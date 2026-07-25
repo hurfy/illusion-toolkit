@@ -1,0 +1,72 @@
+# Style rules for the entire solution.
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{xml,csproj,props,targets,slnx,config,manifest,xaml}]
+indent_size = 2
+
+[*.{json,yml,yaml}]
+indent_size = 2
+
+[*.cs]
+# Dead weight fails the build: unused usings, unused/unread private members, unused private fields.
+# (IDE0005 only reports during build when the documentation file is generated — Directory.Build.props
+# turns it on and routes it into obj/, with CS1591 muted since public docs are not mandatory here.)
+dotnet_diagnostic.IDE0005.severity = warning
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+dotnet_diagnostic.CA1823.severity = warning
+
+# Style: file-scoped namespaces, var by context, expression bodies where appropriate.
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_for_built_in_types = false:silent
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:silent
+csharp_new_line_before_open_brace = all
+# Lookup tables and coordinate triples read better packed a few entries per line than one per
+# line; the formatter's default would inflate them (dotnet format is a gate here, so say it out loud).
+csharp_new_line_before_members_in_object_initializers = false
+# A braced switch case keeps its block at the case's own indentation (the style the codebase uses).
+csharp_indent_case_contents_when_block = false
+dotnet_sort_system_directives_first = true
+
+# ── IDE inspection tuning (ReSharper/Rider) ──
+# Vendor-derived names (flag_1, MafiaII, unk* fields, RefID) deliberately mirror the reference
+# MafiaToolkit and the game's own data tables; default IDE naming conventions fight that mapping.
+resharper_inconsistent_naming_highlighting = none
+# Exact float equality is the POINT in bit-exact round-trip/quantization code (CookedMeshScaler,
+# probes verifying byte-identical re-serialization) — an epsilon would hide real regressions.
+resharper_compare_of_floats_by_equality_operator_highlighting = none
+# The vendored Formats layer stamps `null!` on fields the file loader fills in later, so nullable
+# annotations there are aspirational — the "always true/false by contract" family flags guards that
+# are deliberately defensive against data the annotations lie about.
+resharper_condition_is_always_true_or_false_according_to_nullable_api_contract_highlighting = none
+resharper_conditional_access_qualifier_is_non_nullable_according_to_api_contract_highlighting = none
+resharper_null_coalescing_condition_is_always_not_null_according_to_api_contract_highlighting = none
+resharper_redundant_suppress_nullable_warning_expression_highlighting = none
+resharper_return_type_can_be_not_nullable_highlighting = none
+resharper_variable_can_be_not_nullable_highlighting = none
+# Vendor format classes initialize fields to their explicit on-disk defaults as documentation of the
+# file layout; enum base types are spelled out for the same reason (on-disk field width).
+resharper_redundant_default_member_initializer_highlighting = none
+resharper_enum_underlying_type_is_int_highlighting = none
+# ComPtr<T> is a single pointer — the defensive copy this inspection warns about is one register.
+resharper_possibly_impure_method_call_on_readonly_variable_highlighting = none
+# Repo style keeps the base type in code-behind of partial XAML classes for readability.
+resharper_redundant_extends_list_entry_highlighting = none
+# WPF DataContext bindings inside DataTemplates resolve at runtime; without x:DataType the IDE
+# cannot see the type — these "Unable to resolve symbol" hits are false positives.
+resharper_xaml_binding_with_context_not_resolved_highlighting = none
+resharper_xaml_binding_without_context_not_resolved_highlighting = none
+
+# Headless probes are best-effort diagnostics: cleanup failures must not kill a report run, and
+# probe lambdas deliberately capture short-lived disposables scoped by the harness itself.
+[src/Illusion/Diagnostics/Probes/*.cs]
+resharper_empty_general_catch_clause_highlighting = none
+resharper_access_to_disposed_closure_highlighting = none

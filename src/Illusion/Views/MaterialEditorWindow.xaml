@@ -1,0 +1,174 @@
+<Window x:Class="Illusion.Views.MaterialEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Illusion.Views"
+        xmlns:vp="clr-namespace:Illusion.Viewport"
+        Title="Material Editor"
+        Width="1680" Height="990" MinWidth="960" MinHeight="520"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+
+    <!-- The material editor: browse an MTL library (file selector + searchable list), inspect the selected
+         material on a live shaded sphere (the widest column), rename it via the project-style name field
+         (the FNV64 hash below re-derives from the name), edit its texture slots (add/remove/rebind,
+         project-style inputs with copy/paste), edit shader parameters (every known code, existing or not),
+         create/delete materials, and — when opened from a mesh tile — assign the selected material to that
+         mesh slot via the button pinned under the right sidebar. Every mutation is an undoable edit on the
+         shared history; Ctrl+S saves through the common Save flow. Visual language: EditorStyles. -->
+    <Window.Resources>
+        <!-- One editable texture slot: flat texture preview chip + copyable field (label = friendly
+             name · code, its copy/paste and the remove button share the label row) — the layout the
+             user sketched. The chip stays dark when the .dds resolves nowhere (note in the tooltip). -->
+        <DataTemplate x:Key="SlotEditor">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Width="42" Height="42" CornerRadius="4" Margin="0,1,10,0"
+                        VerticalAlignment="Top" Background="#FF101216" BorderBrush="#1AFFFFFF"
+                        BorderThickness="1" ClipToBounds="True" ToolTip="{Binding ResolveNote}">
+                    <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                </Border>
+                <!-- The remove button joins copy/paste on the label row, so the input keeps full width. -->
+                <v:CopyableTextField Grid.Column="1" Label="{Binding Label}"
+                                     Value="{Binding Text, Mode=TwoWay}"
+                                     ShowDelete="True" DeleteClicked="RemoveSlot_Click" />
+            </Grid>
+        </DataTemplate>
+
+        <!-- One editable shader parameter: copyable field, floats comma-separated (count is fixed).
+             Codes the material does not carry yet render empty — committing floats adds the parameter. -->
+        <DataTemplate x:Key="ParamEditor">
+            <v:CopyableTextField Label="{Binding Label}" Value="{Binding Text, Mode=TwoWay}"
+                                 ToolTip="{Binding Hint}" Margin="0,0,0,10" />
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="250" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="14" />
+            <ColumnDefinition Width="300" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Left: library file, search, material list, new/delete. -->
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="MATERIAL FILE" Style="{StaticResource Caption}" />
+            <v:DropDownField Grid.Row="1" x:Name="LibraryCombo" SelectionChanged="Library_Changed" />
+            <TextBox Grid.Row="2" x:Name="SearchBox" Style="{StaticResource DarkBox}" Margin="0,8,0,6"
+                     TextChanged="Search_Changed" ToolTip="Filter materials by name" />
+            <Border Grid.Row="3" BorderBrush="#1AFFFFFF" BorderThickness="1" CornerRadius="4">
+                <ListBox x:Name="MaterialList" Background="Transparent" BorderThickness="0"
+                         ItemContainerStyle="{StaticResource PickerItem}"
+                         IsSynchronizedWithCurrentItem="False"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                         SelectionChanged="MaterialList_Changed">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="11.5"
+                                       TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+            <Grid Grid.Row="4" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0" x:Name="NewNameBox" Style="{StaticResource DarkBox}"
+                         ToolTip="Name for a new material" KeyDown="NewNameBox_KeyDown" />
+                <Button Grid.Column="1" Style="{StaticResource NeutralButton}" Content="New"
+                        Margin="6,0,0,0" Click="New_Click" />
+            </Grid>
+            <Button Grid.Row="5" x:Name="DeleteBtn" Style="{StaticResource NeutralButton}"
+                    Foreground="#E0736B" Content="Delete" Margin="0,6,0,0"
+                    HorizontalAlignment="Stretch" Click="Delete_Click" />
+        </Grid>
+
+        <!-- Center (widest): name/hash identity over the live preview sphere. -->
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <!-- Name + hash: the project-style copyable fields (like the Object tab's identity section).
+                 Committing a new name renames the material — the FNV64 hash re-derives automatically.
+                 DataContext is a NameEditRow (null and disabled while no material is shown). -->
+            <StackPanel Grid.Row="0" x:Name="NamePanel" Margin="2,0,0,10" IsEnabled="False">
+                <v:CopyableTextField Label="Name" Value="{Binding Text, Mode=TwoWay}" />
+                <v:CopyableTextField Label="Hash" Value="{Binding HashHex, Mode=OneWay}" ReadOnly="True"
+                                     Margin="0,4,0,0" />
+            </StackPanel>
+            <Border Grid.Row="1" Background="#FF101216" BorderBrush="#1AFFFFFF" BorderThickness="1"
+                    CornerRadius="6" ClipToBounds="True">
+                <vp:MaterialPreviewViewport x:Name="Preview" />
+            </Border>
+        </Grid>
+
+        <!-- Right: texture slots (editable, add/remove) and shader parameters (every known code is
+             editable — empty rows add the parameter on commit), with the assign action pinned below. -->
+        <Grid Grid.Column="4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,8,4">
+                <TextBlock Text="TEXTURES" Style="{StaticResource Caption}" Margin="0,0,0,8" />
+                <ItemsControl x:Name="SlotsList" ItemTemplate="{StaticResource SlotEditor}" />
+                <TextBlock x:Name="NoSlotsText" Text="No texture slots." Style="{StaticResource DimLabel}"
+                           Visibility="Collapsed" />
+                <!-- One full-width accent "Add" button; the slot type is picked from its dropdown —
+                     choosing a row adds the slot immediately. -->
+                <Grid Margin="0,4,0,0">
+                    <ToggleButton x:Name="AddSlotBtn" Style="{StaticResource AccentDropButton}"
+                                  Content="Add" IsEnabled="False" Checked="AddSlotBtn_Checked" />
+                    <Popup IsOpen="{Binding IsChecked, ElementName=AddSlotBtn}" StaysOpen="False"
+                           Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade"
+                           Closed="AddSlotPopup_Closed">
+                        <Border Background="#232327" BorderBrush="#3AFFFFFF" BorderThickness="1"
+                                CornerRadius="6" Padding="4" Margin="0,3,8,8"
+                                MinWidth="{Binding ActualWidth, ElementName=AddSlotBtn}">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
+                            </Border.Effect>
+                            <ListBox x:Name="AddSlotList" Background="Transparent" BorderThickness="0"
+                                     FontSize="11.5" Foreground="White" MaxHeight="290"
+                                     DisplayMemberPath="Display"
+                                     ItemContainerStyle="{StaticResource PickerItem}"
+                                     IsSynchronizedWithCurrentItem="False"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     SelectionChanged="AddSlotList_Changed" />
+                        </Border>
+                    </Popup>
+                </Grid>
+
+                <TextBlock x:Name="ParamsCaption" Text="PARAMETERS" Style="{StaticResource Caption}"
+                           Margin="0,20,0,8" />
+                <ItemsControl x:Name="ParamsList" ItemTemplate="{StaticResource ParamEditor}" />
+                <TextBlock x:Name="NoParamsText" Text="No shader parameters." Style="{StaticResource DimLabel}"
+                           Visibility="Collapsed" />
+            </StackPanel>
+            </ScrollViewer>
+
+            <!-- Mesh-slot assignment — pinned under the sidebar, shown only when the editor was opened
+                 from a mesh's material tile. Details in the tooltip. -->
+            <Button Grid.Row="1" x:Name="AssignBtn" Style="{StaticResource AccentButton}" Height="28"
+                    Margin="0,10,8,0" HorizontalAlignment="Stretch" Visibility="Collapsed"
+                    Content="Assign" Click="Assign_Click" />
+        </Grid>
+    </Grid>
+</Window>

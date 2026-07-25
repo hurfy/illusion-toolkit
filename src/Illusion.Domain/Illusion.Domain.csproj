@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Core domain model: engine/format-neutral scene & geometry types (and, later, the ports
+       that decouple the app from any format backend). Must not depend on rendering, UI, or
+       the vendored MafiaToolkit parsers. -->
+
+</Project>

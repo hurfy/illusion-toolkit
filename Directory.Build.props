@@ -1,0 +1,34 @@
+<Project>
+
+  <!-- Common build properties for all projects in the solution. The base TFM is platform-neutral;
+       the WPF projects (Illusion.Rendering, Illusion exe) override it with net10.0-windows. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- SDS decompression goes through native Oodle x64 — the whole solution builds as x64. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- Silk.NET/COM interop and vendored code require unsafe. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Quality gates: the solution builds warning-free — keep it that way. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- The unused-using rule (IDE0005) only fires during build when docs are generated, so docs are
+         on and the XML is routed into obj/. Doc comments are for what is not obvious: a member needs
+         none (CS1591) and a comment may explain one parameter without listing the rest (CS1573).
+         Broken <see cref="..."/> targets stay an error — that is how a doc rots after a rename. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+    <!-- ...and publish has to be told the same thing separately: it composes its file list from
+         the output directory, so with the documentation dropped there (see Directory.Build.targets)
+         it would otherwise fail copying an Illusion.xml that was never written. -->
+    <PublishDocumentationFiles>false</PublishDocumentationFiles>
+    <Version>0.3.0</Version>
+    <Authors>hurfy</Authors>
+    <Product>Illusion Toolkit</Product>
+  </PropertyGroup>
+
+</Project>

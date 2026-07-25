@@ -1,0 +1,164 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Illusion.Formats</RootNamespace>
+    <AssemblyName>Illusion.Formats</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Byte-level collision helpers (OpcodeModelOffset, ReadCounts) are internal on purpose but the
+         diagnostic probes in the app assembly measure against them. -->
+    <InternalsVisibleTo Include="Illusion" />
+  </ItemGroup>
+
+  <!-- ============================== Native core ==============================
+       Mafia.Formats.dll reaches the output one of two ways:
+
+         Source   — the core's sources are at hand, so CMake + Ninja build them as part of
+                    `dotnet build` and the fresh DLL is collected.
+         Prebuilt — no sources: a released Mafia.Formats.dll sits in native/ and is copied
+                    as is. This is how the public toolkit repository builds — no MSVC, no
+                    CMake, no Ninja needed to work on the C# side.
+
+       Sources win when found; force either mode with -p:MfCoreMode=Source|Prebuilt (both
+       paths are meant to be exercised before a release). Source lookup order:
+
+         1. MfCoreSource                       an explicit path (property or environment variable)
+         2. src/Mafia.Formats                  the core inside this repository
+         3. ../illusion-core/src/Mafia.Formats the private core repository checked out beside this one
+
+       An explicit MfCoreSource that fails validation is an error, never a silent fall back to
+       the prebuilt DLL: editing the core and then shipping yesterday's binary is exactly the
+       failure this rule exists to prevent. -->
+  <PropertyGroup>
+    <MfCoreInRepo>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Mafia.Formats'))</MfCoreInRepo>
+    <MfCoreBeside>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\illusion-core\src\Mafia.Formats'))</MfCoreBeside>
+    <MfPrebuiltDll>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\native\Mafia.Formats.dll'))</MfPrebuiltDll>
+
+    <MfCoreRequested Condition="'$(MfCoreSource)' != ''">$([System.IO.Path]::GetFullPath('$(MfCoreSource)'))</MfCoreRequested>
+
+    <MfCoreDir Condition="'$(MfCoreMode)' != 'Prebuilt' AND '$(MfCoreRequested)' != ''">$(MfCoreRequested)</MfCoreDir>
+    <MfCoreDir Condition="'$(MfCoreMode)' != 'Prebuilt' AND '$(MfCoreDir)' == '' AND Exists('$(MfCoreInRepo)\CMakeLists.txt')">$(MfCoreInRepo)</MfCoreDir>
+    <MfCoreDir Condition="'$(MfCoreMode)' != 'Prebuilt' AND '$(MfCoreDir)' == '' AND Exists('$(MfCoreBeside)\CMakeLists.txt')">$(MfCoreBeside)</MfCoreDir>
+
+    <MfCoreMode Condition="'$(MfCoreMode)' == '' AND '$(MfCoreDir)' != ''">Source</MfCoreMode>
+    <MfCoreMode Condition="'$(MfCoreMode)' == ''">Prebuilt</MfCoreMode>
+  </PropertyGroup>
+
+  <!-- Source-mode build settings. Configuration runs once per config and is cached in
+       native-build/; afterwards a timestamp check skips the whole step (including the ~2 s vcvars
+       environment setup) until a native source changes, and an incremental ninja run decides what
+       to recompile. -->
+  <PropertyGroup Condition="'$(MfCoreMode)' == 'Source'">
+    <!-- A Debug app build gets an OPTIMIZED native core, not a Debug one. The core decodes every
+         vertex of every mesh, and an /Od /RTC1 build of that loop is ~20x slower end to end
+         (measured 2026-07-23: one district 52.4 s vs 2.5 s, swapping only this DLL) — slow enough
+         that district streaming looks broken. RelWithDebInfo keeps full PDBs and stepping, and
+         measured at Release speed (/GL /LTCG buy only ~20% on top). Set MfNativeDebug=true to get
+         a genuine Debug core when debugging the C++ itself. -->
+    <MfNativeConfig>Release</MfNativeConfig>
+    <MfNativeConfig Condition="'$(Configuration)' == 'Debug'">RelWithDebInfo</MfNativeConfig>
+    <MfNativeConfig Condition="'$(MfNativeDebug)' == 'true'">Debug</MfNativeConfig>
+    <!-- AddressSanitizer stays OFF for the DLL the application loads: its runtime hooks the
+         whole process, and foreign threads (CLR, WPF, the D3D driver) trip it with
+         "unknown-crash" reports on a full app launch — measured 2026-07-23; the headless
+         probes alone ran fine. The memory tripwire lives in the native ctest loop instead
+         (configure a separate tree with -DMF_ASAN=ON). Opt in here by setting the
+         MfNativeAsan env var to ON; flipping it requires deleting native-build/<config>,
+         since configuration is cached. -->
+    <MfNativeAsan Condition="'$(MfNativeAsan)' == ''">OFF</MfNativeAsan>
+    <MfNativeBuildDir>$(MfCoreDir)\native-build\$(MfNativeConfig.ToLowerInvariant())</MfNativeBuildDir>
+    <MfNativeBinDir>$(MfNativeBuildDir)\bin</MfNativeBinDir>
+    <MfNativeDll>$(MfNativeBinDir)\Mafia.Formats.dll</MfNativeDll>
+  </PropertyGroup>
+
+  <!-- The C++ toolchain, CMake and Ninja all come bundled with Visual Studio; probe the known
+       editions. MfVsRoot can also be pre-set from the environment to point anywhere else. -->
+  <PropertyGroup Condition="'$(MfCoreMode)' == 'Source'">
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\18\Community</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\18\Professional\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\18\Professional</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\18\Enterprise</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\18\BuildTools</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\Community</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\Professional</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\Enterprise</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\BuildTools</MfVsRoot>
+    <MfVcVars>$(MfVsRoot)\VC\Auxiliary\Build\vcvars64.bat</MfVcVars>
+    <MfCMake>$(MfVsRoot)\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe</MfCMake>
+    <MfNinja>$(MfVsRoot)\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe</MfNinja>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MfCoreMode)' == 'Source' AND '$(MfCoreDir)' != ''">
+    <!-- Timestamp inputs for the up-to-date check of MfBuildNative. -->
+    <MfNativeInput Include="$(MfCoreDir)\CMakeLists.txt" />
+    <MfNativeInput Include="$(MfCoreDir)\src\**\*" />
+    <MfNativeInput Include="$(MfCoreDir)\tests\**\*" />
+  </ItemGroup>
+
+  <!-- Is the directory we are about to build really this core, and is it the revision this
+       assembly speaks? Three cheap checks before CMake is ever started: the marker files, the
+       CMake project name, and MF_ABI_REV against the facade's ExpectedAbiRev. The last one also
+       catches the classic slip of bumping the header and forgetting the managed constant. -->
+  <Target Name="MfValidateCore"
+          Condition="'$(MfCoreMode)' == 'Source' AND '$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(MfCoreDir)' == '' AND '$(MfCoreRequested)' != ''"
+           Text="Mafia.Formats: MfCoreSource points at '$(MfCoreRequested)', which does not exist." />
+    <Error Condition="'$(MfCoreDir)' == ''"
+           Text="Mafia.Formats: MfCoreMode=Source was requested but no core sources were found (looked at '$(MfCoreInRepo)' and '$(MfCoreBeside)'). Point MfCoreSource at the core, or build with -p:MfCoreMode=Prebuilt to use native\Mafia.Formats.dll." />
+    <Error Condition="!Exists('$(MfCoreDir)\CMakeLists.txt') OR !Exists('$(MfCoreDir)\src\abi\mf_abi.h') OR !Exists('$(MfCoreDir)\schema\model.mfs')"
+           Text="Mafia.Formats: '$(MfCoreDir)' does not look like the native core — expected CMakeLists.txt, src\abi\mf_abi.h and schema\model.mfs to be there." />
+
+    <PropertyGroup>
+      <MfCoreIsThisProject>$([System.Text.RegularExpressions.Regex]::IsMatch($([System.IO.File]::ReadAllText('$(MfCoreDir)\CMakeLists.txt')), 'project\(MafiaFormats'))</MfCoreIsThisProject>
+      <MfCoreAbiRev>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MfCoreDir)\src\abi\mf_abi.h')), '(?&lt;=MF_ABI_REV )\d+').Value)</MfCoreAbiRev>
+      <MfFacadeAbiRev>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)Native\NativeFormats.cs')), '(?&lt;=ExpectedAbiRev = )\d+').Value)</MfFacadeAbiRev>
+    </PropertyGroup>
+
+    <Error Condition="'$(MfCoreIsThisProject)' != 'true'"
+           Text="Mafia.Formats: the CMake project at '$(MfCoreDir)' is not MafiaFormats — that is a different C++ project, not this core." />
+    <Error Condition="'$(MfCoreAbiRev)' == '' OR '$(MfFacadeAbiRev)' == ''"
+           Text="Mafia.Formats: could not read the boundary revision (MF_ABI_REV in '$(MfCoreDir)\src\abi\mf_abi.h', ExpectedAbiRev in Native\NativeFormats.cs). One of them changed shape." />
+    <Error Condition="'$(MfCoreAbiRev)' != '$(MfFacadeAbiRev)'"
+           Text="Mafia.Formats: boundary revision mismatch — the core at '$(MfCoreDir)' is rev $(MfCoreAbiRev), this assembly expects rev $(MfFacadeAbiRev). Update whichever is behind (MF_ABI_REV and ExpectedAbiRev move together)." />
+  </Target>
+
+  <Target Name="MfBuildNative"
+          Condition="'$(MfCoreMode)' == 'Source' AND '$(DesignTimeBuild)' != 'true'"
+          DependsOnTargets="MfValidateCore"
+          Inputs="@(MfNativeInput)"
+          Outputs="$(MfNativeDll)">
+    <Error Condition="!Exists('$(MfVcVars)')"
+           Text="Mafia.Formats: no Visual Studio C++ toolchain found (looked for vcvars64.bat under '$(ProgramFiles)\Microsoft Visual Studio'). Install the 'Desktop development with C++' workload, set MfVsRoot, or build with -p:MfCoreMode=Prebuilt to use the released native\Mafia.Formats.dll." />
+    <Error Condition="!Exists('$(MfCMake)') OR !Exists('$(MfNinja)')"
+           Text="Mafia.Formats: the Visual Studio at '$(MfVsRoot)' has no bundled CMake/Ninja. Install the 'C++ CMake tools for Windows' component." />
+    <Exec Condition="!Exists('$(MfNativeBuildDir)\build.ninja')"
+          Command="call &quot;$(MfVcVars)&quot; &gt;NUL &amp;&amp; &quot;$(MfCMake)&quot; -G Ninja -DCMAKE_MAKE_PROGRAM=&quot;$(MfNinja)&quot; -DCMAKE_BUILD_TYPE=$(MfNativeConfig) -DMF_ASAN=$(MfNativeAsan) -S &quot;$(MfCoreDir)&quot; -B &quot;$(MfNativeBuildDir)&quot;" />
+    <Exec Command="call &quot;$(MfVcVars)&quot; &gt;NUL &amp;&amp; &quot;$(MfNinja)&quot; -C &quot;$(MfNativeBuildDir)&quot;" />
+    <!-- Ninja leaves the DLL untouched when a source edit compiles to identical bytes; the touch
+         keeps the Inputs/Outputs check satisfied so the vcvars step is not re-run every build. -->
+    <Touch Files="$(MfNativeDll)" />
+  </Target>
+
+  <Target Name="MfCollectNative"
+          DependsOnTargets="MfBuildNative"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(MfCoreMode)' == 'Prebuilt' AND !Exists('$(MfPrebuiltDll)')"
+           Text="Mafia.Formats: no native core to build against — neither sources (see MfCoreSource) nor a prebuilt '$(MfPrebuiltDll)'. Fetch the DLL from the core's releases, or point MfCoreSource at the core sources." />
+    <ItemGroup>
+      <!-- Content, so the DLL (and, in a source build, the PDB or ASan runtime beside it) flows
+           into every referencing project's output directory the same way M2PhysX.exe does. -->
+      <Content Condition="'$(MfCoreMode)' == 'Source'"
+               Include="$(MfNativeBinDir)\*.dll" Link="%(Filename)%(Extension)"
+               CopyToOutputDirectory="PreserveNewest" Visible="false" />
+      <Content Condition="'$(MfCoreMode)' == 'Prebuilt'"
+               Include="$(MfPrebuiltDll)" Link="%(Filename)%(Extension)"
+               CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    </ItemGroup>
+    <Message Importance="normal" Condition="'$(MfCoreMode)' == 'Source'"
+             Text="Mafia.Formats: Source mode — building the core from '$(MfCoreDir)'" />
+    <Message Importance="normal" Condition="'$(MfCoreMode)' == 'Prebuilt'"
+             Text="Mafia.Formats: Prebuilt mode — using '$(MfPrebuiltDll)'" />
+  </Target>
+
+</Project>

@@ -1,0 +1,120 @@
+using System.Numerics;
+using Illusion.Assets.Properties;
+using Illusion.Domain;
+using Illusion.Domain.Materials;
+using Illusion.Domain.Properties;
+using Illusion.Formats.Frames;
+using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.Frames.Resources;
+
+namespace Illusion.Assets.Adapters;
+
+/// <summary>Canonical <see cref="IFrameNode"/> wrapper over a vendor frame object — obtained only through
+/// <see cref="SceneDocumentAdapter.Node"/> so identity holds document-wide.</summary>
+public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialListSource, IMaterialSlotEditor
+{
+    private readonly FrameObjectBase _frame;
+    private readonly SceneDocumentAdapter _document;
+
+    internal FrameNodeAdapter(FrameObjectBase frame, SceneDocumentAdapter document)
+    {
+        _frame = frame;
+        _document = document;
+    }
+
+    /// <summary>The wrapped vendor frame — for the asset layer's own loaders and diagnostics; the UI never
+    /// touches it.</summary>
+    public FrameObjectBase Frame => _frame;
+
+    /// <summary>The owning document adapter — the asset layer's route from a node to its dirty
+    /// tracking and save unit.</summary>
+    internal SceneDocumentAdapter Document => _document;
+
+    /// <summary>Setting cascades world transforms through the frame subtree (vendor setter behavior).</summary>
+    public Matrix4x4 LocalTransform
+    {
+        get => _frame.LocalTransform;
+        set => _frame.LocalTransform = value;
+    }
+
+    public Matrix4x4 WorldTransform => _frame.WorldTransform;
+
+    /// <summary>Parent's world, falling back to the scene root's world for parentless frames — the same
+    /// lookup the vendor's SetWorldTransform decomposition uses.</summary>
+    public Matrix4x4 ParentWorldTransform =>
+        _frame.Parent?.WorldTransform ?? _frame.Root?.WorldTransform ?? Matrix4x4.Identity;
+
+    /// <summary>The frame this one hangs under: its hierarchy parent, or — for a frame that only has an anchor —
+    /// that anchor. Falling back to Root matches <see cref="ParentWorldTransform"/>, which already does; reporting
+    /// null for an anchored frame made the tree and the transform cascade disagree about the same object.</summary>
+    public IFrameNode? Parent => (_frame.Parent ?? _frame.Root) is { } p ? _document.Node(p) : null;
+
+    public bool IsOnNameTable => _frame.IsOnFrameTable;
+
+    public int NameTableFlags => (int)_frame.FrameNameTableFlags;
+
+    /// <summary>The frame's type label — the vendor class name without the "FrameObject" prefix, with
+    /// "SingleMesh" shown as "Mesh" (the same rule the scene tree uses for its node kind).</summary>
+    public string TypeName
+    {
+        get
+        {
+            string t = _frame.GetType().Name;
+            if (t.StartsWith("FrameObject", StringComparison.Ordinal)) t = t.Substring(11);
+            return t == "SingleMesh" ? "Mesh" : t;
+        }
+    }
+
+    public IReadOnlyList<PropertyGroup> GetPropertyGroups() => FramePropertyCatalog.Build(this);
+
+    /// <summary>The mesh's LOD0 materials resolved against the MTL library; empty for a non-mesh frame. Does not
+    /// touch <see cref="FrameObjectSingleMesh.Material"/> unless a material ref exists (the getter would otherwise
+    /// construct a block as a side effect).</summary>
+    public IReadOnlyList<MaterialInfo> GetMaterials()
+    {
+        if (_frame is not FrameObjectSingleMesh mesh) return Array.Empty<MaterialInfo>();
+        if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Material)) return Array.Empty<MaterialInfo>();
+
+        FrameMaterial fm = mesh.Material; // safe: a Material ref exists, so this returns the resolved block
+        if (fm.Materials is not { Count: > 0 } lods || lods[0] is not { Length: > 0 } structs)
+            return Array.Empty<MaterialInfo>();
+
+        var result = new List<MaterialInfo>(structs.Length);
+        foreach (var ms in structs)
+            result.Add(MafiaMaterials.GetMaterialInfo(ms.MaterialHash, ms.StartIndex, ms.NumFaces));
+        return result;
+    }
+
+    public ulong? GetSlotMaterial(int slotIndex) =>
+        Lod0Structs() is { } structs && slotIndex >= 0 && slotIndex < structs.Length
+            ? structs[slotIndex].MaterialHash
+            : null;
+
+    /// <summary>Repoints LOD0 slot <paramref name="slotIndex"/> at <paramref name="hash"/> and mirrors the
+    /// change into further LODs wherever they still bind the slot's old material — LOD tables don't share
+    /// slot order, so matching by the old hash is the only assignment that stays meaningful at distance.</summary>
+    public bool SetSlotMaterial(int slotIndex, ulong hash)
+    {
+        if (_frame is not FrameObjectSingleMesh mesh) return false;
+        if (Lod0Structs() is not { } structs || slotIndex < 0 || slotIndex >= structs.Length) return false;
+
+        ulong old = structs[slotIndex].MaterialHash;
+        structs[slotIndex].MaterialHash = hash;
+        List<MaterialStruct[]> lods = mesh.Material.Materials;
+        for (int lod = 1; lod < lods.Count; lod++)
+            foreach (MaterialStruct ms in lods[lod])
+                if (ms.MaterialHash == old)
+                    ms.MaterialHash = hash;
+        return true;
+    }
+
+    // The LOD0 material table, with the same construct-as-side-effect guard GetMaterials uses.
+    private MaterialStruct[]? Lod0Structs()
+    {
+        if (_frame is not FrameObjectSingleMesh mesh) return null;
+        if (!mesh.Refs.ContainsKey(FrameEntryRefTypes.Material)) return null;
+        return mesh.Material.Materials is { Count: > 0 } lods && lods[0] is { Length: > 0 } structs
+            ? structs
+            : null;
+    }
+}

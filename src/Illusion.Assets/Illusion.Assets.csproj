@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Asset pipeline: adapts the Mafia format backend (Illusion.Formats) into the engine-neutral
+       Domain model — game-folder discovery, SDS extraction, scene/mesh loading, material→texture
+       resolution, catalogs, and the save/repack path. The only layer allowed to see both Formats
+       and Domain; Rendering and the UI consume Domain types exclusively. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
+    <ProjectReference Include="..\Illusion.Formats\Illusion.Formats.csproj" />
+    <ProjectReference Include="..\Illusion.Bridge\Illusion.Bridge.csproj" />
+  </ItemGroup>
+
+</Project>

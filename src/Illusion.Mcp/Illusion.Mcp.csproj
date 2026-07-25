@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The embedded MCP server: a loopback-only HTTP endpoint that exposes the toolkit to MCP
+       clients (Claude Code and friends). Kept in its own project so that ASP.NET Core / Kestrel
+       stays out of the WPF exe and the rest of the solution. Depends on Domain only — tools will
+       reach live application state through DI seams (see McpHostOptions), never by referencing
+       the UI. -->
+
+  <ItemGroup>
+    <!-- Kestrel is not published as standalone NuGet packages: a non-Web SDK project gets the
+         ASP.NET Core assemblies through this FrameworkReference. Consequence for distribution —
+         a framework-dependent build then needs the ASP.NET Core runtime installed next to the
+         .NET Desktop runtime (a self-contained publish carries it along instead). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

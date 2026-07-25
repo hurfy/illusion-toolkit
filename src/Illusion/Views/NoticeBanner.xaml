@@ -1,0 +1,11 @@
+<UserControl x:Class="Illusion.Views.NoticeBanner"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Transient notices stacked over the bottom of the viewport. The host panel deliberately has NO
+         Background, so it is invisible to hit-testing and the viewport keeps every click that does not land
+         on an actual notice; each notice is its own filled Border, which does take clicks (to dismiss).
+         Right-aligned so it never fights the bottom-left gizmo panel for the same corner. -->
+    <StackPanel x:Name="Host" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="12" MaxWidth="480" />
+</UserControl>

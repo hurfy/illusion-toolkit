@@ -1,0 +1,1343 @@
+<Window x:Class="Illusion.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:r="clr-namespace:Illusion.Scene"
+        xmlns:v="clr-namespace:Illusion.Views"
+        xmlns:vp="clr-namespace:Illusion.Viewport"
+        Title="Illusion Toolkit"
+        Width="1100" Height="700"
+        MinWidth="800" MinHeight="500"
+        WindowState="Maximized"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <!-- Vector icon geometries (defined first: StaticResource can't forward-reference within a dictionary).
+             Blender-style resource-type icons (~12×12) for the scene tree, selected per node Kind. -->
+        <StreamGeometry x:Key="IconFolder">M1.5,9.3 L1.5,4.2 L4.4,4.2 L5.6,5.5 L10.5,5.5 L10.5,9.3 Z</StreamGeometry>
+        <StreamGeometry x:Key="IconArchive">M2,3.3 L10,3.3 L10,9.6 L2,9.6 Z M2,5.4 L10,5.4 M5.4,7.4 L6.6,7.4</StreamGeometry>
+        <StreamGeometry x:Key="IconScene">M6,1.8 L10.6,4.6 L6,7.4 L1.4,4.6 Z M2.3,6.2 L6,8.5 L9.7,6.2</StreamGeometry>
+        <StreamGeometry x:Key="IconMesh">M6,1.5 L10.5,4 L10.5,8.5 L6,11 L1.5,8.5 L1.5,4 Z M1.5,4 L6,6.5 L10.5,4 M6,6.5 L6,11</StreamGeometry>
+        <StreamGeometry x:Key="IconLight">M4.3,6 A1.7,1.7 0 1 1 7.7,6 A1.7,1.7 0 1 1 4.3,6 Z M6,1.3 L6,2.6 M6,9.4 L6,10.7 M1.3,6 L2.6,6 M9.4,6 L10.7,6 M2.7,2.7 L3.6,3.6 M8.4,8.4 L9.3,9.3 M9.3,2.7 L8.4,3.6 M3.6,8.4 L2.7,9.3</StreamGeometry>
+        <StreamGeometry x:Key="IconCamera">M1.5,4 L6.8,4 L6.8,8.5 L1.5,8.5 Z M6.8,5.4 L10.5,3.9 L10.5,8.6 L6.8,7.1</StreamGeometry>
+        <StreamGeometry x:Key="IconCollision">M6,1.5 L10,3 L10,6.2 C10,8.8 8.2,10.3 6,11 C3.8,10.3 2,8.8 2,6.2 L2,3 Z</StreamGeometry>
+        <StreamGeometry x:Key="IconEmpty">M6,2 L6,10 M2,6 L10,6</StreamGeometry>
+        <!-- Eye toggle icons (~16×16): open eye with pupil / closed lid with lashes. -->
+        <StreamGeometry x:Key="IconEyeOpen">M1.5,8 C4.5,4 11.5,4 14.5,8 C11.5,12 4.5,12 1.5,8 Z M6,8 A2,2 0 1 1 10,8 A2,2 0 1 1 6,8 Z</StreamGeometry>
+        <StreamGeometry x:Key="IconEyeClosed">M1.5,7 C4.5,11 11.5,11 14.5,7 M4,9.9 L3.2,11.5 M8,10.6 L8,12.2 M12,9.9 L12.8,11.5</StreamGeometry>
+
+        <!-- Viewport tool-shelf icons (16×16). Select is filled; Move/Rotate/Scale are stroked. -->
+        <StreamGeometry x:Key="IconToolSelect">M3,2 L3,12.5 L6,9.7 L7.9,13.8 L9.7,13 L7.8,9 L11.5,9 Z</StreamGeometry>
+        <StreamGeometry x:Key="IconToolMove">M8,1.5 L8,14.5 M1.5,8 L14.5,8 M5.5,4 L8,1.5 L10.5,4 M5.5,12 L8,14.5 L10.5,12 M4,5.5 L1.5,8 L4,10.5 M12,5.5 L14.5,8 L12,10.5</StreamGeometry>
+        <StreamGeometry x:Key="IconToolRotate">M8,3 A5,5 0 1 1 3.67,5.5 M6.8,1.6 L8.4,3 L6.8,4.4</StreamGeometry>
+        <StreamGeometry x:Key="IconToolScale">M4,12 L12,4 M4,12 L4,8.5 M4,12 L7.5,12 M12,4 L12,7.5 M12,4 L8.5,4</StreamGeometry>
+
+        <!-- The Blender mark, verbatim from the official logo SVG (body-with-eye-hole subpaths plus
+             the eye ball appended as an absolute subpath) — even-odd fill turns it into the
+             monochrome logo: solid body, empty ring, filled pupil. -->
+        <StreamGeometry x:Key="IconBlender">m231-330c0.013 0.74 0.249 2.18 0.603 3.3 0.744 2.38 2.01 4.58 3.76 6.51 1.8 1.99 4.02 3.59 6.58 4.73 2.69 1.19 5.61 1.8 8.64 1.8 3.03-4e-3 5.95-0.624 8.64-1.83 2.56-1.15 4.78-2.75 6.58-4.75 1.76-1.95 3.02-4.15 3.76-6.53 0.375-1.2 0.612-2.42 0.707-3.64 0.093-1.2 0.054-2.41-0.117-3.62-0.334-2.35-1.15-4.56-2.4-6.56-1.14-1.85-2.62-3.46-4.38-4.82l4e-3 -3e-3 -17.7-13.6c-0.016-0.012-0.029-0.025-0.046-0.036-1.16-0.892-3.12-0.889-4.39 5e-3 -1.29 0.904-1.44 2.4-0.29 3.34l-5e-3 5e-3 7.39 6.01-22.5 0.024h-0.03c-1.86 2e-3 -3.65 1.22-4 2.77-0.364 1.57 0.9 2.88 2.84 2.88l-3e-3 7e-3 11.4-0.022-20.4 15.6c-0.026 0.019-0.054 0.039-0.078 0.058-1.92 1.47-2.54 3.92-1.33 5.46 1.23 1.57 3.84 1.58 5.78 9e-3l11.1-9.1s-0.162 1.23-0.149 1.96zm28.6 4.11c-2.29 2.33-5.5 3.66-8.96 3.66-3.47 6e-3 -6.68-1.3-8.97-3.63-1.12-1.14-1.94-2.44-2.45-3.83-0.497-1.37-0.69-2.82-0.562-4.28 0.121-1.43 0.547-2.8 1.23-4.03 0.668-1.21 1.59-2.31 2.72-3.24 2.23-1.81 5.06-2.8 8.02-2.8 2.97-4e-3 5.8 0.969 8.03 2.78 1.13 0.924 2.05 2.02 2.72 3.23 0.683 1.23 1.11 2.59 1.23 4.03 0.126 1.46-0.067 2.91-0.564 4.28-0.508 1.4-1.33 2.7-2.45 3.84z M243,-334c0.106-1.89 1.03-3.56 2.43-4.74 1.37-1.16 3.21-1.87 5.23-1.87 2.01 0 3.85 0.709 5.22 1.87 1.4 1.18 2.32 2.85 2.43 4.74 0.106 1.94-0.675 3.75-2.04 5.09-1.4 1.36-3.38 2.22-5.61 2.22s-4.22-0.854-5.61-2.22c-1.37-1.34-2.15-3.14-2.04-5.08z</StreamGeometry>
+
+        <!-- Eye toggle: a proper square button (persistent gray fill, like ToolSquareButton), pinned to the
+             row's right edge. Vector eye — open when visible, closed (dimmed) when the branch is hidden. -->
+        <Style x:Key="EyeToggle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="#333336" CornerRadius="4">
+                            <Path x:Name="Icon" Width="13" Height="13" Stretch="Uniform"
+                                  Fill="Transparent" Stroke="#CFCFCF" StrokeThickness="1.2"
+                                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Data="{StaticResource IconEyeOpen}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="False">
+                                <Setter TargetName="Icon" Property="Data" Value="{StaticResource IconEyeClosed}" />
+                                <Setter TargetName="Icon" Property="Stroke" Value="#6E7279" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#454549" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#29292B" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Tree expand/collapse chevron: points right when collapsed, rotates down when expanded.
+             Occupies a fixed width so leaf rows align under their parent's label. -->
+        <Style x:Key="TreeChevron" TargetType="ToggleButton">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent" Width="16">
+                            <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
+                                       Text="&#xE76C;" Foreground="#99FFFFFF"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       RenderTransformOrigin="0.5,0.5" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chev" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="90" />
+                                    </Setter.Value>
+                                </Setter>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chev" Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Scene stats strip: a large value over a small caption. -->
+        <Style x:Key="StatNumber" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="StatLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#80FFFFFF" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+        </Style>
+
+        <!-- Center action bar: blue "Play" button (rectangular, glyph + label). -->
+        <Style x:Key="PlayButton" TargetType="Button">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#2D7DD2" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="13" Text="&#xE768;"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="Play" FontWeight="SemiBold" Margin="7,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2569B0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Center action bar: square gray icon buttons (multiplayer, build). Dims when disabled. -->
+        <Style x:Key="ToolSquareButton" TargetType="Button">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3D3D3D" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Render-mode selector (Blender-style): square icon toggles, mutually exclusive via GroupName.
+             Gray by default, accent-blue when active (the current shading mode). -->
+        <Style x:Key="RenderModeButton" TargetType="RadioButton">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Viewport tool-shelf button (Blender-style): larger square icon toggle, mutually exclusive
+             via GroupName. Gray by default, accent-blue when the tool is active. -->
+        <Style x:Key="ToolButton" TargetType="RadioButton">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Blender edit-mode toggle (bottom of the tool shelf): gray like the other tools when idle,
+             Blender-orange while a bridge session is active. IsChecked mirrors the REAL session
+             state (set from code) — the click only requests the toggle. -->
+        <Style x:Key="BlenderToolButton" TargetType="ToggleButton">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#E87D0D" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="#F58B1F" />
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Render tab: modern toggle switch + vertical icon-tab strip ═══ -->
+
+        <!-- Pill toggle switch: a ToggleButton retemplated as a rounded track + sliding knob.
+             OFF = neutral-gray track (#4D4D4D, hover #5E5E5E), knob parked left.
+             ON  = accent-blue track (#2D7DD2, on-hover #3B8EE6), knob glides 18px right (120ms). -->
+        <Style x:Key="ToggleSwitch" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Track" Background="{TemplateBinding Background}"
+                                CornerRadius="9" BorderBrush="#1FFFFFFF" BorderThickness="1"
+                                SnapsToDevicePixels="True">
+                            <Ellipse x:Name="Knob" Width="14" Height="14" Fill="White"
+                                     HorizontalAlignment="Left" VerticalAlignment="Center"
+                                     Margin="2,0,0,0">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform x:Name="KnobShift" X="0" />
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#2D7DD2" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#2D7DD2" />
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobShift"
+                                                             Storyboard.TargetProperty="X"
+                                                             To="18" Duration="0:0:0.12" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobShift"
+                                                             Storyboard.TargetProperty="X"
+                                                             To="0" Duration="0:0:0.12" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Track" Property="Background" Value="#3B8EE6" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#3B8EE6" />
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Vertical tab strip: slim left icon column (panel tint + right hairline) beside a
+             chromeless content host. Fully overrides the default Fluent tab chrome. -->
+        <Style x:Key="VerticalTabControl" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <!-- Transparent strip: blends with the content + the tree above (no two-tone
+                                 band); only the hairline divider and the selected cell define the icon rail. -->
+                            <Border Grid.Column="0" Background="Transparent"
+                                    BorderBrush="#1AFFFFFF" BorderThickness="0,0,1,0">
+                                <TabPanel x:Name="HeaderPanel" IsItemsHost="True"
+                                          Panel.ZIndex="1" Margin="0,4,0,0" />
+                            </Border>
+                            <Border Grid.Column="1" Background="Transparent">
+                                <ContentPresenter x:Name="PART_SelectedContentHost"
+                                                  ContentSource="SelectedContent" />
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Flat icon-only tab cell. Idle = transparent + dim (#80FFFFFF). Selected = selection
+             tint fill (#382D7DD2) + a 2px accent bar on the inner right edge + white glyph.
+             Hover = subtle #12FFFFFF row-hover tint. Glyph comes from Tag; Header stays for the
+             tooltip/accessibility only (not shown). -->
+        <Style x:Key="VerticalTab" TargetType="TabItem">
+            <Setter Property="Cursor" Value="Hand" />
+            <!-- Foreground = the tab's meaning colour (set per TabItem); Blender-style coloured icon rail.
+                 The glyph dims when idle, brightens on hover/select; the accent bar picks up the same colour. -->
+            <Setter Property="Foreground" Value="#9AA0A6" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Grid Width="32" Height="30" SnapsToDevicePixels="True">
+                            <Border x:Name="Cell" Background="Transparent" CornerRadius="4" Margin="2,1" />
+                            <Border x:Name="AccentBar" Width="2" HorizontalAlignment="Right" Opacity="0"
+                                    Background="{TemplateBinding Foreground}" SnapsToDevicePixels="True" />
+                            <TextBlock x:Name="Glyph" FontFamily="Segoe MDL2 Assets"
+                                       FontSize="15" Opacity="0.62"
+                                       Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Cell" Property="Background" Value="#12FFFFFF" />
+                                <Setter TargetName="Glyph" Property="Opacity" Value="0.9" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Cell" Property="Background" Value="#22FFFFFF" />
+                                <Setter TargetName="Glyph" Property="Opacity" Value="1" />
+                                <Setter TargetName="AccentBar" Property="Opacity" Value="1" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ═══ Property tabs: shared converters + card/typography styles (dark, Blender-ish) ═══ -->
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <!-- Grouping card: rounded panel-tint block with a hairline border (matches the scene-stats strip). -->
+        <Style x:Key="PropCard" TargetType="Border">
+            <Setter Property="Background" Value="#14FFFFFF" />
+            <Setter Property="BorderBrush" Value="#1AFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="11,10" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <!-- Selection header: object name (bold) over a dim type caption. -->
+        <Style x:Key="PropTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="13.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+        <Style x:Key="PropSubtitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#80FFFFFF" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <!-- Section caption (uppercase-ish label above a group of rows). -->
+        <Style x:Key="PropCaption" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#8AFFFFFF" />
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="1,0,0,7" />
+        </Style>
+
+        <!-- Read-only metadata: "Label   value" row (label dim-left, value white-right). -->
+        <Style x:Key="MetaLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#80FFFFFF" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="MetaValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontFamily" Value="Consolas" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
+
+        <!-- One "label … value" metadata row (used across SDS / FrameResource / Scene tabs). -->
+        <Style x:Key="MetaRow" TargetType="Grid">
+            <Setter Property="Margin" Value="0,0,0,7" />
+        </Style>
+
+        <!-- Plain single-line input styled to match the Vector3Box cells (dark, rounded, accent on focus).
+             Used for the camera-speed field so it reads as the same kind of control, just without the axis
+             prefix / copy button. -->
+        <Style x:Key="InputField" TargetType="TextBox">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="MinWidth" Value="64" />
+            <Setter Property="CaretBrush" Value="White" />
+            <Setter Property="SelectionBrush" Value="#552D7DD2" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
+                                BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="7,0,7,0" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
+                                <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Menu: the Fluent template won't let us shrink the height via padding/height (it clips the text),
+             so we scale the whole menu with a LayoutTransform. -->
+        <Menu DockPanel.Dock="Top" Padding="0">
+            <Menu.LayoutTransform>
+                <ScaleTransform ScaleX="0.8" ScaleY="0.8" />
+            </Menu.LayoutTransform>
+            <MenuItem Header="File">
+                <MenuItem Header="Save" Command="{x:Static v:MainWindow.SaveCmd}" InputGestureText="Ctrl+S" />
+                <MenuItem Header="Import…" Command="{x:Static v:MainWindow.ImportCmd}" InputGestureText="Ctrl+I" />
+                <MenuItem Header="Build SDS…" Click="Build_Click" />
+                <MenuItem Header="Restore Backup…" Click="RestoreBackup_Click" />
+                <Separator />
+                <MenuItem Header="Exit" Click="Exit_Click" />
+            </MenuItem>
+            <MenuItem Header="Edit" SubmenuOpened="EditMenu_SubmenuOpened">
+                <MenuItem Header="Undo" Command="{x:Static v:MainWindow.UndoCmd}" InputGestureText="Ctrl+Z" />
+                <MenuItem Header="Redo" Command="{x:Static v:MainWindow.RedoCmd}" InputGestureText="Ctrl+Shift+Z" />
+                <Separator />
+                <!-- Header is rewritten with the live count when the menu opens; disabled at zero, so the
+                     .col's state can be read off the menu instead of guessed. -->
+                <MenuItem x:Name="RemoveUnusedHullsItem" Header="Remove unused hulls"
+                          Click="RemoveUnusedHulls_Click" />
+            </MenuItem>
+        </Menu>
+
+        <!-- Status bar: camera position (per axis) + speed. Sizes are set on the fields themselves
+             (no implicit Style — otherwise the Fluent theme gets overwritten). Fields are wide: Fluent draws
+             a clear cross when focused, which a narrow field has no room for. -->
+        <StatusBar DockPanel.Dock="Bottom" Padding="0" ItemsPanel="{StaticResource StatusBarTwoColumns}">
+            <StatusBarItem Grid.Column="0" Padding="6,1">
+                <StackPanel Orientation="Horizontal">
+                    <v:Vector3Box x:Name="CamPosBox" Compact="True" Decimals="1" VerticalAlignment="Center"
+                                  Margin="2,1,0,1" ToolTip="Camera position (X, Y, Z)" />
+                    <Border Width="1" Height="16" Background="#40808080" Margin="12,0" />
+                    <TextBox x:Name="SpeedBox" Style="{StaticResource InputField}" Width="72" Text="100"
+                             VerticalAlignment="Center" Margin="0,1" ToolTip="Camera speed (units/s)"
+                             KeyDown="Speed_KeyDown" LostFocus="Speed_LostFocus" />
+                </StackPanel>
+            </StatusBarItem>
+            <StatusBarItem Grid.Column="1" Padding="10,1">
+                <TextBlock x:Name="FpsText" VerticalAlignment="Center" FontFamily="Consolas" Opacity="0.85" Text="" />
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Work area: viewport | splitter | scene panel (right) -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="380" MinWidth="220" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Viewport column: toolbar on top (only above the viewport, up to the hierarchy panel) -->
+            <DockPanel Grid.Column="0">
+                <!-- Toolbar row: the tray fills it (left-aligned tools); the center action bar is
+                     overlaid on top, centered over the whole width. -->
+                <Grid x:Name="ToolbarRow" DockPanel.Dock="Top">
+                <ToolBarTray IsLocked="True">
+                    <ToolBar>
+                        <ComboBox x:Name="AreaCombo" Width="200" Margin="12, 4, 0, 4"
+                                  DisplayMemberPath="Display"
+                                  ToolTip="Open-world district or interior (⌂); ❄ — has a winter variant"
+                                  SelectionChanged="AreaCombo_SelectionChanged" />
+                        <ToggleButton x:Name="WholeMapCheck" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      FontFamily="Segoe MDL2 Assets" Content="&#xE826;" FontSize="16"
+                                      ToolTip="Whole map — camera-driven district streaming"
+                                      Checked="WholeMap_Changed" Unchecked="WholeMap_Changed" />
+                        <ToggleButton x:Name="WinterToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      Content="❄" FontSize="15"
+                                      ToolTip="Winter (_z district variants + ground_zima)"
+                                      Checked="Winter_Changed" Unchecked="Winter_Changed" />
+                        <Separator Margin="2,6" />
+                        <ToggleButton x:Name="ZonesToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      FontFamily="Segoe MDL2 Assets" Content="&#xE80A;" FontSize="16"
+                                      ToolTip="Show loading zones (colored boxes, by district)"
+                                      Checked="Zones_Changed" Unchecked="Zones_Changed" />
+                        <ToggleButton x:Name="CrashToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      FontFamily="Segoe MDL2 Assets" Content="&#xEBD2;" FontSize="16"
+                                      ToolTip="Spawn crash objects (city_crash — Translokator instances)"
+                                      Checked="Crash_Changed" Unchecked="Crash_Changed" />
+                        <ToggleButton x:Name="CollisionToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      Content="▦" FontSize="15"
+                                      ToolTip="Show collision hulls (translucent + wireframe, per district)"
+                                      Checked="Collision_Changed" Unchecked="Collision_Changed" />
+                        <ToggleButton x:Name="NovToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      FontFamily="Segoe MDL2 Assets" Content="&#xE81B;" FontSize="15"
+                                      ToolTip="Show AI navigation (.nov graph + AI-mesh, per district)"
+                                      Checked="Nov_Changed" Unchecked="Nov_Changed" />
+                        <ToggleButton x:Name="NavWorldToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      FontFamily="Segoe MDL2 Assets" Content="&#xE7C1;" FontSize="15"
+                                      ToolTip="Show AI path objects (.nav cover / vault-over markers, per district)"
+                                      Checked="NavWorld_Changed" Unchecked="NavWorld_Changed" />
+                    </ToolBar>
+                </ToolBarTray>
+
+                    <!-- Center action bar: Play (launch game) · Multiplayer (M2Online) · Build -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Button x:Name="PlayBtn" Style="{StaticResource PlayButton}"
+                                ToolTip="Launch Mafia II" Click="Play_Click" />
+                        <Button x:Name="MultiplayerBtn" Style="{StaticResource ToolSquareButton}"
+                                Content="&#xE774;" Margin="6,0,0,0"
+                                ToolTip="Launch Multiplayer" Click="Multiplayer_Click" />
+                        <Button x:Name="BuildBtn" Style="{StaticResource ToolSquareButton}"
+                                Content="&#xE90F;" Margin="6,0,0,0"
+                                ToolTip="Build" Click="Build_Click" />
+                    </StackPanel>
+
+                    <!-- Right edge: shading mode — Render (full maps) · Material Preview (diffuse) · Solid (flat) · Wireframe (mesh grid) -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Margin="0,4,12,4">
+                        <RadioButton x:Name="RenderModeBtn" GroupName="RenderMode"
+                                     Style="{StaticResource RenderModeButton}"
+                                     ToolTip="Render — full textures, normal &amp; specular maps" Checked="RenderMode_Changed">
+                            <!-- Matte material ball: lit disc with a soft diffuse shadow crescent, no specular highlight -->
+                            <Canvas Width="16" Height="16">
+                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
+                                <Path Fill="#9A9A9A">
+                                    <Path.Data>
+                                        <CombinedGeometry GeometryCombineMode="Exclude">
+                                            <CombinedGeometry.Geometry1>
+                                                <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
+                                            </CombinedGeometry.Geometry1>
+                                            <CombinedGeometry.Geometry2>
+                                                <EllipseGeometry Center="5.2,5.2" RadiusX="6.9" RadiusY="6.9" />
+                                            </CombinedGeometry.Geometry2>
+                                        </CombinedGeometry>
+                                    </Path.Data>
+                                </Path>
+                            </Canvas>
+                        </RadioButton>
+                        <RadioButton x:Name="MaterialPreviewModeBtn" GroupName="RenderMode"
+                                     Style="{StaticResource RenderModeButton}" IsChecked="True" Margin="4,0,0,0"
+                                     ToolTip="Material Preview — diffuse texture only, no maps" Checked="RenderMode_Changed">
+                            <!-- Checkered sphere: full material -->
+                            <Canvas Width="16" Height="16">
+                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
+                                         Stroke="#ECECEC" StrokeThickness="1.3" Fill="Transparent" />
+                                <Path Fill="#ECECEC"
+                                      Data="M8,1.5 L14.5,1.5 L14.5,8 L8,8 Z  M1.5,8 L8,8 L8,14.5 L1.5,14.5 Z">
+                                    <Path.Clip>
+                                        <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
+                                    </Path.Clip>
+                                </Path>
+                            </Canvas>
+                        </RadioButton>
+                        <RadioButton x:Name="SolidModeBtn" GroupName="RenderMode"
+                                     Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
+                                     ToolTip="Solid — flat geometry, no textures" Checked="RenderMode_Changed">
+                            <!-- Shaded sphere -->
+                            <Canvas Width="16" Height="16">
+                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
+                                <Ellipse Canvas.Left="3.6" Canvas.Top="3.2" Width="4.8" Height="4.8"
+                                         Fill="#FFFFFF" Opacity="0.5" />
+                            </Canvas>
+                        </RadioButton>
+                        <RadioButton x:Name="WireModeBtn" GroupName="RenderMode"
+                                     Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
+                                     ToolTip="Wireframe — mesh edges" Checked="RenderMode_Changed">
+                            <!-- Wireframe sphere: outline + meridian + equator (round, matches the others) -->
+                            <Canvas Width="16" Height="16">
+                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
+                                         Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                <Ellipse Canvas.Left="5.3" Canvas.Top="0.75" Width="5.4" Height="14.5"
+                                         Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                <Ellipse Canvas.Left="0.75" Canvas.Top="5.3" Width="14.5" Height="5.4"
+                                         Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                            </Canvas>
+                        </RadioButton>
+                    </StackPanel>
+                </Grid>
+
+                <Grid>
+                    <vp:D3DImageHost x:Name="Viewport" />
+
+                    <!-- Viewport tool shelf (Blender-style): Select · Move · Rotate · Scale.
+                         Mutually exclusive; visual selection only (no functionality yet). -->
+                    <Border VerticalAlignment="Top" HorizontalAlignment="Left"
+                            Margin="12" Padding="5"
+                            Background="#99000000" CornerRadius="6">
+                        <StackPanel>
+                            <RadioButton x:Name="ToolSelect" GroupName="ViewportTool" IsChecked="True"
+                                         Style="{StaticResource ToolButton}" ToolTip="Select">
+                                <Path Width="22" Height="22" Stretch="Uniform" Fill="#ECECEC"
+                                      Data="{StaticResource IconToolSelect}" />
+                            </RadioButton>
+                            <RadioButton x:Name="ToolMove" GroupName="ViewportTool" Margin="0,8,0,0"
+                                         Style="{StaticResource ToolButton}" ToolTip="Move">
+                                <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                                      Stroke="#ECECEC" StrokeThickness="1.3" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconToolMove}" />
+                            </RadioButton>
+                            <RadioButton x:Name="ToolRotate" GroupName="ViewportTool" Margin="0,8,0,0"
+                                         Style="{StaticResource ToolButton}" ToolTip="Rotate">
+                                <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                                      Stroke="#ECECEC" StrokeThickness="1.3" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconToolRotate}" />
+                            </RadioButton>
+                            <RadioButton x:Name="ToolScale" GroupName="ViewportTool" Margin="0,8,0,0"
+                                         Style="{StaticResource ToolButton}" ToolTip="Scale">
+                                <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
+                                      Stroke="#ECECEC" StrokeThickness="1.3" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconToolScale}" />
+                            </RadioButton>
+
+                            <Border Height="1" Background="#33FFFFFF" Margin="4,10,4,0" />
+
+                            <!-- Blender edit mode (Tab): the official Blender mark (see IconBlender). -->
+                            <ToggleButton x:Name="ToolBlender" Margin="0,10,0,0"
+                                          Style="{StaticResource BlenderToolButton}"
+                                          ToolTip="Edit the selection in Blender (Tab); click again to leave"
+                                          Click="BlenderTool_Click">
+                                <Path Width="24" Height="20" Stretch="Uniform" Fill="#ECECEC"
+                                      Data="{StaticResource IconBlender}" />
+                            </ToggleButton>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Blender edit-mode frame: an orange glow border over the whole viewport while a
+                         bridge session is active. Purely visual (hit-test transparent). -->
+                    <Border x:Name="BridgeFrame" BorderBrush="#E87D0D" BorderThickness="2.5"
+                            IsHitTestVisible="False" Visibility="Collapsed">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#E87D0D" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
+                        </Border.Effect>
+                    </Border>
+
+                    <!-- Editable transform overlay (bottom-left): just the X/Y/Z inputs for the state that was
+                         changed by the 3D gizmo — Position (Move), Rotation (Rotate) or Scale (Scale), one at a
+                         time. It appears in code ONLY after an actual gizmo edit (not on select) and stays for
+                         hand-editing; DataContext = the SelectionViewModel. No object name and no state label. -->
+                    <Border x:Name="GizmoPanel" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                            Margin="12" Padding="10,8" Background="#B0000000" CornerRadius="6"
+                            Visibility="Collapsed">
+                        <StackPanel Width="330">
+                            <v:Vector3Box x:Name="PanelPos" Compact="True" ShowActions="False" Decimals="3"
+                                          X="{Binding PosX}" Y="{Binding PosY}" Z="{Binding PosZ}" />
+                            <v:Vector3Box x:Name="PanelRot" Compact="True" ShowActions="False" Decimals="2"
+                                          Visibility="Collapsed"
+                                          X="{Binding RotX}" Y="{Binding RotY}" Z="{Binding RotZ}" />
+                            <v:Vector3Box x:Name="PanelScale" Compact="True" ShowActions="False" Decimals="3"
+                                          Visibility="Collapsed"
+                                          X="{Binding ScaleX}" Y="{Binding ScaleY}" Z="{Binding ScaleZ}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Transient notices (bottom-right): refusals and push outcomes that must not interrupt.
+                         Last in the Grid so it draws over the other overlays; see NoticeBanner. -->
+                    <v:NoticeBanner x:Name="Notices" />
+                </Grid>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                          Background="#22000000" />
+
+            <!-- Scene panel: stats · search · tree · splitter · settings (tabs) -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="1*" MinHeight="80" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="2*" MinHeight="60" />
+                </Grid.RowDefinitions>
+
+                <!-- Loaded-scene stats: files (SDS) · meshes · polygons. UniformGrid = three exactly
+                     equal cells; content centered both ways, full-height hairline separators between.
+                     Height is bound to the viewport toolbar so both top bars are exactly the same height. -->
+                <Border Grid.Row="0" Margin="8,0,8,0" Padding="0,3" CornerRadius="6"
+                        Height="{Binding ActualHeight, ElementName=ToolbarRow}"
+                        Background="#14FFFFFF" BorderBrush="#1AFFFFFF" BorderThickness="1">
+                    <UniformGrid Columns="3">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="StatFiles" Style="{StaticResource StatNumber}" Text="0" />
+                            <TextBlock Style="{StaticResource StatLabel}" Text="Files" />
+                        </StackPanel>
+                        <Border BorderBrush="#1FFFFFFF" BorderThickness="1,0,0,0">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="StatMeshes" Style="{StaticResource StatNumber}" Text="0" />
+                                <TextBlock Style="{StaticResource StatLabel}" Text="Meshes" />
+                            </StackPanel>
+                        </Border>
+                        <Border BorderBrush="#1FFFFFFF" BorderThickness="1,0,0,0">
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="StatPolys" Style="{StaticResource StatNumber}" Text="0" />
+                                <TextBlock Style="{StaticResource StatLabel}" Text="Polygons" />
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+                </Border>
+
+                <!-- Search by name (magnifier glyph + placeholder overlay) -->
+                <Grid Grid.Row="1" Margin="8,8,8,4">
+                    <TextBox x:Name="SearchBox" Padding="26,5,6,5" TextChanged="SearchBox_TextChanged" />
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="12"
+                               Foreground="#80FFFFFF" Margin="8,0,0,0"
+                               HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
+                    <TextBlock x:Name="SearchPlaceholder" Text="Search…" Foreground="Gray"
+                               Margin="28,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+                </Grid>
+
+                <TreeView x:Name="SceneTree" Grid.Row="2" Margin="8,0,8,0" BorderThickness="0"
+                          Background="Transparent"
+                          VirtualizingStackPanel.IsVirtualizing="True"
+                          VirtualizingStackPanel.VirtualizationMode="Recycling">
+                    <TreeView.ContextMenu>
+                        <ContextMenu Opened="SceneTreeContextMenu_Opened">
+                            <MenuItem Header="Duplicate" Click="DuplicateMenuItem_Click" InputGestureText="Ctrl+D" />
+                            <MenuItem Header="Delete" Click="DeleteMenuItem_Click" InputGestureText="Del" />
+                            <Separator />
+                            <MenuItem x:Name="TreeRemoveUnusedHullsItem" Header="Remove unused hulls"
+                                      Click="RemoveUnusedHulls_Click" />
+                            <Separator />
+                            <!-- Header carries the clicked row's archive name (set when the menu opens), so the
+                                 rollback target is readable before committing to the dialog. -->
+                            <MenuItem x:Name="TreeRestoreBackupItem" Header="Restore Backup…"
+                                      Click="TreeRestoreBackup_Click" />
+                        </ContextMenu>
+                    </TreeView.ContextMenu>
+                    <TreeView.ItemContainerStyle>
+                        <!-- Custom template: header stretches to the panel's right edge (its column is *),
+                             so the eye toggle is always pinned to the right. Own chevron + row hover/selection. -->
+                        <Style TargetType="TreeViewItem">
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                            <!-- IsSelected is NOT bound to the node: multi-select needs several rows highlighted at
+                                 once, which the TreeView's single-selection would fight. The row highlight below
+                                 binds the node's own IsSelected flag (driven by the viewport), and Ctrl+click is
+                                 handled in code (SceneTree_PreviewMouseLeftButtonDown). -->
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="VerticalContentAlignment" Value="Center" />
+                            <Setter Property="Foreground" Value="White" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="TreeViewItem">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Border x:Name="Row" Grid.Row="0" CornerRadius="3"
+                                                    Padding="2,0" MinHeight="23">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="Transparent" />
+                                                        <Style.Triggers>
+                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                <Setter Property="Background" Value="#12FFFFFF" />
+                                                            </Trigger>
+                                                            <DataTrigger Value="True" Binding="{Binding IsSelected}">
+                                                                <Setter Property="Background" Value="#382D7DD2" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ToggleButton x:Name="Expander" Grid.Column="0"
+                                                                  Style="{StaticResource TreeChevron}"
+                                                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" />
+                                                    <ContentPresenter x:Name="PART_Header" Grid.Column="1"
+                                                                      ContentSource="Header"
+                                                                      HorizontalAlignment="Stretch"
+                                                                      VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+                                            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="14,0,0,0" />
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsExpanded" Value="False">
+                                                <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
+                                            </Trigger>
+                                            <Trigger Property="HasItems" Value="False">
+                                                <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.Resources>
+                        <!-- Recursive node: type icon · name (bold for containers) · eye toggle (pinned right) -->
+                        <HierarchicalDataTemplate DataType="{x:Type r:SceneNode}"
+                                                  ItemsSource="{Binding ChildrenView}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <!-- Resource-type icon (color + shape by Kind) -->
+                                <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                                      Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True">
+                                    <Path.Style>
+                                        <Style TargetType="Path">
+                                            <Setter Property="Stroke" Value="#8A99AC" />
+                                            <Setter Property="Data" Value="{StaticResource IconEmpty}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Folder">
+                                                    <Setter Property="Stroke" Value="#E3B341" />
+                                                    <Setter Property="Data" Value="{StaticResource IconFolder}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Sds">
+                                                    <Setter Property="Stroke" Value="#B392F0" />
+                                                    <Setter Property="Data" Value="{StaticResource IconArchive}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="FrameResource">
+                                                    <Setter Property="Stroke" Value="#9D7CD8" />
+                                                    <Setter Property="Data" Value="{StaticResource IconMesh}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Scene">
+                                                    <Setter Property="Stroke" Value="#56C7D6" />
+                                                    <Setter Property="Data" Value="{StaticResource IconScene}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Mesh">
+                                                    <Setter Property="Stroke" Value="#6CC490" />
+                                                    <Setter Property="Data" Value="{StaticResource IconMesh}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Model">
+                                                    <Setter Property="Stroke" Value="#6CC490" />
+                                                    <Setter Property="Data" Value="{StaticResource IconMesh}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Light">
+                                                    <Setter Property="Stroke" Value="#E6C24B" />
+                                                    <Setter Property="Data" Value="{StaticResource IconLight}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Camera">
+                                                    <Setter Property="Stroke" Value="#7EA6E0" />
+                                                    <Setter Property="Data" Value="{StaticResource IconCamera}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Collision">
+                                                    <Setter Property="Stroke" Value="#E0736B" />
+                                                    <Setter Property="Data" Value="{StaticResource IconCollision}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Navigation">
+                                                    <Setter Property="Stroke" Value="#5FD08A" />
+                                                    <Setter Property="Data" Value="{StaticResource IconScene}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="NavLayer">
+                                                    <Setter Property="Stroke" Value="#5FD08A" />
+                                                    <Setter Property="Data" Value="{StaticResource IconEmpty}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Path.Style>
+                                </Path>
+                                <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsContainer}" Value="True">
+                                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <ToggleButton Grid.Column="2" Style="{StaticResource EyeToggle}"
+                                              Margin="8,2,6,2"
+                                              IsChecked="{Binding IsVisible, Mode=TwoWay}"
+                                              ToolTip="Show / hide" />
+                            </Grid>
+                        </HierarchicalDataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+
+                <GridSplitter Grid.Row="3" Height="4" HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center" ResizeBehavior="PreviousAndNext"
+                              Background="#22808080" />
+
+                <!-- Settings section (Blender-style): vertical tab strip. "Render" is always present; the
+                     Object / SDS / FrameResource / Scene tabs appear based on the selected node's type. -->
+                <TabControl x:Name="PropertyTabs" Grid.Row="4" TabStripPlacement="Left"
+                            Language="en-US"
+                            Style="{StaticResource VerticalTabControl}">
+                    <!-- Tag = Segoe MDL2 "Picture" glyph (render output); icon-only cell, Header kept for tooltip/a11y.
+                         Always visible — the fallback tab when the selection has no type-specific tab. -->
+                    <TabItem x:Name="RenderTab" Header="Render" Tag="&#xE7C5;" ToolTip="Render"
+                             Style="{StaticResource VerticalTab}">
+                        <!-- Render tab content: thin "Scene filters" header + 3 compact toggle rows.
+                             Each row reuses the scene tree's node-kind glyph+color (Scene teal for proxy
+                             SCENES vs Mesh green for proxy MESHES) so the two read apart at a glance.
+                             All three switches are OFF by default (no IsChecked). -->
+                        <StackPanel Margin="12,10,12,10">
+                            <TextBlock Text="Scene filters" Foreground="#80FFFFFF"
+                                       FontSize="11" FontWeight="SemiBold" Margin="0,0,0,3" />
+                            <Border Height="1" Background="#1AFFFFFF" Margin="0,0,0,2" />
+
+                            <!-- (a) proxy scenes — Scene glyph, teal #56C7D6 -->
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                                      Margin="0,0,9,0" Fill="Transparent" Stroke="#56C7D6" StrokeThickness="1.2"
+                                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconScene}" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Render proxy scenes" Foreground="White" FontSize="12" />
+                                    <TextBlock Text="Neighboring proxy districts" Foreground="#80FFFFFF"
+                                               FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <ToggleButton Grid.Column="2" x:Name="ProxyScenesToggle"
+                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                              ToolTip="Whole neighboring proxy districts (proxy_&lt;district&gt;, cityNN meshes)"
+                                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                            </Grid>
+
+                            <!-- (b) proxy meshes (NEW) — Mesh glyph, green #6CC490 -->
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                                      Margin="0,0,9,0" Fill="Transparent" Stroke="#6CC490" StrokeThickness="1.2"
+                                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconMesh}" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Render proxy meshes" Foreground="White" FontSize="12" />
+                                    <TextBlock Text="Embedded proxy_ in this scene" Foreground="#80FFFFFF"
+                                               FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <ToggleButton Grid.Column="2" x:Name="ProxyMeshesToggle"
+                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                              ToolTip="The embedded proxy_ mesh inside the current district's main scene"
+                                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                            </Grid>
+
+                            <!-- (c) snow scenes — inline snowflake, icy #7EA6E0 -->
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                                      Margin="0,0,9,0" Fill="Transparent" Stroke="#7EA6E0" StrokeThickness="1.2"
+                                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M6,1 L6,11 M1.7,3.5 L10.3,8.5 M1.7,8.5 L10.3,3.5" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Render snow scenes" Foreground="White" FontSize="12" />
+                                    <TextBlock Text="Winter snow — follows the ❄ selector" Foreground="#80FFFFFF"
+                                               FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <ToggleButton Grid.Column="2" x:Name="SnowScenesToggle"
+                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                              ToolTip="Winter-only snow geometry (scene4XX). Auto-follows the winter selector — toggle to override."
+                                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                            </Grid>
+                        </StackPanel>
+                    </TabItem>
+
+                    <!-- Object tab (transformable frame object): local Position / Rotation / Scale. -->
+                    <TabItem x:Name="ObjectTab" Header="Object" Tag="&#xE759;" ToolTip="Object"
+                             Foreground="#E8873C"
+                             Style="{StaticResource VerticalTab}"
+                             Visibility="{Binding HasTransform, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="10,10,10,4">
+                                <!-- Header: name + type on the left, the mesh's triangle count on the right. -->
+                                <Border Style="{StaticResource PropCard}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                                            <TextBlock Text="{Binding ObjectType}" Style="{StaticResource PropSubtitle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
+                                            <TextBlock Text="{Binding TriangleCountText}" Foreground="White"
+                                                       FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                            <TextBlock Text="triangles" Foreground="#80FFFFFF" FontSize="10"
+                                                       HorizontalAlignment="Right" Margin="0,1,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="TRANSFORM" Style="{StaticResource PropCaption}" />
+                                        <v:Vector3Box Label="Position" Decimals="3" Margin="0,0,0,7"
+                                                      X="{Binding PosX}" Y="{Binding PosY}" Z="{Binding PosZ}" />
+                                        <v:Vector3Box Label="Rotation" Decimals="2" Margin="0,0,0,7"
+                                                      X="{Binding RotX}" Y="{Binding RotY}" Z="{Binding RotZ}" />
+                                        <v:Vector3Box Label="Scale" Decimals="3"
+                                                      X="{Binding ScaleX}" Y="{Binding ScaleY}" Z="{Binding ScaleZ}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Common properties (identity / frame table) — every frame object has these. -->
+                                <v:PropertyList Groups="{Binding CommonGroups}" />
+
+                                <!-- Hierarchy: reparent the object (another object, a scene folder, or the root).
+                                     Its own subtree is excluded so a cycle can't be chosen. -->
+                                <Border Style="{StaticResource PropCard}"
+                                        Visibility="{Binding CanReparent, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock Text="HIERARCHY" Style="{StaticResource PropCaption}" />
+                                        <TextBlock Text="Parent — pick a new one to reparent" Style="{StaticResource MetaLabel}"
+                                                   Margin="0,0,0,4" TextWrapping="Wrap" />
+                                        <!-- Search box (magnifier + placeholder) filters the candidate list. -->
+                                        <Grid Margin="0,0,0,4">
+                                            <TextBox Style="{StaticResource InputField}" Padding="24,3,6,3"
+                                                     Text="{Binding ParentSearchText, UpdateSourceTrigger=PropertyChanged}" />
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
+                                                       Foreground="#80FFFFFF" Margin="8,0,0,0"
+                                                       HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
+                                        </Grid>
+                                        <!-- IsSynchronizedWithCurrentItem=False is load-bearing: bound to a
+                                             CollectionView a ListBox otherwise tracks the view's CURRENT item, so
+                                             swapping ItemsSource on every selection change pushes item 0 — "(root)" —
+                                             back through this TwoWay binding, and the view-model cannot tell that
+                                             from a click. That silently reparented whatever object you selected. -->
+                                        <ListBox ItemsSource="{Binding ParentCandidatesView}"
+                                                 SelectedItem="{Binding SelectedParent, Mode=TwoWay}"
+                                                 IsSynchronizedWithCurrentItem="False"
+                                                 MaxHeight="220" Background="#161619" BorderBrush="#24FFFFFF" BorderThickness="1"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="Foreground" Value="#D0FFFFFF" />
+                                                    <Setter Property="Padding" Value="6,3" />
+                                                    <Setter Property="Cursor" Value="Hand" />
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ListBoxItem">
+                                                                <Border x:Name="Bd" Background="Transparent" CornerRadius="3"
+                                                                        Padding="{TemplateBinding Padding}">
+                                                                    <TextBlock Text="{Binding Display}" FontSize="11.5"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="Bd" Property="Background" Value="#14FFFFFF" />
+                                                                    </Trigger>
+                                                                    <Trigger Property="IsSelected" Value="True">
+                                                                        <Setter TargetName="Bd" Property="Background" Value="#382D7DD2" />
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                        </ListBox>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- Per-type property tab: the selected object type's own fields (Mesh / Light / Camera / …).
+                         One contextual tab whose header + content switch with the selection's type; visible only
+                         when the type contributes properties. -->
+                    <TabItem x:Name="TypeTab" Header="{Binding TypeTabTitle}" Tag="&#xE946;"
+                             ToolTip="{Binding TypeTabTitle}" Foreground="#4C9AE0"
+                             Style="{StaticResource VerticalTab}"
+                             Visibility="{Binding HasTypeProperties, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="10,10,10,4">
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                                        <TextBlock Text="{Binding ObjectType}" Style="{StaticResource PropSubtitle}" />
+                                    </StackPanel>
+                                </Border>
+                                <v:PropertyList Groups="{Binding TypeGroups}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- Materials tab (mesh): the object's materials as a 2×N grid of sphere-thumbnail tiles;
+                         clicking a tile opens the material editor window on that material/slot.
+                         Visible only for objects that have materials (a mesh). -->
+                    <TabItem x:Name="MaterialsTab" Header="Materials" Tag="&#xE790;" ToolTip="Materials"
+                             Foreground="#E0574E"
+                             Style="{StaticResource VerticalTab}"
+                             Visibility="{Binding HasMaterials, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="10,10,10,4">
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                                        <TextBlock Text="Materials" Style="{StaticResource PropSubtitle}" />
+                                    </StackPanel>
+                                </Border>
+                                <v:MaterialsView x:Name="MaterialsPanel" Materials="{Binding Materials}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- SDS tab: archive summary. -->
+                    <TabItem x:Name="SdsTab" Header="SDS" Tag="&#xE8A5;" ToolTip="SDS"
+                             Foreground="#4C9AE0"
+                             Style="{StaticResource VerticalTab}"
+                             Visibility="{Binding IsSds, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="10,10,10,4">
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                                        <TextBlock Text="SDS archive" Style="{StaticResource PropSubtitle}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Meshes" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding MeshCountText}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Triangles" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding TriangleCountText}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- FrameResource tab: block counts of the frame resource. -->
+                    <TabItem x:Name="FrameResourceTab" Header="FrameResource" Tag="&#xE8F1;" ToolTip="FrameResource"
+                             Foreground="#4C9AE0"
+                             Style="{StaticResource VerticalTab}"
+                             Visibility="{Binding IsFrameResource, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="10,10,10,4">
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="FrameResource" Style="{StaticResource PropTitle}" />
+                                        <TextBlock Text="Frame hierarchy + resource blocks" Style="{StaticResource PropSubtitle}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Frame objects" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding FrObjects}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Scenes" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding FrScenes}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Geometries" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding FrGeometries}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Materials" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding FrMaterials}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Skeletons" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding FrSkeletons}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <!-- Scene tab: scene-folder summary. -->
+                    <TabItem x:Name="SceneTab" Header="Scene" Tag="&#xE8B7;" ToolTip="Scene folder"
+                             Style="{StaticResource VerticalTab}"
+                             Visibility="{Binding IsScene, Converter={StaticResource BoolToVis}}">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="10,10,10,4">
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                                        <TextBlock Text="Scene folder" Style="{StaticResource PropSubtitle}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource PropCard}">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Category" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding SceneCategory}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid Style="{StaticResource MetaRow}">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Direct children" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding ChildCountText}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Meshes" Style="{StaticResource MetaLabel}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding MeshCountText}" Style="{StaticResource MetaValue}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>

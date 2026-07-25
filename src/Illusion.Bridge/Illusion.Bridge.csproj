@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Blender bridge core: the .ilx exchange container, the NDJSON control protocol, session
+       discovery, and the weld/split geometry mapping. Depends on Domain only — the container is
+       format-backend-neutral so it can later double as a standalone import/export format. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

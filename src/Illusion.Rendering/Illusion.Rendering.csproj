@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reusable D3D11 render pipeline (Silk.NET) + WPF D3DImage host base (ViewportControl).
+       Depends only on the domain model; knows nothing about file formats. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Core" />
+    <PackageReference Include="Silk.NET.Maths" />
+    <PackageReference Include="Silk.NET.DXGI" />
+    <PackageReference Include="Silk.NET.Direct3D11" />
+    <PackageReference Include="Silk.NET.Direct3D9" />
+    <PackageReference Include="Silk.NET.Direct3D.Compilers" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

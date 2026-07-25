@@ -1,0 +1,124 @@
+<Window x:Class="Illusion.Views.AppDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Illusion Toolkit"
+        Width="420" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Reusable modal: optional status glyph + heading + body text + checkbox, over an OK (notification) or a
+         Cancel/confirm (action) button pair. Native Fluent with theme-neutral gray-alpha surfaces — the same
+         composition as the launcher's status card — so it reads on both light and dark themes; the confirm button
+         uses the app accent for emphasis. Any part left unset collapses cleanly (a Collapsed element takes no
+         space, margins included), and the icon lives in a left gutter that disappears with it. -->
+    <Window.Resources>
+        <!-- One command-bar button pair, both on the same 4px-radius pill so the pair reads as one control.
+             Confirm = app accent (the launcher's Play blue); Cancel = a neutral theme-adaptive surface. -->
+        <Style x:Key="AccentButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinWidth" Value="92" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="Background" Value="#2D7DD2" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2569B0" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Neutral secondary (Cancel): same size/shape as the accent button, gray-alpha fill + hairline so it
+             reads on both themes. Foreground is left to inherit the theme's control text (light/dark adaptive). -->
+        <Style x:Key="NeutralButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinWidth" Value="92" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="Background" Value="#18808080" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                                BorderBrush="#33808080" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#28808080" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#12808080" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <!-- Two bands: a padded content region (icon gutter + message) over a full-width command bar set off by a
+         hairline. Content and bar share the SAME 24px horizontal inset, so the button pair lines up under the
+         message's right edge and the checkbox under the icon — one clean vertical rhythm, no stagger. -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- content -->
+            <RowDefinition Height="Auto" />  <!-- command bar -->
+        </Grid.RowDefinitions>
+
+        <!-- Content: a status glyph in a left gutter, vertically centred on the heading row (like the launcher's
+             status card), with the body wrapping below in the text column. When there is no heading the body
+             moves up into the heading's row (code-behind) so the glyph stays centred on the first line; when
+             there is no icon the gutter column collapses to nothing. -->
+        <Grid Grid.Row="0" Margin="24,22,24,22">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />  <!-- icon gutter -->
+                <ColumnDefinition Width="*" />     <!-- message -->
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />  <!-- heading -->
+                <RowDefinition Height="Auto" />  <!-- body -->
+            </Grid.RowDefinitions>
+
+            <TextBlock x:Name="IconGlyph" Grid.Row="0" Grid.Column="0" FontFamily="Segoe MDL2 Assets"
+                       FontSize="20" VerticalAlignment="Center" Margin="0,0,14,0" />
+            <TextBlock x:Name="HeadingText" Grid.Row="0" Grid.Column="1" FontSize="15" FontWeight="SemiBold"
+                       TextWrapping="Wrap" VerticalAlignment="Center" />
+            <TextBlock x:Name="BodyText" Grid.Row="1" Grid.Column="1" FontSize="13" TextWrapping="Wrap"
+                       Opacity="0.85" LineHeight="19" Margin="0,6,0,0" />
+        </Grid>
+
+        <!-- Command bar: hairline-topped strip. The verification checkbox sits on the left (aligned under the
+             icon), the buttons on the right (aligned under the message) — a balanced bar, not one lonely button.
+             Cancel + checkbox hide when unused. -->
+        <Border Grid.Row="1" Background="#0A808080" BorderBrush="#22808080" BorderThickness="0,1,0,0"
+                Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <CheckBox x:Name="CheckBoxControl" DockPanel.Dock="Left" FontSize="13"
+                          VerticalAlignment="Center" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="SecondaryBtn" Style="{StaticResource NeutralButton}"
+                            Margin="0,0,8,0" Click="Secondary_Click" />
+                    <Button x:Name="PrimaryBtn" Style="{StaticResource AccentButton}" Click="Primary_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

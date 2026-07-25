@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- Keep the generated XML documentation out of the output folder: it exists only so IDE0005
+       (unused using) can report during build, not to ship. This lives in .targets rather than
+       .props because AssemblyName and IntermediateOutputPath are not resolved that early. -->
+  <PropertyGroup>
+    <DocumentationFile>$(IntermediateOutputPath)$(AssemblyName).xml</DocumentationFile>
+    <!-- ...and do not let a referenced project's documentation ride into the output either
+         (symbols still do — only the .xml is dropped from the related-file set). -->
+    <AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+  <!-- The project's own doc file would still be copied next to the assembly; drop it from the
+       copy list so the output folder carries binaries only. -->
+  <Target Name="KeepDocumentationOutOfOutput" BeforeTargets="CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <DocFileItem Remove="@(DocFileItem)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

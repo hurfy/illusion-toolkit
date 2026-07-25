@@ -1,0 +1,22 @@
+<Application x:Class="Illusion.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Shared dark editor styles for secondary windows (Import, Material Editor). -->
+                <ResourceDictionary Source="Views/EditorStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Two-column StatusBar layout (content left, engine label right), shared by both windows. -->
+            <ItemsPanelTemplate x:Key="StatusBarTwoColumns">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </ItemsPanelTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

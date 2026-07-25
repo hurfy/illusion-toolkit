@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <!-- WPF0001: ThemeMode (Fluent / system theme) is marked as an experimental API. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Core" />
+    <PackageReference Include="Silk.NET.Maths" />
+    <PackageReference Include="Silk.NET.DXGI" />
+    <PackageReference Include="Silk.NET.Direct3D11" />
+    <PackageReference Include="Silk.NET.Direct3D9" />
+    <PackageReference Include="Silk.NET.Direct3D.Compilers" />
+    <!-- The MCP *client*, used only by the "probe-mcp" scenario to exercise the server the way a
+         real client would. The server side needs nothing from here (see Illusion.Mcp). -->
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
+    <!-- Formats is referenced ONLY for Diagnostics\Probes.cs — the regression harness legitimately
+         exercises raw format APIs. Production UI code (Views\, Viewport\) must consume the Domain
+         ports via Illusion.Assets and stay free of Formats usings. -->
+    <ProjectReference Include="..\Illusion.Formats\Illusion.Formats.csproj" />
+    <ProjectReference Include="..\Illusion.Rendering\Illusion.Rendering.csproj" />
+    <ProjectReference Include="..\Illusion.Assets\Illusion.Assets.csproj" />
+    <ProjectReference Include="..\Illusion.Bridge\Illusion.Bridge.csproj" />
+    <ProjectReference Include="..\Illusion.Mcp\Illusion.Mcp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The Blender addon ships beside the exe and is injected into a spawned Blender via
+         BLENDER_USER_SCRIPTS (zero-install; see Bridge\BridgeLauncher). -->
+    <Content Include="BlenderAddon\**" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- The PhysX 2.8 triangle-mesh cooker, shelled out to when a hull's shape changes. It is an
+         irreplaceable 18 KB MIT binary (see tools\M2PhysX\README.md) and needs no NVIDIA DLLs beside it —
+         the engine comes from the user's PhysX System Software install. -->
+    <Content Include="..\..\tools\M2PhysX\M2PhysX.exe" Link="tools\M2PhysX\M2PhysX.exe"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

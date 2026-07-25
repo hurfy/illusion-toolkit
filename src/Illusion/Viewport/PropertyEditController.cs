@@ -1,0 +1,74 @@
+using Illusion.Domain.Properties;
+using Illusion.Scene;
+
+namespace Illusion.Viewport;
+
+/// <summary>
+/// Editing of a frame object's data properties (the property panel): applies a committed value to the underlying
+/// object, records it as one undoable edit on the shared history, and marks the owning document dirty so Save /
+/// Build pick it up. A rename also updates the scene-tree row. Sits beside <see cref="TransformEditController"/>
+/// and shares its <see cref="Domain.EditHistory"/>.
+/// </summary>
+internal sealed class PropertyEditController
+{
+    private readonly D3DImageHost _host;
+
+    public PropertyEditController(D3DImageHost host) => _host = host;
+
+    /// <summary>Applies a property edit, records it for undo and marks the document modified (no-op when unchanged).</summary>
+    public void Commit(SceneNode node, PropertyDescriptor descriptor, object? before, object? after)
+    {
+        if (descriptor.Set is null || Equals(before, after)) return;
+        descriptor.Set(after);
+        PropagateNameEdit(node, descriptor);
+        _host.Editing.History.Push(new PropertyEdit(this, node, descriptor, before, after));
+        _host.Persistence.MarkFrameModified(node);
+        _host.RaiseSelectionPropertiesChanged(); // refresh the panel values + the header title
+    }
+
+    // Undo/redo re-applies the recorded value. Skips a node that left the scene (streaming unload) — a defensive
+    // backstop to the history pruning. Re-selects the node so the change is visible and the panel rebuilds.
+    private void ApplyRecorded(SceneNode node, PropertyDescriptor descriptor, object? value)
+    {
+        if (descriptor.Set is null || !_host.Tree.IsInScene(node)) return;
+        descriptor.Set(value);
+        PropagateNameEdit(node, descriptor);       // update the tree row/name BEFORE re-select so the rebuilt panel is correct
+        _host.Persistence.MarkFrameModified(node); // undo/redo re-dirties the frame vs. the last save
+        _host.Selection.SetSelection(new[] { node }, node);
+        _host.RaiseSelectionPropertiesChanged();
+    }
+
+    // Side effects of a name / on-name-table edit: the visible tree-row name and the name-table dirty flag (those
+    // fields live in the FrameNameTable, not the frame stream, so the next save must rewrite it).
+    private void PropagateNameEdit(SceneNode node, PropertyDescriptor descriptor)
+    {
+        if (descriptor.Id == "Base.Name" && descriptor.Get() is HashNameValue hn)
+            node.Name = hn.Name;
+        if (descriptor.Id is "Base.Name" or "Base.IsOnFrameTable")
+            _host.Persistence.MarkNameTableDirty(node);
+    }
+
+    // Prunable by the streamer (INodeEdit) like a transform edit, so unloading a district drops its edits.
+    private sealed class PropertyEdit : INodeEdit
+    {
+        private readonly PropertyEditController _owner;
+        private readonly SceneNode _node;
+        private readonly PropertyDescriptor _descriptor;
+        private readonly object? _before;
+        private readonly object? _after;
+
+        public PropertyEdit(PropertyEditController owner, SceneNode node, PropertyDescriptor descriptor,
+            object? before, object? after)
+        {
+            _owner = owner;
+            _node = node;
+            _descriptor = descriptor;
+            _before = before;
+            _after = after;
+        }
+
+        public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
+        public void Undo() => _owner.ApplyRecorded(_node, _descriptor, _before);
+        public void Redo() => _owner.ApplyRecorded(_node, _descriptor, _after);
+    }
+}

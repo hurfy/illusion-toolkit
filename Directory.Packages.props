@@ -1,0 +1,27 @@
+<Project>
+
+  <!-- Central Package Management (CPM) for NuGet:
+       versions are set only here, in csproj — PackageReference without Version. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Silk.NET packages are updated only all at once. -->
+    <SilkVersion>2.21.0</SilkVersion>
+  </PropertyGroup>
+
+  <ItemGroup Label="MCP server">
+    <!-- The 2.0.0-preview line is mid-rewrite of the protocol lifecycle (it drops the `initialize`
+         handshake for stateless servers and renumbers error codes) — stay on the stable 1.x. -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.4.1" />
+    <PackageVersion Include="ModelContextProtocol" Version="1.4.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Rendering (Silk.NET / D3D11)">
+    <PackageVersion Include="Silk.NET.Core" Version="$(SilkVersion)" />
+    <PackageVersion Include="Silk.NET.Maths" Version="$(SilkVersion)" />
+    <PackageVersion Include="Silk.NET.DXGI" Version="$(SilkVersion)" />
+    <PackageVersion Include="Silk.NET.Direct3D11" Version="$(SilkVersion)" />
+    <PackageVersion Include="Silk.NET.Direct3D9" Version="$(SilkVersion)" />
+    <PackageVersion Include="Silk.NET.Direct3D.Compilers" Version="$(SilkVersion)" />
+  </ItemGroup>
+
+</Project>
