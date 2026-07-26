@@ -7,7 +7,7 @@
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
     <File Path="README.md" />
-    <File Path="THIRD-PARTY-NOTICE.txt" />
+    <File Path="LICENSE" />
   </Folder>
   <Project Path="src/Illusion.Domain/Illusion.Domain.csproj" />
   <Project Path="src/Illusion.Bridge/Illusion.Bridge.csproj" />
