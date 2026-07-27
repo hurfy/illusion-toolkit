@@ -26,7 +26,7 @@
 
 Before you get started, there are a few things you should know:
 
-* To be honest I have no idea how the idea for this project came about. At this point, I consider it an experiment, and I can't guarantee that it will ever make it to a proper release.
+* Honestly, I'm not even sure how this project started. At this point, I consider it an experiment, and I can't guarantee that it will ever make it to a proper release.
 * This project is 99% vibe-coded. That said, it definitely wasn't developed by simply telling an AI "make a toolkit make no mistakes".
 * You're likely to encounter a few bugs and unfinished features along the way, so feel free to let me know if you do.
 * A huge amount of reference material was provided by [Greavesy](https://github.com/Greavesy1899) - massive thanks to him for that.
