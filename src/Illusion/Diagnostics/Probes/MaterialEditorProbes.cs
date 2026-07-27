@@ -532,6 +532,12 @@ internal static class MaterialEditorProbes
 
         var viewport = new D3DImageHost();
         var window = new MaterialEditorWindow(viewport);
+        // Opening bigger than the desktop puts the bottom edge under the taskbar on the smallest screen we
+        // support; the size asked for in XAML is clamped in the constructor (WindowFit).
+        check("editor window opens no larger than the desktop",
+            window.Width <= SystemParameters.WorkArea.Width && window.Height <= SystemParameters.WorkArea.Height,
+            $"{window.Width:F0}x{window.Height:F0} in a {SystemParameters.WorkArea.Width:F0}x{SystemParameters.WorkArea.Height:F0} work area");
+
         window.ShowMaterial(sample.Hash, null, 0);
         var nameRow = window.NamePanel.DataContext as NameEditRow;
         check("editor window binds the requested material",

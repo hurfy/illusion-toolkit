@@ -52,6 +52,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // The window opens maximized; this is about the size it restores to, which must fit the desktop too.
+        WindowFit.ToWorkArea(this);
+
         SceneTree.ItemsSource = Viewport.Roots;
         _groupsView = CollectionViewSource.GetDefaultView(Viewport.Roots);
         _groupsView.Filter = o => o is SceneNode n && n.HasSearchMatch;

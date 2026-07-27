@@ -40,6 +40,7 @@ public partial class MaterialEditorWindow : Window
     public MaterialEditorWindow(D3DImageHost viewport)
     {
         InitializeComponent();
+        WindowFit.ToWorkArea(this);   // 1280x720 is the wish; the desktop has the last word
         _viewport = viewport;
 
         LibraryCombo.ItemsSource = viewport.MaterialCatalog.Libraries;

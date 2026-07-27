@@ -278,6 +278,7 @@ internal static class EditorProbes
             Check("Compact layout has a finite desired width", cw > 0 && !double.IsInfinity(cw), $"desired={cw:F1}");
 
             CheckHoverPopup(Check);
+            CheckWindowFit(Check);
 
             sb.Insert(0, $"UI PROBE: {pass} passed, {fail} failed\n\n");
         }
@@ -319,6 +320,25 @@ internal static class EditorProbes
         Views.HoverPopup.RaiseHover(list, entering: false);
         Pump(TimeSpan.FromMilliseconds(600));
         check("Hover flyout: leaving both closes it", button.IsChecked != true, "");
+    }
+
+    // WindowFit: a window asking for more than the desktop is cut down to it, one that already fits is left
+    // alone. Stated against whatever desktop the probe runs on, so the guarantee holds on the 1280x720 screen
+    // it exists for — where the material editor's own asked-for size is what gets trimmed.
+    private static void CheckWindowFit(Action<string, bool, string> check)
+    {
+        Rect work = SystemParameters.WorkArea;
+
+        var oversized = new Window { Width = work.Width + 500, Height = work.Height + 500 };
+        Views.WindowFit.ToWorkArea(oversized);
+        check("WindowFit trims a window bigger than the desktop",
+            oversized.Width == work.Width && oversized.Height == work.Height,
+            $"{oversized.Width:F0}x{oversized.Height:F0} vs work area {work.Width:F0}x{work.Height:F0}");
+
+        var modest = new Window { Width = 320, Height = 240 };
+        Views.WindowFit.ToWorkArea(modest);
+        check("WindowFit leaves a window that already fits alone",
+            modest.Width == 320 && modest.Height == 240, $"{modest.Width:F0}x{modest.Height:F0}");
     }
 
     // Lets queued dispatcher work — the flyout's timers — actually run: a probe has no message loop of its own.
