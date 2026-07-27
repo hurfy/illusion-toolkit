@@ -4,7 +4,7 @@
         xmlns:v="clr-namespace:Illusion.Views"
         xmlns:vp="clr-namespace:Illusion.Viewport"
         Title="Material Editor"
-        Width="1680" Height="990" MinWidth="960" MinHeight="520"
+        Width="1280" Height="720" MinWidth="960" MinHeight="520"
         ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
 
     <!-- The material editor: browse an MTL library (file selector + searchable list), inspect the selected
