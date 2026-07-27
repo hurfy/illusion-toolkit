@@ -6,9 +6,13 @@
         xmlns:vp="clr-namespace:Illusion.Viewport"
         Title="Illusion Toolkit"
         Width="1100" Height="700"
-        MinWidth="800" MinHeight="500"
+        MinWidth="960" MinHeight="560"
         WindowState="Maximized"
         WindowStartupLocation="CenterScreen">
+
+    <!-- The smallest screen the editor supports is 1280x720. The minimum size above stays under what such a
+         screen offers even at 125% scaling (a 1024x576 work area in DIPs), so it can never force a window
+         larger than the desktop; the layout degrades gracefully below it (see ToolbarRowPanel). -->
 
     <Window.Resources>
         <!-- Vector icon geometries (defined first: StaticResource can't forward-reference within a dictionary).
@@ -21,6 +25,16 @@
         <StreamGeometry x:Key="IconCamera">M1.5,4 L6.8,4 L6.8,8.5 L1.5,8.5 Z M6.8,5.4 L10.5,3.9 L10.5,8.6 L6.8,7.1</StreamGeometry>
         <StreamGeometry x:Key="IconCollision">M6,1.5 L10,3 L10,6.2 C10,8.8 8.2,10.3 6,11 C3.8,10.3 2,8.8 2,6.2 L2,3 Z</StreamGeometry>
         <StreamGeometry x:Key="IconEmpty">M6,2 L6,10 M2,6 L10,6</StreamGeometry>
+        <!-- Toolbar layer icons (12×12, stroked like the tree's). Each says what the layer IS, so the row reads
+             without its label: a stack of sheets (the Layers button), a district grid, scattered instances, and
+             a route through waypoints. Collisions reuse the tree's shield (IconCollision) — same thing, same
+             icon. These replaced Segoe MDL2 glyphs that were only loosely about their layer, and one literal
+             "▦" character. -->
+        <StreamGeometry x:Key="IconLayers">M6,1.4 L11,4 L6,6.6 L1,4 Z M1,6.4 L6,9 L11,6.4 M1,8.8 L6,11.4 L11,8.8</StreamGeometry>
+        <StreamGeometry x:Key="IconZones">M1.6,1.6 L10.4,1.6 L10.4,10.4 L1.6,10.4 Z M6,1.6 L6,10.4 M1.6,6 L10.4,6</StreamGeometry>
+        <StreamGeometry x:Key="IconInstances">M1.4,7.4 L4.4,7.4 L4.4,10.4 L1.4,10.4 Z M4.9,1.6 L7.9,1.6 L7.9,4.6 L4.9,4.6 Z M7.6,6.4 L10.6,6.4 L10.6,9.4 L7.6,9.4 Z</StreamGeometry>
+        <StreamGeometry x:Key="IconNavigation">M2.6,9.4 L5.4,6.2 L7.4,8.2 L10,3.4 M1.3,10.4 A1.3,1.3 0 1 1 3.9,10.4 A1.3,1.3 0 1 1 1.3,10.4 Z M8.8,2.6 A1.3,1.3 0 1 1 11.4,2.6 A1.3,1.3 0 1 1 8.8,2.6 Z</StreamGeometry>
+
         <!-- Eye toggle icons (~16×16): open eye with pupil / closed lid with lashes. -->
         <StreamGeometry x:Key="IconEyeOpen">M1.5,8 C4.5,4 11.5,4 14.5,8 C11.5,12 4.5,12 1.5,8 Z M6,8 A2,2 0 1 1 10,8 A2,2 0 1 1 6,8 Z</StreamGeometry>
         <StreamGeometry x:Key="IconEyeClosed">M1.5,7 C4.5,11 11.5,11 14.5,7 M4,9.9 L3.2,11.5 M8,10.6 L8,12.2 M12,9.9 L12.8,11.5</StreamGeometry>
@@ -565,57 +579,139 @@
 
             <!-- Viewport column: toolbar on top (only above the viewport, up to the hierarchy panel) -->
             <DockPanel Grid.Column="0">
-                <!-- Toolbar row: the tray fills it (left-aligned tools); the center action bar is
-                     overlaid on top, centered over the whole width. -->
-                <Grid x:Name="ToolbarRow" DockPanel.Dock="Top">
-                <ToolBarTray IsLocked="True">
-                    <ToolBar>
-                        <ComboBox x:Name="AreaCombo" Width="200" Margin="12, 4, 0, 4"
-                                  DisplayMemberPath="Display"
-                                  ToolTip="Open-world district or interior (⌂); ❄ — has a winter variant"
-                                  SelectionChanged="AreaCombo_SelectionChanged" />
-                        <ToggleButton x:Name="WholeMapCheck" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      FontFamily="Segoe MDL2 Assets" Content="&#xE826;" FontSize="16"
-                                      ToolTip="Whole map — camera-driven district streaming"
-                                      Checked="WholeMap_Changed" Unchecked="WholeMap_Changed" />
-                        <ToggleButton x:Name="WinterToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      Content="❄" FontSize="15"
-                                      ToolTip="Winter (_z district variants + ground_zima)"
-                                      Checked="Winter_Changed" Unchecked="Winter_Changed" />
-                        <Separator Margin="2,6" />
-                        <ToggleButton x:Name="ZonesToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      FontFamily="Segoe MDL2 Assets" Content="&#xE80A;" FontSize="16"
-                                      ToolTip="Show loading zones (colored boxes, by district)"
-                                      Checked="Zones_Changed" Unchecked="Zones_Changed" />
-                        <ToggleButton x:Name="CrashToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      FontFamily="Segoe MDL2 Assets" Content="&#xEBD2;" FontSize="16"
-                                      ToolTip="Spawn crash objects (city_crash — Translokator instances)"
-                                      Checked="Crash_Changed" Unchecked="Crash_Changed" />
-                        <ToggleButton x:Name="CollisionToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      Content="▦" FontSize="15"
-                                      ToolTip="Show collision hulls (translucent + wireframe, per district)"
-                                      Checked="Collision_Changed" Unchecked="Collision_Changed" />
-                        <ToggleButton x:Name="NovToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      FontFamily="Segoe MDL2 Assets" Content="&#xE81B;" FontSize="15"
-                                      ToolTip="Show AI navigation (.nov graph + AI-mesh, per district)"
-                                      Checked="Nov_Changed" Unchecked="Nov_Changed" />
-                        <ToggleButton x:Name="NavWorldToggle" Width="30" Height="30" Margin="4" Padding="0"
-                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                                      FontFamily="Segoe MDL2 Assets" Content="&#xE7C1;" FontSize="15"
-                                      ToolTip="Show AI path objects (.nav cover / vault-over markers, per district)"
-                                      Checked="NavWorld_Changed" Unchecked="NavWorld_Changed" />
-                    </ToolBar>
-                </ToolBarTray>
+                <!-- Toolbar row: tool tray · action bar · shading modes, in that child order. The action bar is
+                     centred on the row and slides aside instead of overlapping when the tray reaches it —
+                     see ToolbarRowPanel; the groups used to share one Grid cell and drew on top of each
+                     other on a narrow window. -->
+                <!-- The band is painted once, by the row. The tray is only as wide as its buttons — that is what
+                     lets the ToolBar fold the surplus ones into its overflow menu — so its own background would
+                     stop mid-row; and since the theme's toolbar brush is translucent, painting it on both would
+                     show the tray as a lighter patch. So the tray and its ToolBar go transparent and the row
+                     carries the colour: the same band as before, now the full width of the viewport column. -->
+                <v:ToolbarRowPanel x:Name="ToolbarRow" DockPanel.Dock="Top" Background="#2D2D2D">
+                    <ToolBarTray x:Name="ToolTray" IsLocked="True" Background="Transparent">
+                        <ToolBar Background="Transparent">
+                            <ComboBox x:Name="AreaCombo" Width="200" Margin="12, 4, 0, 4"
+                                      DisplayMemberPath="Display"
+                                      ToolTip="Open-world district or interior (⌂); ❄ — has a winter variant"
+                                      SelectionChanged="AreaCombo_SelectionChanged" />
+                            <ToggleButton x:Name="WholeMapCheck" Width="30" Height="30" Margin="4" Padding="0"
+                                          HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                          FontFamily="Segoe MDL2 Assets" Content="&#xE826;" FontSize="16"
+                                          ToolTip="Whole map — camera-driven district streaming"
+                                          Checked="WholeMap_Changed" Unchecked="WholeMap_Changed" />
+                            <ToggleButton x:Name="WinterToggle" Width="30" Height="30" Margin="4" Padding="0"
+                                          HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                          Content="❄" FontSize="15"
+                                          ToolTip="Winter (_z district variants + ground_zima)"
+                                          Checked="Winter_Changed" Unchecked="Winter_Changed" />
+                            <Separator Margin="2,6" />
+
+                            <!-- Layers: everything that only changes what the viewport DRAWS lives behind this
+                                 one button, named and switchable in a list. The area selector, Whole map and
+                                 Winter stay outside it — those change what is LOADED. The list is where new
+                                 layers go: the toolbar no longer grows a button per layer, so it cannot run
+                                 out of room again. -->
+                            <Grid>
+                                <ToggleButton x:Name="LayersBtn" Width="30" Height="30" Margin="4" Padding="0"
+                                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                              ToolTip="Layers — what the viewport draws">
+                                    <Path Width="16" Height="16" Stretch="Uniform" Fill="Transparent"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                          StrokeThickness="1.15" StrokeLineJoin="Round"
+                                          Data="{StaticResource IconLayers}" />
+                                </ToggleButton>
+                                <!-- Opens on hover as well as on click — see HoverPopup, wired in the ctor. -->
+                                <Popup x:Name="LayersPopup" IsOpen="{Binding IsChecked, ElementName=LayersBtn}"
+                                       Placement="Bottom" PlacementTarget="{Binding ElementName=LayersBtn}"
+                                       AllowsTransparency="True" PopupAnimation="Fade" Closed="LayersPopup_Closed">
+                                    <Border Background="#232327" BorderBrush="#3AFFFFFF" BorderThickness="1"
+                                            CornerRadius="6" Padding="10,8" Margin="0,3,8,8" Width="264">
+                                        <Border.Effect>
+                                            <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2"
+                                                              Opacity="0.5" />
+                                        </Border.Effect>
+                                        <StackPanel x:Name="LayerRows">
+                                            <Grid Margin="0,4" ToolTip="Loading zones — colored boxes, by district">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                      Stroke="#56C7D6" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Data="{StaticResource IconZones}" />
+                                                <TextBlock Grid.Column="1" Text="Loading zones" Foreground="White"
+                                                           FontSize="12" VerticalAlignment="Center" />
+                                                <ToggleButton Grid.Column="2" x:Name="ZonesToggle"
+                                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                                              Checked="Zones_Changed" Unchecked="Zones_Changed" />
+                                            </Grid>
+                                            <Grid Margin="0,4"
+                                                  ToolTip="Crash objects — city_crash, the Translokator instances">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                      Stroke="#E3B341" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Data="{StaticResource IconInstances}" />
+                                                <TextBlock Grid.Column="1" Text="Crash objects" Foreground="White"
+                                                           FontSize="12" VerticalAlignment="Center" />
+                                                <ToggleButton Grid.Column="2" x:Name="CrashToggle"
+                                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                                              Checked="Crash_Changed" Unchecked="Crash_Changed" />
+                                            </Grid>
+                                            <Grid Margin="0,4"
+                                                  ToolTip="Collision hulls — translucent, per district">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                      Stroke="#E0736B" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Data="{StaticResource IconCollision}" />
+                                                <TextBlock Grid.Column="1" Text="Collisions" Foreground="White"
+                                                           FontSize="12" VerticalAlignment="Center" />
+                                                <ToggleButton Grid.Column="2" x:Name="CollisionToggle"
+                                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                                              Checked="Collision_Changed" Unchecked="Collision_Changed" />
+                                            </Grid>
+                                            <!-- .nov (graph + AI-mesh) and .nav (cover / vault-over markers) are two
+                                                 halves of the same answer to "where can the AI go", and were never
+                                                 useful apart — one switch drives both. -->
+                                            <Grid Margin="0,4"
+                                                  ToolTip="AI navigation — .nov graph and AI-mesh plus .nav path markers, per district">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                      Stroke="#5FD08A" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                      Data="{StaticResource IconNavigation}" />
+                                                <TextBlock Grid.Column="1" Text="AI navigation" Foreground="White"
+                                                           FontSize="12" VerticalAlignment="Center" />
+                                                <ToggleButton Grid.Column="2" x:Name="AiNavToggle"
+                                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                                              Checked="AiNav_Changed" Unchecked="AiNav_Changed" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </ToolBar>
+                    </ToolBarTray>
 
                     <!-- Center action bar: Play (launch game) · Multiplayer (M2Online) · Build -->
-                    <StackPanel Orientation="Horizontal"
-                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Button x:Name="PlayBtn" Style="{StaticResource PlayButton}"
                                 ToolTip="Launch Mafia II" Click="Play_Click" />
                         <Button x:Name="MultiplayerBtn" Style="{StaticResource ToolSquareButton}"
@@ -626,77 +722,79 @@
                                 ToolTip="Build" Click="Build_Click" />
                     </StackPanel>
 
-                    <!-- Right edge: shading mode — Render (full maps) · Material Preview (diffuse) · Solid (flat) · Wireframe (mesh grid) -->
-                    <StackPanel Orientation="Horizontal"
-                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                                Margin="0,4,12,4">
-                        <RadioButton x:Name="RenderModeBtn" GroupName="RenderMode"
-                                     Style="{StaticResource RenderModeButton}"
-                                     ToolTip="Render — full textures, normal &amp; specular maps" Checked="RenderMode_Changed">
-                            <!-- Matte material ball: lit disc with a soft diffuse shadow crescent, no specular highlight -->
-                            <Canvas Width="16" Height="16">
-                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
-                                <Path Fill="#9A9A9A">
-                                    <Path.Data>
-                                        <CombinedGeometry GeometryCombineMode="Exclude">
-                                            <CombinedGeometry.Geometry1>
-                                                <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
-                                            </CombinedGeometry.Geometry1>
-                                            <CombinedGeometry.Geometry2>
-                                                <EllipseGeometry Center="5.2,5.2" RadiusX="6.9" RadiusY="6.9" />
-                                            </CombinedGeometry.Geometry2>
-                                        </CombinedGeometry>
-                                    </Path.Data>
-                                </Path>
-                            </Canvas>
-                        </RadioButton>
-                        <RadioButton x:Name="MaterialPreviewModeBtn" GroupName="RenderMode"
-                                     Style="{StaticResource RenderModeButton}" IsChecked="True" Margin="4,0,0,0"
-                                     ToolTip="Material Preview — diffuse texture only, no maps" Checked="RenderMode_Changed">
-                            <!-- Checkered sphere: full material -->
-                            <Canvas Width="16" Height="16">
-                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
-                                         Stroke="#ECECEC" StrokeThickness="1.3" Fill="Transparent" />
-                                <Path Fill="#ECECEC"
-                                      Data="M8,1.5 L14.5,1.5 L14.5,8 L8,8 Z  M1.5,8 L8,8 L8,14.5 L1.5,14.5 Z">
-                                    <Path.Clip>
-                                        <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
-                                    </Path.Clip>
-                                </Path>
-                            </Canvas>
-                        </RadioButton>
-                        <RadioButton x:Name="SolidModeBtn" GroupName="RenderMode"
-                                     Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
-                                     ToolTip="Solid — flat geometry, no textures" Checked="RenderMode_Changed">
-                            <!-- Shaded sphere -->
-                            <Canvas Width="16" Height="16">
-                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
-                                <Ellipse Canvas.Left="3.6" Canvas.Top="3.2" Width="4.8" Height="4.8"
-                                         Fill="#FFFFFF" Opacity="0.5" />
-                            </Canvas>
-                        </RadioButton>
-                        <RadioButton x:Name="WireModeBtn" GroupName="RenderMode"
-                                     Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
-                                     ToolTip="Wireframe — mesh edges" Checked="RenderMode_Changed">
-                            <!-- Wireframe sphere: outline + meridian + equator (round, matches the others) -->
-                            <Canvas Width="16" Height="16">
-                                <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
-                                         Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
-                                <Ellipse Canvas.Left="5.3" Canvas.Top="0.75" Width="5.4" Height="14.5"
-                                         Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
-                                <Ellipse Canvas.Left="0.75" Canvas.Top="5.3" Width="14.5" Height="5.4"
-                                         Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
-                            </Canvas>
-                        </RadioButton>
-                    </StackPanel>
-                </Grid>
+                    <!-- Right edge: shading mode — Render (full maps) · Material Preview (diffuse) · Solid (flat) ·
+                         Wireframe (mesh grid). Four one-click buttons while the row has room for them; on a short
+                         row the strip folds into a drop-down (CompactStrip) to leave the tools their space. -->
+                    <v:CompactStrip x:Name="ModeStrip" VerticalAlignment="Center" Margin="0,4,12,4">
+                        <v:CompactStrip.Items>
+                            <RadioButton Tag="Render" GroupName="RenderMode"
+                                         Style="{StaticResource RenderModeButton}"
+                                         ToolTip="Render — full textures, normal &amp; specular maps" Checked="RenderMode_Changed">
+                                <!-- Matte material ball: lit disc with a soft diffuse shadow crescent, no specular highlight -->
+                                <Canvas Width="16" Height="16">
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
+                                    <Path Fill="#9A9A9A">
+                                        <Path.Data>
+                                            <CombinedGeometry GeometryCombineMode="Exclude">
+                                                <CombinedGeometry.Geometry1>
+                                                    <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
+                                                </CombinedGeometry.Geometry1>
+                                                <CombinedGeometry.Geometry2>
+                                                    <EllipseGeometry Center="5.2,5.2" RadiusX="6.9" RadiusY="6.9" />
+                                                </CombinedGeometry.Geometry2>
+                                            </CombinedGeometry>
+                                        </Path.Data>
+                                    </Path>
+                                </Canvas>
+                            </RadioButton>
+                            <RadioButton Tag="MaterialPreview" GroupName="RenderMode"
+                                         Style="{StaticResource RenderModeButton}" IsChecked="True" Margin="4,0,0,0"
+                                         ToolTip="Material Preview — diffuse texture only, no maps" Checked="RenderMode_Changed">
+                                <!-- Checkered sphere: full material -->
+                                <Canvas Width="16" Height="16">
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
+                                             Stroke="#ECECEC" StrokeThickness="1.3" Fill="Transparent" />
+                                    <Path Fill="#ECECEC"
+                                          Data="M8,1.5 L14.5,1.5 L14.5,8 L8,8 Z  M1.5,8 L8,8 L8,14.5 L1.5,14.5 Z">
+                                        <Path.Clip>
+                                            <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
+                                        </Path.Clip>
+                                    </Path>
+                                </Canvas>
+                            </RadioButton>
+                            <RadioButton Tag="Solid" GroupName="RenderMode"
+                                         Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
+                                         ToolTip="Solid — flat geometry, no textures" Checked="RenderMode_Changed">
+                                <!-- Shaded sphere -->
+                                <Canvas Width="16" Height="16">
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
+                                    <Ellipse Canvas.Left="3.6" Canvas.Top="3.2" Width="4.8" Height="4.8"
+                                             Fill="#FFFFFF" Opacity="0.5" />
+                                </Canvas>
+                            </RadioButton>
+                            <RadioButton Tag="Wireframe" GroupName="RenderMode"
+                                         Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
+                                         ToolTip="Wireframe — mesh edges" Checked="RenderMode_Changed">
+                                <!-- Wireframe sphere: outline + meridian + equator (round, matches the others) -->
+                                <Canvas Width="16" Height="16">
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
+                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                    <Ellipse Canvas.Left="5.3" Canvas.Top="0.75" Width="5.4" Height="14.5"
+                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="5.3" Width="14.5" Height="5.4"
+                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                </Canvas>
+                            </RadioButton>
+                        </v:CompactStrip.Items>
+                    </v:CompactStrip>
+                </v:ToolbarRowPanel>
 
                 <Grid>
                     <vp:D3DImageHost x:Name="Viewport" />
 
                     <!-- Viewport tool shelf (Blender-style): Select · Move · Rotate · Scale.
                          Mutually exclusive; visual selection only (no functionality yet). -->
-                    <Border VerticalAlignment="Top" HorizontalAlignment="Left"
+                    <Border x:Name="ToolShelf" VerticalAlignment="Top" HorizontalAlignment="Left"
                             Margin="12" Padding="5"
                             Background="#99000000" CornerRadius="6">
                         <StackPanel>

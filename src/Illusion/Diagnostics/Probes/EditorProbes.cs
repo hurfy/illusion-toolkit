@@ -4,6 +4,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Illusion.Domain;
 using Illusion.Rendering.Controls;
 using Illusion.Rendering.Gizmos;
@@ -276,10 +277,59 @@ internal static class EditorProbes
             double cw = compactBox.DesiredSize.Width;
             Check("Compact layout has a finite desired width", cw > 0 && !double.IsInfinity(cw), $"desired={cw:F1}");
 
+            CheckHoverPopup(Check);
+
             sb.Insert(0, $"UI PROBE: {pass} passed, {fail} failed\n\n");
         }
         catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
         finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    // The toolbar's hover flyouts (layers list, folded shading modes): resting on the button opens it, merely
+    // crossing it does not, the list survives the pointer travelling into it, and leaving both closes it. Driven
+    // on a bare button+popup pair — the state machine is the thing under test, and a headless run has no mouse.
+    private static void CheckHoverPopup(Action<string, bool, string> check)
+    {
+        var button = new System.Windows.Controls.Primitives.ToggleButton();
+        var list = new System.Windows.Controls.Border();
+        var popup = new System.Windows.Controls.Primitives.Popup { Child = list, PlacementTarget = button };
+        Views.HoverPopup.Attach(button, popup);
+        check("Hover flyout: the popup stops closing itself (hover owns that)", popup.StaysOpen, "");
+
+        // Crossing the button: gone again well before the opening delay is up.
+        Views.HoverPopup.RaiseHover(button, entering: true);
+        Views.HoverPopup.RaiseHover(button, entering: false);
+        Pump(TimeSpan.FromMilliseconds(500));
+        check("Hover flyout: crossing the button leaves it shut", button.IsChecked != true, "");
+
+        // Resting on it.
+        Views.HoverPopup.RaiseHover(button, entering: true);
+        Pump(TimeSpan.FromMilliseconds(120));
+        check("Hover flyout: nothing opens before the delay is up", button.IsChecked != true, "");
+        Pump(TimeSpan.FromMilliseconds(400));
+        check("Hover flyout: resting on the button opens it", button.IsChecked == true, "");
+
+        // Pointer travels from the button into the list itself — the gap between them must not close it.
+        Views.HoverPopup.RaiseHover(button, entering: false);
+        Views.HoverPopup.RaiseHover(list, entering: true);
+        Pump(TimeSpan.FromMilliseconds(600));
+        check("Hover flyout: moving into the list keeps it open", button.IsChecked == true, "");
+
+        // And away from both.
+        Views.HoverPopup.RaiseHover(list, entering: false);
+        Pump(TimeSpan.FromMilliseconds(600));
+        check("Hover flyout: leaving both closes it", button.IsChecked != true, "");
+    }
+
+    // Lets queued dispatcher work — the flyout's timers — actually run: a probe has no message loop of its own.
+    private static void Pump(TimeSpan span)
+    {
+        var frame = new DispatcherFrame();
+        var timer = new DispatcherTimer(span, DispatcherPriority.Background, (_, _) => frame.Continue = false,
+            Dispatcher.CurrentDispatcher);
+        timer.Start();
+        Dispatcher.PushFrame(frame);
+        timer.Stop();
     }
 
     // Renders the bottom-left transform overlay (compact, actions-off Vector3Box at large Mafia coordinates) to a

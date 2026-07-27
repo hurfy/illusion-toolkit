@@ -1,0 +1,58 @@
+<UserControl x:Class="Illusion.Views.CompactStrip"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- A row of toolbar buttons that folds into a drop-down when the toolbar runs short of room. The buttons
+         are not rebuilt in the narrow form — the strip holding them moves into the popup — so their state,
+         styles and handlers are untouched, and there is only ever one of each on screen. -->
+
+    <UserControl.Resources>
+        <!-- Drop button: exactly the toolbar's square icon button (see ToolSquareButton), no chevron — the
+             toolbar is a row of square buttons and this one has no reason to look different. -->
+        <Style x:Key="StripDropButton" TargetType="ToggleButton">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="15" Text="&#xE7C5;"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3D3D3D" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid x:Name="Root">
+        <!-- Wide form: the buttons sit here. Narrow form: this whole strip moves into PopupBox. -->
+        <StackPanel x:Name="ButtonHost" Orientation="Horizontal" VerticalAlignment="Center" />
+
+        <Grid x:Name="DropUi" Visibility="Collapsed">
+            <ToggleButton x:Name="DropBtn" Style="{StaticResource StripDropButton}" />
+            <!-- Opens on hover as well as on click — see HoverPopup, wired in the ctor. -->
+            <Popup x:Name="DropPopup" IsOpen="{Binding IsChecked, ElementName=DropBtn}" Placement="Bottom"
+                   AllowsTransparency="True" PopupAnimation="Fade" Closed="Popup_Closed">
+                <Border x:Name="PopupBox" Background="#232327" BorderBrush="#3AFFFFFF" BorderThickness="1"
+                        CornerRadius="6" Padding="6" Margin="0,3,8,8"
+                        PreviewMouseLeftButtonUp="PopupBox_MouseUp">
+                    <Border.Effect>
+                        <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
+                    </Border.Effect>
+                </Border>
+            </Popup>
+        </Grid>
+    </Grid>
+</UserControl>

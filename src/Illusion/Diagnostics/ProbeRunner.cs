@@ -90,6 +90,11 @@ internal static class ProbeRunner
             case "--probe-ui":
                 EditorProbes.RunUiProbe();
                 return true;
+            // Window layout from the 1280x720 floor up: toolbar groups stay apart and inside the row, no tool
+            // button folds into the overflow menu, the viewport keeps its share. Output: %TEMP%\illusion_layout.txt
+            case "--probe-layout":
+                LayoutProbes.RunLayoutProbe();
+                return true;
             // Save + pack chain: edit a frame's transform → SdsWriter.SaveFrameResource → reload & verify the edit
             // persisted (extracted folder restored after), then repack the folder to a TEMP .sds and re-open it.
             case "--probe-save":

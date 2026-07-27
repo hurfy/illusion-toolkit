@@ -145,6 +145,9 @@ public partial class MainWindow : Window
             gizmo.Attach(Viewport);
         }
 
+        // The layers list is a look, not a decision: hovering the button is enough to open it.
+        HoverPopup.Attach(LayersBtn, LayersPopup);
+
         // Viewport tool shelf → gizmo mode. ToolSelect is the default (select-only, no gizmo).
         ToolSelect.Checked += (_, _) => SetGizmoMode(GizmoMode.None);
         ToolMove.Checked += (_, _) => SetGizmoMode(GizmoMode.Move);
@@ -881,14 +884,14 @@ public partial class MainWindow : Window
 
     // Shading mode (Blender-style): the checked radio drives the viewport render mode.
     // Fires during InitializeComponent (IsChecked="True" on MaterialModeBtn) — guard like the others.
+    // Checked fires on the mode that was just picked, and each button carries its RenderMode in Tag — so the
+    // handler reads the sender instead of the group. That also keeps the buttons nameless, which they have to
+    // be: they live inside CompactStrip, and a UserControl's namescope will not take this window's names.
     private void RenderMode_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsInitialized || Viewport == null) return;
-        Viewport.RenderMode =
-            WireModeBtn.IsChecked == true ? RenderMode.Wireframe :
-            SolidModeBtn.IsChecked == true ? RenderMode.Solid :
-            MaterialPreviewModeBtn.IsChecked == true ? RenderMode.MaterialPreview :
-            RenderMode.Render;
+        if (sender is FrameworkElement { Tag: string tag } && Enum.TryParse(tag, out RenderMode mode))
+            Viewport.RenderMode = mode;
     }
 
     // city_crash is an additive layer: the ShowCrash setter loads/unloads it without a scene reload.
@@ -905,19 +908,19 @@ public partial class MainWindow : Window
         Viewport.ShowCollision = CollisionToggle.IsChecked == true;
     }
 
-    // .nov overlay (one toggle): the AI navigation graph + its AI-mesh boxes. Uploaded at load; only gates drawing.
-    private void Nov_Changed(object sender, RoutedEventArgs e)
+    // AI navigation overlay — both halves at once: the .nov graph + its AI-mesh boxes, and the .nav path objects
+    // (cover / vault-over / action markers). They answer the same question and were never read apart, so the
+    // layers list offers them as one switch. Both are uploaded at load; this only gates drawing.
+    private void AiNav_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsInitialized || Viewport == null) return;
-        Viewport.ShowNov = NovToggle.IsChecked == true;
+        bool show = AiNavToggle.IsChecked == true;
+        Viewport.ShowNov = show;
+        Viewport.ShowNavWorld = show;
     }
 
-    // .nav overlay: AI path objects (cover / vault-over / action markers) drawn as boxes. Only gates drawing.
-    private void NavWorld_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsInitialized || Viewport == null) return;
-        Viewport.ShowNavWorld = NavWorldToggle.IsChecked == true;
-    }
+    // The layers popup closes on an outside click; untoggle the button, or reopening it would take two presses.
+    private void LayersPopup_Closed(object sender, EventArgs e) => LayersBtn.IsChecked = false;
 
     private void ReloadArea()
     {
