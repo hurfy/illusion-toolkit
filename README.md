@@ -19,7 +19,7 @@ silent drift.
 | | |
 |---|---|
 | OS | Windows x64 (WPF + Direct3D 11) |
-| Runtime | .NET SDK **10.0.301** or newer in the same major version (`global.json`, `rollForward: latestFeature`) |
+| Runtime | .NET 10 **Desktop Runtime** x64 to run a release build; the .NET SDK **10.0.301** or newer in the same major version to build one (`global.json`, `rollForward: latestFeature`) |
 | Native runtime | **Microsoft Visual C++ 2015–2022 x64 redistributable** — the bundled `Mafia.Formats.dll` imports `MSVCP140.dll` / `VCRUNTIME140.dll` |
 | GPU | any Direct3D 11 capable adapter |
 | Game | Mafia II (classic) or Mafia II: Definitive Edition, installed |
@@ -34,7 +34,16 @@ Optional, per feature:
 
 ---
 
-## Getting started
+## Download
+
+Grab the latest archive from [Releases](https://github.com/hurfy/illusion-toolkit/releases), unpack
+it anywhere and run `Illusion.exe`. It carries no runtime of its own, so the machine needs the
+[.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) — Windows offers
+to fetch it on first launch if it is missing — and the VC++ redistributable listed above.
+
+---
+
+## Building it yourself
 
 ```powershell
 git clone https://github.com/hurfy/illusion-toolkit

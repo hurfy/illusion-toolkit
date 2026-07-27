@@ -1,0 +1,28 @@
+# The gate every push has to clear before it can be released.
+#
+# There is no test step: the probes under src/Illusion/Diagnostics all need an installed copy of
+# Mafia II to say anything, and none of them is on a runner. What is left is still a real gate --
+# the solution builds with TreatWarningsAsErrors, EnforceCodeStyleInBuild and the IDE0005/CA1823/
+# CS1574 rules promoted to errors, so a rotted doc reference or an unused field fails here.
+#
+# Prebuilt is forced so this measures exactly what the release workflow builds: the committed
+# vendors/Mafia.Formats.dll, never a core built from source.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - run: dotnet build Illusion.slnx -c Release -p:MfCoreMode=Prebuilt

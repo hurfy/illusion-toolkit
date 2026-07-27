@@ -1,0 +1,149 @@
+# Builds the downloadable toolkit and opens a draft GitHub release for it.
+#
+# Normal use: push a tag — `git tag v0.3.0 && git push origin v0.3.0`. The tag is the single source
+# of the version number; nothing in the repository has to be edited to cut a release (the <Version>
+# in Directory.Build.props is only the fallback for local builds).
+#
+# The archive is framework-dependent: the .NET Desktop Runtime is NOT bundled, which keeps it small
+# but means a machine without the runtime shows the "you must install .NET" dialog on first launch.
+# The release notes say so.
+#
+# The native core is NOT built here. Mafia.Formats.dll is taken from vendors/ exactly as committed
+# (MfCoreMode=Prebuilt), so refreshing it from the private core repository before tagging is a
+# manual step — see docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Dry run: builds and uploads a draft the same way, off whatever ref is selected.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v (e.g. 0.3.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so the generated notes can diff against the previous tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # The tag drives the version; a manual run passes it in. Both go through the same check, so a
+      # typo fails here rather than producing a release named "v.0.3".
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:REF_NAME -replace '^v', '' }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Version '$version' is not <major>.<minor>.<patch>[-suffix]."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "name=Illusion-Toolkit-$version-win-x64" >> $env:GITHUB_OUTPUT
+
+      - name: Publish
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          # DebugType=none keeps the .pdb files out: the archive ships what the toolkit needs to
+          # run and nothing else. Managed stack traces stay readable, they just lose line numbers.
+          dotnet publish src/Illusion/Illusion.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:MfCoreMode=Prebuilt `
+            -p:DebugType=none -p:DebugSymbols=false `
+            -p:Version=$env:VERSION `
+            -p:InformationalVersion="$env:VERSION+$env:GITHUB_SHA" `
+            -o "publish/$env:NAME"
+          if ($LASTEXITCODE -ne 0) { throw 'publish failed' }
+
+      # A published tree that is missing a native dependency still starts and then dies on the first
+      # archive it opens. Cheaper to catch it here than in a bug report.
+      - name: Check the payload
+        shell: pwsh
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          $root = "publish/$env:NAME"
+          $required = @(
+            'Illusion.exe',
+            'Illusion.dll',
+            'Mafia.Formats.dll',
+            'tools/M2PhysX/M2PhysX.exe',
+            'BlenderAddon'
+          )
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path $root $_)) }
+          if ($missing) { throw "Missing from the published tree: $($missing -join ', ')" }
+
+          # Nothing but what the toolkit runs on: no symbols, no documentation, no stray sources.
+          $junk = Get-ChildItem $root -Recurse -File -Include *.pdb, *.xml, *.md, *.txt
+          if ($junk) { throw "Not release payload: $(($junk.Name | Sort-Object -Unique) -join ', ')" }
+
+      - name: Archive
+        id: archive
+        shell: pwsh
+        env:
+          NAME: ${{ steps.version.outputs.name }}
+        run: |
+          $zip = "$env:NAME.zip"
+          Compress-Archive -Path "publish/$env:NAME" -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          "size=$size" >> $env:GITHUB_OUTPUT
+
+      # Draft, so the notes can be read (and edited) before anyone can download it. Publish from the
+      # releases page when it looks right.
+      - name: Draft the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP: ${{ steps.archive.outputs.zip }}
+          SHA256: ${{ steps.archive.outputs.sha256 }}
+          SIZE: ${{ steps.archive.outputs.size }}
+        run: |
+          # A literal here-string: the markdown below is full of backticks, which a PowerShell
+          # expandable string would eat as escape characters. Placeholders are filled in after.
+          $notes = @'
+          ### Install
+
+          1. Download `{ZIP}` ({SIZE} MB) and unpack it anywhere.
+          2. Run `Illusion.exe`. On first launch it asks for your Mafia II folder.
+
+          Needs the **[.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)**
+          and the **[Visual C++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)**.
+          Windows offers to fetch the first one if it is missing.
+
+          No game content is included - you need your own copy of Mafia II or Mafia II: Definitive Edition.
+
+          ```
+          SHA256  {SHA256}
+          ```
+          '@
+          $notes = $notes.Replace('{ZIP}', $env:ZIP).Replace('{SIZE}', $env:SIZE).Replace('{SHA256}', $env:SHA256)
+          Set-Content notes.md -Value $notes -Encoding utf8
+          # --generate-notes appends the commit/PR log under the notes above.
+          gh release create "v$env:VERSION" $env:ZIP `
+            --draft `
+            --title "Illusion Toolkit $env:VERSION" `
+            --notes-file notes.md `
+            --generate-notes `
+            --target $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
