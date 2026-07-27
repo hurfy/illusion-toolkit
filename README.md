@@ -1,5 +1,5 @@
 <div align="center">
-    <a href="https://github.com/hurfy/dayz-shop-backend"><img src="https://github.com/user-attachments/assets/70cb3df3-41a9-4f9e-b345-a32f359d5937"></a>
+    <a href="https://github.com/hurfy/dayz-shop-backend"><img src="https://github.com/user-attachments/assets/d3a4d421-6ea3-4154-9c3a-58ca904747b8"></a>
 </div>
 
 <div align="center">
@@ -69,16 +69,16 @@ Settings live in `%LOCALAPPDATA%\Illusion\settings.json`: `GamePath`, `BlenderPa
 ## Key Features
 
 ### Scene Editing
-<img width="2592" height="1426" alt="image 159" src="https://github.com/user-attachments/assets/81e20910-4813-41a3-94a8-42875d801e80" />
+<img width="2592" height="1426" alt="image 159" src="https://github.com/user-attachments/assets/09ee5fc2-7833-4ae0-9dc3-b09a21ac578b" />
 
 ### Collision & AI Navigation
-<img width="2592" height="1426" alt="image 160" src="https://github.com/user-attachments/assets/36f23bd3-eea7-45bf-addf-d32fde936cd5" />
+<img width="2592" height="1426" alt="image 160" src="https://github.com/user-attachments/assets/f1abc0cb-298b-4614-969a-bbb477917b89" />
 
 ### Blender Bridge
-<img width="2592" height="1426" alt="image 162" src="https://github.com/user-attachments/assets/f5504733-8efa-4601-886e-c6931b633e68" />
+<img width="2592" height="1426" alt="image 162" src="https://github.com/user-attachments/assets/6a9f2b01-964a-4fb9-9f8c-f6c715cb9ff0" />
 
 ### Material Editor
-<img width="2592" height="1426" alt="image 161" src="https://github.com/user-attachments/assets/079afeb4-44da-4f5a-93a1-5ee8708ce5fa" />
+<img width="2592" height="1426" alt="image 161" src="https://github.com/user-attachments/assets/acabe0e9-87fd-4944-8dc2-42eda05b24da" />
 
 ## What it does
 
