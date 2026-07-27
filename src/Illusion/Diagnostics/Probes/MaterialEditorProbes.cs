@@ -568,10 +568,10 @@ internal static class MaterialEditorProbes
         SavePng(content, 1000, 640, Path.Combine(Path.GetTempPath(), "illusion_material_editor.png"), sb);
 
         // The restyled Import window shares the same dictionary — a bad StaticResource key would only
-        // surface at runtime, so construct it headless and render its content too. The live app runs
-        // under the Fluent theme (applied AFTER probes in App.OnStartup), whose implicit styles reach
-        // into control templates — render under it too, or theme regressions stay invisible here.
-#pragma warning disable WPF0001 // ThemeMode is experimental; the app opts in the same way
+        // surface at runtime, so construct it headless and render its content too. The live app runs under
+        // Fluent dark (App.OnStartup pins ThemeMode.Dark, AFTER the probe path has returned), whose implicit
+        // styles reach into control templates — render under it too, or theme regressions stay invisible here.
+#pragma warning disable WPF0001 // ThemeMode is experimental; the app pins the same theme
         var import = new ImportWindow(viewport) { ThemeMode = ThemeMode.Dark };
 #pragma warning restore WPF0001
         var fakeTargets = new[] { new { Display = "arpradelna.sds" } };

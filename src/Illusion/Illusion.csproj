@@ -6,7 +6,7 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
-    <!-- WPF0001: ThemeMode (Fluent / system theme) is marked as an experimental API. -->
+    <!-- WPF0001: ThemeMode (the Fluent theme selector) is marked as an experimental API. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
 

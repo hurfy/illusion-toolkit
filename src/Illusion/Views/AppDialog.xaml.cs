@@ -58,7 +58,7 @@ public readonly record struct DialogOutcome(bool Confirmed, bool Checked);
 public partial class AppDialog : Window
 {
     // Segoe MDL2 Assets glyph code point + tint per icon kind (code points kept as ints so the source stays
-    // plain ASCII). Tints read on both light and dark themes. 0 = no glyph.
+    // plain ASCII). Tints are picked to read on the dark surface. 0 = no glyph.
     private static (int GlyphCode, Brush Brush) IconFor(DialogIcon icon) => icon switch
     {
         DialogIcon.Info => (0xE946, Frozen(0x2D, 0x7D, 0xD2)),     // Info        — accent blue

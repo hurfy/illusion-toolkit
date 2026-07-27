@@ -7,13 +7,13 @@
         WindowStartupLocation="CenterOwner">
 
     <!-- Reusable modal: optional status glyph + heading + body text + checkbox, over an OK (notification) or a
-         Cancel/confirm (action) button pair. Native Fluent with theme-neutral gray-alpha surfaces — the same
-         composition as the launcher's status card — so it reads on both light and dark themes; the confirm button
+         Cancel/confirm (action) button pair. Native Fluent dark with gray-alpha surfaces — the same composition
+         as the launcher's status card, so the two read as one app; the confirm button
          uses the app accent for emphasis. Any part left unset collapses cleanly (a Collapsed element takes no
          space, margins included), and the icon lives in a left gutter that disappears with it. -->
     <Window.Resources>
         <!-- One command-bar button pair, both on the same 4px-radius pill so the pair reads as one control.
-             Confirm = app accent (the launcher's Play blue); Cancel = a neutral theme-adaptive surface. -->
+             Confirm = app accent (the launcher's Play blue); Cancel = a neutral gray-alpha surface. -->
         <Style x:Key="AccentButton" TargetType="Button">
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Cursor" Value="Hand" />
@@ -45,7 +45,7 @@
         </Style>
 
         <!-- Neutral secondary (Cancel): same size/shape as the accent button, gray-alpha fill + hairline so it
-             reads on both themes. Foreground is left to inherit the theme's control text (light/dark adaptive). -->
+             sits back from the confirm button. Foreground is left to inherit the theme's control text. -->
         <Style x:Key="NeutralButton" TargetType="Button">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="MinWidth" Value="92" />

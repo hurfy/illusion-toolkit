@@ -41,10 +41,13 @@ public partial class App : Application
         // deletes them. Best-effort and off the critical path.
         Task.Run(Assets.Collisions.PhysXCooker.SweepStaleScratch);
 
-        // Follow the OS light/dark setting. ThemeMode is still [Experimental] in WPF (WPF0001);
-        // we opt in deliberately and keep the suppression scoped to this one call.
+        // One theme, always dark. Everything the toolkit paints itself — the editor panels, the shared
+        // styles in EditorStyles.xaml, the custom controls — is written for a dark surface, so the Fluent
+        // chrome around it has to be dark too; following the OS setting would frame those panels in light
+        // chrome on a light Windows. ThemeMode is still [Experimental] in WPF (WPF0001); we opt in
+        // deliberately and keep the suppression scoped to this one call.
 #pragma warning disable WPF0001
-        ThemeMode = ThemeMode.System;
+        ThemeMode = ThemeMode.Dark;
 #pragma warning restore WPF0001
 
         StartMcpServer();

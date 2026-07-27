@@ -426,8 +426,12 @@ public partial class MainWindow : Window
         string? exe = candidates.FirstOrDefault(File.Exists);
         if (exe == null)
         {
-            MessageBox.Show(this, "Mafia II executable not found (looked for mafia2.exe / launcher.exe).",
-                "Play", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Play",
+                Icon = DialogIcon.Warning,
+                Text = "Mafia II executable not found (looked for mafia2.exe / launcher.exe).",
+            });
             return;
         }
         LaunchExe(exe);
@@ -777,8 +781,13 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "Failed to launch: " + ex.Message,
-                "Launch", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Launch",
+                Icon = DialogIcon.Error,
+                Heading = "Failed to launch",
+                Text = ex.Message,
+            });
         }
     }
 

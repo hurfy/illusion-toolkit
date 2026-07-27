@@ -6,10 +6,10 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize">
 
-    <!-- Native Fluent, like in MainWindow (map editor): no custom button outline,
-         system accent on hover/focus, Segoe MDL2 glyphs, Consolas for paths, theme-neutral
-         gray-alpha surfaces (readable in both light and dark themes). SizeToContent="Height"
-         fits the height to the content — no empty gaps. -->
+    <!-- Native Fluent dark (the app pins ThemeMode.Dark), like in MainWindow (map editor): no custom
+         button outline, system accent on hover/focus, Segoe MDL2 glyphs, Consolas for paths, gray-alpha
+         surfaces over the dark window. SizeToContent="Height" fits the height to the content — no empty
+         gaps. -->
     <DockPanel>
         <!-- The MCP server the whole application shares: its state on the left, its address on the
              right (click to copy). It runs from launch to exit, so this bar is the one place that
@@ -69,8 +69,8 @@
                 </Grid>
             </StackPanel>
 
-            <!-- Status card: exactly one panel is visible at a time. Theme-neutral
-                 surface (gray 50% + low alpha reads on both light and dark themes). -->
+            <!-- Status card: exactly one panel is visible at a time. Gray 50% at a low
+                 alpha — a surface that lifts off the dark window without a hard fill. -->
             <Border Grid.Row="2" Margin="0,0,0,22" CornerRadius="6"
                     Background="#14808080" BorderBrush="#28808080" BorderThickness="1"
                     Padding="12,10" MinHeight="52">
