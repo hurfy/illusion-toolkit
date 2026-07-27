@@ -6,6 +6,13 @@
          cloning styles locally. Secondary windows leave their Background unset — the Fluent theme paints
          them the same as MainWindow, so the palette never drifts between windows. -->
 
+    <!-- The surface every drop-down in the app lands on. One brush pair rather than five copies of a literal,
+         so the popups cannot drift apart. It sits in the same family as the toolbar band (#2D2D2D) and a step
+         above the windows it floats over (#202020); the edge is a neutral grey, because a white-alpha hairline
+         read as a lit outline against the dark chrome rather than as a border. -->
+    <SolidColorBrush x:Key="PopupSurface" Color="#2D2D2D" />
+    <SolidColorBrush x:Key="PopupEdge" Color="#454545" />
+
     <!-- Buttons -->
     <Style x:Key="AccentButton" TargetType="Button">
         <Setter Property="Foreground" Value="White" />

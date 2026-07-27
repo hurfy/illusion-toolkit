@@ -625,7 +625,8 @@
                                 <Popup x:Name="LayersPopup" IsOpen="{Binding IsChecked, ElementName=LayersBtn}"
                                        Placement="Bottom" PlacementTarget="{Binding ElementName=LayersBtn}"
                                        AllowsTransparency="True" PopupAnimation="Fade" Closed="LayersPopup_Closed">
-                                    <Border Background="#232327" BorderBrush="#3AFFFFFF" BorderThickness="1"
+                                    <Border Background="{StaticResource PopupSurface}"
+                                            BorderBrush="{StaticResource PopupEdge}" BorderThickness="1"
                                             CornerRadius="6" Padding="10,8" Margin="0,3,8,8" Width="264">
                                         <Border.Effect>
                                             <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2"

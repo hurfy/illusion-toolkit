@@ -45,7 +45,8 @@
             <!-- Opens on hover as well as on click — see HoverPopup, wired in the ctor. -->
             <Popup x:Name="DropPopup" IsOpen="{Binding IsChecked, ElementName=DropBtn}" Placement="Bottom"
                    AllowsTransparency="True" PopupAnimation="Fade" Closed="Popup_Closed">
-                <Border x:Name="PopupBox" Background="#232327" BorderBrush="#3AFFFFFF" BorderThickness="1"
+                <Border x:Name="PopupBox" Background="{StaticResource PopupSurface}"
+                        BorderBrush="{StaticResource PopupEdge}" BorderThickness="1"
                         CornerRadius="6" Padding="6" Margin="0,3,8,8"
                         PreviewMouseLeftButtonUp="PopupBox_MouseUp">
                     <Border.Effect>

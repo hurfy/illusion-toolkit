@@ -11,7 +11,8 @@
         <ToggleButton x:Name="Btn" Style="{StaticResource DropButton}" Checked="Btn_Checked" />
         <Popup IsOpen="{Binding IsChecked, ElementName=Btn}" StaysOpen="False" Placement="Bottom"
                AllowsTransparency="True" PopupAnimation="Fade" Closed="Popup_Closed">
-            <Border Background="#232327" BorderBrush="#3AFFFFFF" BorderThickness="1" CornerRadius="6"
+            <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource PopupEdge}"
+                    BorderThickness="1" CornerRadius="6"
                     Padding="4" MaxHeight="300" Margin="0,3,8,8"
                     MinWidth="{Binding ActualWidth, ElementName=Btn}">
                 <Border.Effect>
