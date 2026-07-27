@@ -20,7 +20,7 @@ silent drift.
 |---|---|
 | OS | Windows x64 (WPF + Direct3D 11) |
 | Runtime | .NET SDK **10.0.301** or newer in the same major version (`global.json`, `rollForward: latestFeature`) |
-| Native runtime | **Microsoft Visual C++ 2015–2022 x64 redistributable** — the bundled `native/Mafia.Formats.dll` imports `MSVCP140.dll` / `VCRUNTIME140.dll` |
+| Native runtime | **Microsoft Visual C++ 2015–2022 x64 redistributable** — the bundled `Mafia.Formats.dll` imports `MSVCP140.dll` / `VCRUNTIME140.dll` |
 | GPU | any Direct3D 11 capable adapter |
 | Game | Mafia II (classic) or Mafia II: Definitive Edition, installed |
 
@@ -44,7 +44,7 @@ dotnet run --project src/Illusion
 ```
 
 Nothing beyond the .NET SDK is required to build: the native core ships as a prebuilt DLL in
-`native/`.
+`vendors/`.
 
 On first run the launcher asks for the game folder — point it at the install root or its `pc`
 folder — and unpacks every `.sds` into a `<game>\resources` mirror. That mirror is what the editor
@@ -110,7 +110,7 @@ does not carry yet. The preview sphere is rendered with the map's real textures 
 
 Hulls render as a translucent overlay and behave like ordinary objects: select, move, rotate,
 delete, duplicate. **Scaling** re-cooks a real PhysX triangle mesh through the vendored
-`tools/M2PhysX/M2PhysX.exe`; if the cooker is unavailable or refuses, the hull snaps back and
+`vendors/M2PhysX/M2PhysX.exe`; if the cooker is unavailable or refuses, the hull snaps back and
 nothing is written. **Remove unused hulls** sweeps hulls no placement references. Authoring a
 brand-new hull shape happens in Blender and comes back through the bridge.
 
@@ -180,8 +180,9 @@ Illusion.slnx
 ├── src/Illusion.Bridge/      Blender exchange container (.ilx) and NDJSON control protocol
 ├── src/Illusion.Mcp/         the embedded MCP endpoint (loopback Kestrel)
 ├── src/Illusion/             WPF shell, viewport host, editors, dialogs, headless probes
-├── native/Mafia.Formats.dll  the native core — every byte-level codec, shipped as a binary
-├── tools/M2PhysX/            the PhysX 2.8 triangle-mesh cooker (see its own README)
+├── vendors/                  the two binaries this repository ships rather than builds:
+│                               Mafia.Formats.dll (the native core) and M2PhysX/ (the PhysX 2.8
+│                               triangle-mesh cooker — see its own README)
 └── docs/golden-snapshot.txt  hashes of every decoded archive and format file in the installation
 ```
 
@@ -203,7 +204,7 @@ repository.
 
 | Mode | When | Needs |
 |---|---|---|
-| **Prebuilt** (the default) | `native/Mafia.Formats.dll` is used as shipped | nothing beyond the .NET SDK |
+| **Prebuilt** (the default) | `vendors/Mafia.Formats.dll` is used as shipped | nothing beyond the .NET SDK |
 | **Source** | the core's sources are present beside this repo or named by `MfCoreSource` | Visual Studio with "Desktop development with C++" and its bundled CMake/Ninja; `dotnet build` then drives CMake itself |
 
 Force either with `-p:MfCoreMode=Source|Prebuilt`. In Source mode the core is validated before
@@ -292,8 +293,8 @@ The format work this toolkit is built on:
 
 - **[MafiaToolkit](https://github.com/Greavesy1899/MafiaToolkit)** by Greavesy (MIT) — the parser
   the native core was rewritten from, the specifications behind the ItemDesc, Collision, Actors and
-  NAV codecs, and the origin of `tools/M2PhysX/M2PhysX.exe`, the PhysX 2.8 cooker vendored here
-  (see [its README](tools/M2PhysX/README.md)); it carries no NVIDIA code and needs NVIDIA's own
+  NAV codecs, and the origin of `vendors/M2PhysX/M2PhysX.exe`, the PhysX 2.8 cooker vendored here
+  (see [its README](vendors/M2PhysX/README.md)); it carries no NVIDIA code and needs NVIDIA's own
   PhysX runtime installed to work.
 - **Gibbed.Illusion / Gibbed.Mafia2** by Rick Gibbed (zlib) — the earliest work on these formats.
 - **OPCODE** by Pierre Terdiman — the collision trees; the cooked-mesh layout mirrors NVIDIA

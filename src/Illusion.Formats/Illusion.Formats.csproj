@@ -16,7 +16,7 @@
 
          Source   — the core's sources are at hand, so CMake + Ninja build them as part of
                     `dotnet build` and the fresh DLL is collected.
-         Prebuilt — no sources: a released Mafia.Formats.dll sits in native/ and is copied
+         Prebuilt — no sources: a released Mafia.Formats.dll sits in vendors/ and is copied
                     as is. This is how the public toolkit repository builds — no MSVC, no
                     CMake, no Ninja needed to work on the C# side.
 
@@ -33,7 +33,7 @@
   <PropertyGroup>
     <MfCoreInRepo>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Mafia.Formats'))</MfCoreInRepo>
     <MfCoreBeside>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\illusion-core\src\Mafia.Formats'))</MfCoreBeside>
-    <MfPrebuiltDll>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\native\Mafia.Formats.dll'))</MfPrebuiltDll>
+    <MfPrebuiltDll>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\vendors\Mafia.Formats.dll'))</MfPrebuiltDll>
 
     <MfCoreRequested Condition="'$(MfCoreSource)' != ''">$([System.IO.Path]::GetFullPath('$(MfCoreSource)'))</MfCoreRequested>
 
@@ -104,7 +104,7 @@
     <Error Condition="'$(MfCoreDir)' == '' AND '$(MfCoreRequested)' != ''"
            Text="Mafia.Formats: MfCoreSource points at '$(MfCoreRequested)', which does not exist." />
     <Error Condition="'$(MfCoreDir)' == ''"
-           Text="Mafia.Formats: MfCoreMode=Source was requested but no core sources were found (looked at '$(MfCoreInRepo)' and '$(MfCoreBeside)'). Point MfCoreSource at the core, or build with -p:MfCoreMode=Prebuilt to use native\Mafia.Formats.dll." />
+           Text="Mafia.Formats: MfCoreMode=Source was requested but no core sources were found (looked at '$(MfCoreInRepo)' and '$(MfCoreBeside)'). Point MfCoreSource at the core, or build with -p:MfCoreMode=Prebuilt to use '$(MfPrebuiltDll)'." />
     <Error Condition="!Exists('$(MfCoreDir)\CMakeLists.txt') OR !Exists('$(MfCoreDir)\src\abi\mf_abi.h') OR !Exists('$(MfCoreDir)\schema\model.mfs')"
            Text="Mafia.Formats: '$(MfCoreDir)' does not look like the native core — expected CMakeLists.txt, src\abi\mf_abi.h and schema\model.mfs to be there." />
 
@@ -128,7 +128,7 @@
           Inputs="@(MfNativeInput)"
           Outputs="$(MfNativeDll)">
     <Error Condition="!Exists('$(MfVcVars)')"
-           Text="Mafia.Formats: no Visual Studio C++ toolchain found (looked for vcvars64.bat under '$(ProgramFiles)\Microsoft Visual Studio'). Install the 'Desktop development with C++' workload, set MfVsRoot, or build with -p:MfCoreMode=Prebuilt to use the released native\Mafia.Formats.dll." />
+           Text="Mafia.Formats: no Visual Studio C++ toolchain found (looked for vcvars64.bat under '$(ProgramFiles)\Microsoft Visual Studio'). Install the 'Desktop development with C++' workload, set MfVsRoot, or build with -p:MfCoreMode=Prebuilt to use the released '$(MfPrebuiltDll)'." />
     <Error Condition="!Exists('$(MfCMake)') OR !Exists('$(MfNinja)')"
            Text="Mafia.Formats: the Visual Studio at '$(MfVsRoot)' has no bundled CMake/Ninja. Install the 'C++ CMake tools for Windows' component." />
     <Exec Condition="!Exists('$(MfNativeBuildDir)\build.ninja')"
@@ -147,7 +147,11 @@
            Text="Mafia.Formats: no native core to build against — neither sources (see MfCoreSource) nor a prebuilt '$(MfPrebuiltDll)'. Fetch the DLL from the core's releases, or point MfCoreSource at the core sources." />
     <ItemGroup>
       <!-- Content, so the DLL (and, in a source build, the PDB or ASan runtime beside it) flows
-           into every referencing project's output directory the same way M2PhysX.exe does. -->
+           into every referencing project's output directory the same way M2PhysX.exe does. Link is
+           what flattens it next to the executable — which is also why the prebuilt DLL is kept in
+           vendors\ and not inside this project's folder: for a file in the project cone the SDK
+           copies it by its relative path (measured — neither Link nor TargetPath overrides that),
+           so it would land in a subfolder of the output where the loader does not look. -->
       <Content Condition="'$(MfCoreMode)' == 'Source'"
                Include="$(MfNativeBinDir)\*.dll" Link="%(Filename)%(Extension)"
                CopyToOutputDirectory="PreserveNewest" Visible="false" />

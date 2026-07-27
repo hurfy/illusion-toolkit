@@ -40,9 +40,11 @@
     <Content Include="BlenderAddon\**" CopyToOutputDirectory="PreserveNewest" />
 
     <!-- The PhysX 2.8 triangle-mesh cooker, shelled out to when a hull's shape changes. It is an
-         irreplaceable 18 KB MIT binary (see tools\M2PhysX\README.md) and needs no NVIDIA DLLs beside it —
-         the engine comes from the user's PhysX System Software install. -->
-    <Content Include="..\..\tools\M2PhysX\M2PhysX.exe" Link="tools\M2PhysX\M2PhysX.exe"
+         irreplaceable 18 KB MIT binary (see vendors\M2PhysX\README.md) and needs no NVIDIA DLLs beside it —
+         the engine comes from the user's PhysX System Software install. It is kept under vendors\ with the
+         other binary this repository ships rather than builds, but lands in tools\ beside the executable:
+         that is the layout the user sees, and what PhysXRuntimeLocator looks in. -->
+    <Content Include="..\..\vendors\M2PhysX\M2PhysX.exe" Link="tools\M2PhysX\M2PhysX.exe"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
