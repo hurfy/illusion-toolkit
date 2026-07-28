@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using Illusion.Assets;
@@ -437,7 +437,8 @@ internal sealed class DistrictStreamer
             foreach (FrameObjectSingleMesh mesh in stale)
             {
                 if (!src.Leaves.TryGetValue(mesh, out SceneNode? leaf) || leaf.Mesh == null) continue;
-                _host.Rnd.UpdateInstances(leaf.Mesh, src.Placements.MatricesFor(mesh));
+                CrashPlacements.Cloud cloud = src.Placements.CloudFor(mesh);
+                _host.Rnd.UpdateInstances(leaf.Mesh, cloud.Matrices, cloud.DrawDistances);
             }
         }
     }

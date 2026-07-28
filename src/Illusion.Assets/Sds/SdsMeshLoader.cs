@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Illusion.Assets.Adapters;
 using Illusion.Domain;
 using Illusion.Formats.Archive;
@@ -137,7 +137,7 @@ public static class SdsMeshLoader
 
         var document = new SceneDocumentAdapter(fr, crashSds);
         CrashPlacements? placements = LoadPlacements(crashSds, extracted, fr);
-        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildMatrixMap());
+        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildClouds());
         return (roots, meshes, document, placements);
     }
 
@@ -186,7 +186,7 @@ public static class SdsMeshLoader
     // Builds tree roots from FrameResource. instanceMap (if provided) marks prototype meshes as instanced.
     private static List<SdsFrameNode> BuildRoots(FrameResource fr, SceneDocumentAdapter document,
         IReadOnlyCollection<string> others,
-        List<MeshData> meshes, IReadOnlyDictionary<FrameObjectSingleMesh, Matrix4x4[]>? instanceMap)
+        List<MeshData> meshes, IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap)
     {
         var roots = new List<SdsFrameNode>();
 
@@ -245,15 +245,16 @@ public static class SdsMeshLoader
 
     private static SdsFrameNode BuildNode(FrameObjectBase obj, SceneDocumentAdapter document,
         Dictionary<FrameObjectBase, List<FrameObjectBase>> childrenOf, List<MeshData> meshes,
-        IReadOnlyDictionary<FrameObjectSingleMesh, Matrix4x4[]>? instanceMap, HashSet<FrameObjectBase> claimed)
+        IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap,
+        HashSet<FrameObjectBase> claimed)
     {
         var node = new SdsFrameNode { Name = obj.Name?.ToString() ?? "?", Kind = KindOf(obj), Source = document.Node(obj) };
 
         if (obj is FrameObjectSingleMesh sm && sm.Geometry != null)
         {
-            Matrix4x4[]? instances = null;
-            instanceMap?.TryGetValue(sm, out instances);
-            MeshData? md = TryConvert(sm, instances);
+            CrashPlacements.Cloud cloud = default;
+            instanceMap?.TryGetValue(sm, out cloud);
+            MeshData? md = TryConvert(sm, cloud.Matrices, cloud.DrawDistances);
             if (md != null) { node.Mesh = md; meshes.Add(md); }
         }
 
@@ -421,7 +422,8 @@ public static class SdsMeshLoader
     }
 
     // Internal for the frame duplicator, which needs a render-ready MeshData for a freshly cloned object.
-    internal static MeshData? TryConvert(FrameObjectSingleMesh mesh, Matrix4x4[]? instances = null)
+    internal static MeshData? TryConvert(FrameObjectSingleMesh mesh, Matrix4x4[]? instances = null,
+        float[]? drawDistances = null)
     {
         try
         {
@@ -445,6 +447,7 @@ public static class SdsMeshLoader
                 Indices = decoded.Indices,
                 Parts = parts,
                 Instances = instances,
+                InstanceDrawDistances = drawDistances,
             };
         }
         catch

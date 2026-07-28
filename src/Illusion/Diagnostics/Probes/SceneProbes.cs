@@ -1590,7 +1590,7 @@ internal static class SceneProbes
     // instances/triangles survive a frustum cull at three representative camera poses.
     private static void AppendChunkStats(StringBuilder sb, List<MeshData> allMeshes, Vector3 mapCentre)
     {
-        int chunkMeshes = 0, totalCells = 0, minPerCell = int.MaxValue, maxPerCell = 0;
+        int chunkMeshes = 0, totalCells = 0, minPerCell = int.MaxValue, maxPerCell = 0, ranged = 0;
         long sumCellCounts = 0;
         bool invariantOk = true;
         var chunked = new List<(MeshData Mesh, InstanceCell[] Cells)>();
@@ -1600,7 +1600,8 @@ internal static class SceneProbes
             var lmin = new Vector3(float.MaxValue);
             var lmax = new Vector3(float.MinValue);
             foreach (Vector3 p in md.Positions) { lmin = Vector3.Min(lmin, p); lmax = Vector3.Max(lmax, p); }
-            (Matrix4x4[] sorted, InstanceCell[] cells) = InstanceChunks.Build(md.Instances, lmin, lmax);
+            (Matrix4x4[] sorted, InstanceCell[] cells) =
+                InstanceChunks.Build(md.Instances, lmin, lmax, md.InstanceDrawDistances);
 
             chunkMeshes++;
             totalCells += cells.Length;
@@ -1610,6 +1611,7 @@ internal static class SceneProbes
                 cellSum += c.Count;
                 minPerCell = Math.Min(minPerCell, (int)c.Count);
                 maxPerCell = Math.Max(maxPerCell, (int)c.Count);
+                if (c.DrawDistance > 0f) ranged++;
             }
             sumCellCounts += cellSum;
             if (cellSum != md.Instances.Length || sorted.Length != md.Instances.Length) invariantOk = false;
@@ -1619,7 +1621,8 @@ internal static class SceneProbes
         sb.AppendLine($"\nInstanceChunks (cell={InstanceChunks.CellSize:F0}m): meshes={chunkMeshes} cells={totalCells} " +
                       $"instances/cell min={(chunkMeshes > 0 ? minPerCell : 0)} " +
                       $"avg={(totalCells > 0 ? (double)sumCellCounts / totalCells : 0):F1} max={maxPerCell} " +
-                      $"| SUM(cells)==instances: {(invariantOk ? "OK" : "FAIL")}");
+                      $"| SUM(cells)==instances: {(invariantOk ? "OK" : "FAIL")} " +
+                      $"| cells carrying a draw range: {ranged}/{totalCells}");
 
         // Absolute Z everywhere: the Translokator bounds reach far below the surface, so their Z
         // centre (~-1259 m) is deep underground — offsetting from it would place poses under the map.
@@ -1636,7 +1639,7 @@ internal static class SceneProbes
             cam.LookAt(eye, at);
             Frustum frustum = Frustum.FromMatrix(cam.ViewProjection);
 
-            long visInst = 0, visTris = 0, allInst = 0, allTris = 0;
+            long visInst = 0, visTris = 0, allInst = 0, allTris = 0, rangedInst = 0;
             foreach ((MeshData md, InstanceCell[] cells) in chunked)
             {
                 allInst += md.Instances!.Length;
@@ -1646,12 +1649,29 @@ internal static class SceneProbes
                     if (!frustum.Intersects(c.Min, c.Max)) continue;
                     visInst += c.Count;
                     visTris += (long)md.TriangleCount * c.Count;
+                    // …and again with the per-object range the game itself draws at, which is the default.
+                    if (c.DrawDistance > 0f && DistanceSqToAabb(eye, c.Min, c.Max) > c.DrawDistance * c.DrawDistance)
+                    {
+                        continue;
+                    }
+                    rangedInst += c.Count;
                 }
             }
             sb.AppendLine($"  cull[{pose}]: instances {visInst}/{allInst} " +
                           $"({(allInst > 0 ? 100.0 * visInst / allInst : 0):F1}%), tris {visTris}/{allTris} " +
-                          $"({(allTris > 0 ? 100.0 * visTris / allTris : 0):F1}%)");
+                          $"({(allTris > 0 ? 100.0 * visTris / allTris : 0):F1}%)" +
+                          $" | with game draw range: {rangedInst} " +
+                          $"({(allInst > 0 ? 100.0 * rangedInst / allInst : 0):F1}%)");
         }
+    }
+
+    // Squared distance from a point to an AABB (0 inside) — the renderer's own per-cell range test.
+    private static float DistanceSqToAabb(Vector3 p, Vector3 min, Vector3 max)
+    {
+        float dx = MathF.Max(MathF.Max(min.X - p.X, 0f), p.X - max.X);
+        float dy = MathF.Max(MathF.Max(min.Y - p.Y, 0f), p.Y - max.Y);
+        float dz = MathF.Max(MathF.Max(min.Z - p.Z, 0f), p.Z - max.Z);
+        return (dx * dx) + (dy * dy) + (dz * dz);
     }
 
     // Collects groupRef prototype-meshes with their local transform relative to the prototype root

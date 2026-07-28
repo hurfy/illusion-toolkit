@@ -11,6 +11,10 @@ public struct InstanceCell
     public uint Count;   // instances in the cell
     public Vector3 Min;  // world AABB over every instance-transformed prototype corner
     public Vector3 Max;
+
+    /// <summary>How far away the game still draws these copies (0 = always). Every copy in a cell shares one
+    /// value — the binning splits by distance precisely so this can be a per-cell test.</summary>
+    public float DrawDistance;
 }
 
 /// <summary>
@@ -31,20 +35,27 @@ public static class InstanceChunks
     /// Cell AABBs transform the 8 corners of the prototype's local AABB by every instance matrix —
     /// conservative under rotation/scale, always a superset, safe for culling.
     /// </summary>
+    /// <param name="drawDistances">Per-instance draw distance (parallel to <paramref name="instances"/>), or null
+    /// when the cloud is drawn regardless of range. Copies with different distances go into different cells even
+    /// when they stand in the same place, so the renderer can drop a cell on distance alone.</param>
     public static (Matrix4x4[] Sorted, InstanceCell[] Cells) Build(
-        Matrix4x4[] instances, Vector3 localMin, Vector3 localMax)
+        Matrix4x4[] instances, Vector3 localMin, Vector3 localMax, float[]? drawDistances = null)
     {
-        var bins = new Dictionary<(int X, int Y), List<int>>();
+        var bins = new Dictionary<(int X, int Y, float Distance), List<int>>();
         for (int i = 0; i < instances.Length; i++)
         {
             Vector3 t = instances[i].Translation;
-            (int, int) key = ((int)MathF.Floor(t.X / CellSize), (int)MathF.Floor(t.Y / CellSize));
+            float distance = drawDistances != null && i < drawDistances.Length ? drawDistances[i] : 0f;
+            (int, int, float) key = ((int)MathF.Floor(t.X / CellSize), (int)MathF.Floor(t.Y / CellSize), distance);
             if (!bins.TryGetValue(key, out List<int>? list)) { list = new List<int>(); bins[key] = list; }
             list.Add(i);
         }
 
-        var keys = new List<(int X, int Y)>(bins.Keys);
-        keys.Sort((a, b) => a.Y != b.Y ? a.Y.CompareTo(b.Y) : a.X.CompareTo(b.X));
+        var keys = new List<(int X, int Y, float Distance)>(bins.Keys);
+        keys.Sort((a, b) =>
+            a.Y != b.Y ? a.Y.CompareTo(b.Y)
+            : a.X != b.X ? a.X.CompareTo(b.X)
+            : a.Distance.CompareTo(b.Distance));
 
         // A prototype with no vertices has an inverted local AABB — fall back to instance translations.
         bool hasLocal = localMin.X <= localMax.X;
@@ -81,7 +92,14 @@ public static class InstanceChunks
                     max = Vector3.Max(max, m.Translation);
                 }
             }
-            cells[c] = new InstanceCell { Start = start, Count = (uint)idx.Count, Min = min, Max = max };
+            cells[c] = new InstanceCell
+            {
+                Start = start,
+                Count = (uint)idx.Count,
+                Min = min,
+                Max = max,
+                DrawDistance = keys[c].Distance,
+            };
         }
         return (sorted, cells);
     }

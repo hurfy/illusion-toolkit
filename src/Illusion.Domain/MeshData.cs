@@ -27,6 +27,13 @@ public sealed class MeshData
     /// </summary>
     public Matrix4x4[]? Instances { get; init; }
 
+    /// <summary>
+    /// How far away the game still draws each copy, parallel to <see cref="Instances"/>. The crash table
+    /// carries this per object (a bin at 20 m, a billboard at 300 m), and honouring it is what makes the
+    /// viewport show the same clutter the game does. null (or 0 for an entry) = always drawn.
+    /// </summary>
+    public float[]? InstanceDrawDistances { get; init; }
+
     public int VertexCount => Positions.Length;
     public int TriangleCount => Indices.Length / 3;
 }

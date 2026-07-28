@@ -37,27 +37,32 @@ public sealed class CrashPlacements
     public IReadOnlyList<FrameObjectSingleMesh> MeshesOf(Formats.Translokator.Object row) =>
         _byRow.TryGetValue(row, out List<FrameObjectSingleMesh>? meshes) ? meshes : [];
 
+    /// <summary>One prototype's copies: where each stands, and how far away the game still draws it.</summary>
+    public readonly record struct Cloud(Matrix4x4[] Matrices, float[] DrawDistances);
+
     /// <summary>
-    /// The world matrices every copy currently puts this prototype mesh at — recomputed from the live table, so
-    /// it reflects edits made since the load. Same composition the loader used: the mesh's transform inside its
-    /// prototype, then the copy's own placement.
+    /// Every copy of this prototype mesh, recomputed from the live table so it reflects edits made since the
+    /// load. Same composition the loader used: the mesh's transform inside its prototype, then the copy's own
+    /// placement. Each copy carries its row's draw distance — the table holds that per object, not per copy.
     /// </summary>
-    public Matrix4x4[] MatricesFor(FrameObjectSingleMesh mesh)
+    public Cloud CloudFor(FrameObjectSingleMesh mesh)
     {
         if (!_byMesh.TryGetValue(mesh, out List<(Formats.Translokator.Object Row, Matrix4x4 Local)>? uses))
         {
-            return [];
+            return new Cloud([], []);
         }
 
         var matrices = new List<Matrix4x4>();
+        var distances = new List<float>();
         foreach ((Formats.Translokator.Object row, Matrix4x4 local) in uses)
         {
             foreach (Instance copy in row.Instances)
             {
                 matrices.Add(local * TransformMath.Compose(copy.Quaternion, new Vector3(copy.Scale), copy.Position));
+                distances.Add(row.GridMax);
             }
         }
-        return matrices.ToArray();
+        return new Cloud(matrices.ToArray(), distances.ToArray());
     }
 
     /// <summary>Where this mesh sits inside the row's prototype — the left half of a copy's world matrix.
@@ -74,11 +79,11 @@ public sealed class CrashPlacements
         return Matrix4x4.Identity;
     }
 
-    /// <summary>The prototype-mesh → copy-matrices map the mesh loader needs to mark meshes as instanced.</summary>
-    public Dictionary<FrameObjectSingleMesh, Matrix4x4[]> BuildMatrixMap()
+    /// <summary>The prototype-mesh → copies map the mesh loader needs to mark meshes as instanced.</summary>
+    public Dictionary<FrameObjectSingleMesh, Cloud> BuildClouds()
     {
-        var map = new Dictionary<FrameObjectSingleMesh, Matrix4x4[]>(_byMesh.Count);
-        foreach (FrameObjectSingleMesh mesh in _byMesh.Keys) map[mesh] = MatricesFor(mesh);
+        var map = new Dictionary<FrameObjectSingleMesh, Cloud>(_byMesh.Count);
+        foreach (FrameObjectSingleMesh mesh in _byMesh.Keys) map[mesh] = CloudFor(mesh);
         return map;
     }
 

@@ -943,6 +943,14 @@ public partial class MainWindow : Window
         Viewport.ShowCrash = CrashToggle.IsChecked == true;
     }
 
+    // Whether crash props obey the per-object range their table gives them (what the game draws), or are all
+    // drawn at any distance. Only affects drawing — nothing is loaded or unloaded.
+    private void CrashDistance_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized || Viewport == null) return;
+        Viewport.CrashGameDrawDistance = CrashDistanceToggle.IsChecked == true;
+    }
+
     // Collision is an additive per-district layer: the ShowCollision setter loads/unloads it without a scene reload.
     private void Collision_Changed(object sender, RoutedEventArgs e)
     {

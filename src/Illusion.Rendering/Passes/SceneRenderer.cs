@@ -155,6 +155,12 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// Off by default — enabling it makes distant clutter pop in/out, a visible behavior change.</summary>
     public float InstanceDrawDistance { get; set; }
 
+    /// <summary>Whether a cloud honours the per-object draw distance the source data carries (the crash table
+    /// gives a bin 20 m and a billboard 300 m). On by default: it is what the game itself does, so the viewport
+    /// shows the clutter the player would see — and it drops most of the city_crash draw load. Turning it off
+    /// draws every copy at any range.</summary>
+    public bool HonorInstanceDrawDistance { get; set; } = true;
+
     // Scratch for the instanced pass: visible instance ranges of one mesh (contiguous cells merged).
     private readonly List<(uint Start, uint Count)> _visibleRanges = new();
 
@@ -298,10 +304,10 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// <summary>Replaces the copies of an instanced mesh in place — a crash placement was moved, added or
     /// removed. Only the matrix buffer is rebuilt; the mesh keeps its geometry, parts and texture leases, and
     /// stays in the render list.</summary>
-    public void UpdateInstances(GpuMesh mesh, System.Numerics.Matrix4x4[] instances)
+    public void UpdateInstances(GpuMesh mesh, System.Numerics.Matrix4x4[] instances, float[]? drawDistances = null)
     {
         ArgumentNullException.ThrowIfNull(mesh);
-        mesh.SetInstances(_gpu, instances);
+        mesh.SetInstances(_gpu, instances, drawDistances);
     }
 
     /// <summary>Registers an already-created mesh with the render list. UI thread only —
@@ -526,6 +532,10 @@ public sealed unsafe class SceneRenderer : IDisposable
                 foreach (InstanceCell cell in cells)
                 {
                     if (!frustum.Intersects(cell.Min, cell.Max)) continue;
+                    // Two independent limits: the data's own per-object range, and the global override. A cell
+                    // holds copies of ONE draw distance (InstanceChunks bins by it), so this stays a per-cell test.
+                    float cellDist = HonorInstanceDrawDistance ? cell.DrawDistance : 0f;
+                    if (cellDist > 0f && DistanceSqToAabb(eye, cell.Min, cell.Max) > cellDist * cellDist) continue;
                     if (maxDist > 0f && DistanceSqToAabb(eye, cell.Min, cell.Max) > maxDistSq) continue;
                     if (_visibleRanges.Count > 0
                         && _visibleRanges[^1].Start + _visibleRanges[^1].Count == cell.Start)

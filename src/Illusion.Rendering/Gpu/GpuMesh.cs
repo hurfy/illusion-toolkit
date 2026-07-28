@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Runtime.InteropServices;
 using Illusion.Domain;
 using Illusion.Rendering.Textures;
@@ -118,7 +118,7 @@ public sealed unsafe class GpuMesh : IDisposable
             // Partition the cloud into XY cells (cell-major sorted copy + per-cell AABB) so the renderer
             // can cull whole cells; the mesh AABB is the union of cell AABBs, which covers the prototype
             // geometry extents — not just the copy translations.
-            (sortedInstances, cells) = InstanceChunks.Build(mesh.Instances!, lmin, lmax);
+            (sortedInstances, cells) = InstanceChunks.Build(mesh.Instances!, lmin, lmax, mesh.InstanceDrawDistances);
             foreach (InstanceCell cell in cells)
             {
                 bmin = Vector3.Min(bmin, cell.Min);
@@ -255,7 +255,7 @@ public sealed unsafe class GpuMesh : IDisposable
     /// written once and read every frame), so "update" means release and re-upload; the cell partition and the
     /// world AABB are rebuilt with it. An empty cloud leaves the mesh with nothing to draw.
     /// </summary>
-    public void SetInstances(GpuContext gpu, Matrix4x4[] instances)
+    public void SetInstances(GpuContext gpu, Matrix4x4[] instances, float[]? drawDistances = null)
     {
         ArgumentNullException.ThrowIfNull(instances);
         if (_disposed) return;
@@ -273,7 +273,8 @@ public sealed unsafe class GpuMesh : IDisposable
             return;
         }
 
-        (Matrix4x4[] sorted, InstanceCell[] cells) = InstanceChunks.Build(instances, _localMin, _localMax);
+        (Matrix4x4[] sorted, InstanceCell[] cells) =
+            InstanceChunks.Build(instances, _localMin, _localMax, drawDistances);
         InstanceCells = cells;
 
         var bmin = new Vector3(float.MaxValue);

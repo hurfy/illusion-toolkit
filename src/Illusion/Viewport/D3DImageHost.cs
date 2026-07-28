@@ -106,6 +106,18 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         }
     }
 
+    /// <summary>
+    /// Whether crash props are drawn only as far as the game draws them. The Translokator table gives each prop
+    /// its own range — a bin 20 m, a billboard 300 m — so honouring it shows the clutter a player would actually
+    /// see, and leaves most of the 57 000 copies out of the frame. Off draws every copy at any distance.
+    /// On by default; drawing only, nothing is loaded or unloaded.
+    /// </summary>
+    public bool CrashGameDrawDistance
+    {
+        get => Rnd?.HonorInstanceDrawDistance ?? true;
+        set { if (Rnd != null) Rnd.HonorInstanceDrawDistance = value; }
+    }
+
     /// <summary>Collision layer: decode each resident district's Collisions (.col) and overlay the hulls as a
     /// translucent, wireframe-edged layer. Loads and unloads additively — toggling never resets the scene.</summary>
     public bool ShowCollision
