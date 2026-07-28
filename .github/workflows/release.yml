@@ -124,14 +124,12 @@ jobs:
           $notes = @'
           ### Install
 
-          1. Download `{ZIP}` ({SIZE} MB) and unpack it anywhere.
-          2. Run `Illusion.exe`. On first launch it asks for your Mafia II folder.
+          Download `Illusion-Toolkit-0.3.1-win-x64.zip` (7.2 MB) and unpack it anywhere.
+          Run `Illusion.exe`. On first launch it asks for your Mafia II folder.
 
           Needs the **[.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)**
           and the **[Visual C++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)**.
           Windows offers to fetch the first one if it is missing.
-
-          No game content is included - you need your own copy of Mafia II or Mafia II: Definitive Edition.
 
           ```
           SHA256  {SHA256}
