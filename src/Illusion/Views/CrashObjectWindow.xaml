@@ -1,0 +1,80 @@
+<Window x:Class="Illusion.Views.CrashObjectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Place Crash Object"
+        Width="520" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Viewport context menu → Place Crash Object…: pick one of the props the loaded city_crash archive
+         already lists in its Translokator table and drop a copy of it where the click landed. Only props
+         that resolve to real geometry are offered, so the choice always produces something visible.
+         Visual language comes from the shared EditorStyles dictionary, like RestoreBackupWindow. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- content -->
+            <RowDefinition Height="Auto" />  <!-- command bar -->
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+            <TextBlock Style="{StaticResource DimLabel}" Text="Search" Margin="0,0,0,4" />
+            <TextBox x:Name="SearchBox" Margin="0,0,0,12" Padding="6,4"
+                     TextChanged="Search_Changed"
+                     ToolTip="Filter the list by name" />
+
+            <TextBlock Style="{StaticResource DimLabel}" Text="Object" Margin="0,0,0,4" />
+            <Border BorderBrush="#1AFFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+                <Grid>
+                    <ListBox x:Name="ObjectList" Height="260" BorderThickness="0"
+                             Background="Transparent"
+                             ItemContainerStyle="{StaticResource PickerItem}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             SelectionChanged="ObjectList_SelectionChanged"
+                             MouseDoubleClick="ObjectList_DoubleClick">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="90" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
+                                               Foreground="White" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1" Text="{Binding CountText}" FontSize="11"
+                                               Foreground="#A0FFFFFF" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{Binding DistanceText}" FontSize="11"
+                                               Foreground="#80FFFFFF" VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="EmptyLabel" Style="{StaticResource DimLabel}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Text="Nothing matches that name." Visibility="Collapsed" />
+                </Grid>
+            </Border>
+
+            <CheckBox x:Name="BothSeasonsBox" Margin="0,12,0,0" IsChecked="True"
+                      Content="Place in all seasons"
+                      ToolTip="Also place it in the other season's archive, so it does not have to be placed twice." />
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="#0FFFFFFF" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0"
+                Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"
+                           TextWrapping="Wrap" VerticalAlignment="Center"
+                           Text="The copy lands where you clicked; drag it with the gizmo from there." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" Click="Cancel_Click" />
+                    <Button x:Name="PlaceBtn" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                            Content="Place" IsEnabled="False" Click="Place_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

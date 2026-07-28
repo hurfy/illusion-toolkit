@@ -9,6 +9,11 @@ public interface ISceneDocument : ISceneSource
     /// <summary>The archive this document was loaded from (the file a build repacks).</summary>
     FileInfo SourceArchive { get; }
 
+    /// <summary>Further archives this document also wrote into and that a build must therefore repack alongside
+    /// <see cref="SourceArchive"/>. Empty for every ordinary document; the seasonal crash table uses it, because
+    /// one edit can land in both the summer and the winter archive.</summary>
+    IReadOnlyList<FileInfo> CompanionArchives => [];
+
     int ObjectCount { get; }
     int GeometryCount { get; }
     int MaterialCount { get; }

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Numerics;
 using System.Windows;
@@ -38,6 +38,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly SelectionController Selection;
     internal readonly TransformEditController Editing;
     internal readonly CollisionEditController CollisionEditing;
+    internal readonly TranslokatorEditController CrashEditing;
     internal readonly PropertyEditController PropertyEditing;
     internal readonly ScenePersistence Persistence;
     internal readonly GeometryEditController GeometryEditing;
@@ -53,6 +54,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         Selection = new SelectionController(this);
         Editing = new TransformEditController(this);
         CollisionEditing = new CollisionEditController(this);
+        CrashEditing = new TranslokatorEditController(this);
         PropertyEditing = new PropertyEditController(this);
         Persistence = new ScenePersistence(this);
         GeometryEditing = new GeometryEditController(this);
@@ -193,26 +195,68 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     public void Redo() => Editing.History.Redo();
 
     /// <summary>Whether the selection has anything deletable — a frame object or a collision placement.</summary>
-    public bool CanDeleteSelection() => Editing.CanDeleteSelection() || CollisionEditing.HasCollisionSelection();
+    public bool CanDeleteSelection() =>
+        Editing.CanDeleteSelection() || CollisionEditing.HasCollisionSelection() || CrashEditing.HasCrashSelection();
 
     /// <summary>Deletes the selection: collision placements from their .col, frame objects from their
     /// FrameResource — both undoable and both persisted by Save/Build.</summary>
     public void DeleteSelected()
     {
         CollisionEditing.DeleteSelected(); // collision instances (drops them from the selection)
+        CrashEditing.DeleteSelected();     // city_crash placements, in both seasons when linked
         Editing.DeleteSelected();          // frame objects (its DeletableRoots excludes collision)
     }
 
     /// <summary>Whether the selection has anything duplicable — a static mesh or a collision placement.</summary>
     public bool CanDuplicateSelection() =>
-        CollisionEditing.HasCollisionSelection() || Editing.CanDuplicateSelection();
+        CollisionEditing.HasCollisionSelection() || CrashEditing.HasCrashSelection() || Editing.CanDuplicateSelection();
 
     /// <summary>Duplicates the selection: collision placements get copies in their .col, static meshes get
     /// deep, independent copies in their FrameResource — both undoable and persisted.</summary>
     public void DuplicateSelected()
     {
         CollisionEditing.DuplicateSelected(); // collision placements (re-selects the copies)
+        CrashEditing.DuplicateSelected();     // city_crash placements (re-selects the copies)
         Editing.DuplicateSelected();          // frame objects (skips collision sources)
+    }
+
+    /// <summary>Whether a city_crash archive is loaded, so props can be placed into it.</summary>
+    public bool CanPlaceCrashObject => Streamer.CrashLayer != null;
+
+    /// <summary>Whether the loaded crash archive has a seasonal counterpart — without one, "place in all
+    /// seasons" has nowhere to place into.</summary>
+    public bool HasCrashSeasonTwin => Streamer.CrashLayer?.Document.Twin != null;
+
+    /// <summary>The props the loaded crash archive can place: name, how many copies already stand in the world,
+    /// the distance they draw at, and the table row itself (opaque to the UI).</summary>
+    public IReadOnlyList<(string Name, int Count, float Distance, object Row)> CrashObjectChoices()
+    {
+        var choices = new List<(string, int, float, object)>();
+        foreach (Formats.Translokator.Object row in CrashEditing.AvailableObjects)
+        {
+            choices.Add((row.Name.String, row.Instances.Count, row.GridMax, row));
+        }
+        return choices;
+    }
+
+    /// <summary>Places a new copy of a crash prop at a world position. <paramref name="row"/> comes from
+    /// <see cref="CrashObjectChoices"/>. Returns false when the archive has no free placement id left.</summary>
+    public bool PlaceCrashObject(object row, Vector3 position, bool bothSeasons) =>
+        row is Formats.Translokator.Object table
+        && CrashEditing.PlaceObject(table, position, bothSeasons) != null;
+
+    /// <summary>
+    /// The world point under a screen pixel: where the viewport ray first meets scene geometry (a mesh or a crash
+    /// prop), or a point 10 m in front of the camera when it meets nothing — so a click on the sky still places
+    /// something the user can see and drag.
+    /// </summary>
+    public Vector3 PickWorldPoint(Point screenPos)
+    {
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(screenPos);
+        PickMesh(screenPos, out float meshT);
+        Streamer.PickCrash(origin, dir, out float crashT);
+        float t = MathF.Min(meshT, crashT);
+        return origin + dir * (float.IsFinite(t) && t > 0f ? t : 10f);
     }
 
     /// <inheritdoc cref="CollisionEditController.UnusedHullCount"/>
@@ -545,7 +589,13 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         GpuMesh? gm = PickMesh(pos, out float meshT);
         (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
         SceneNode? col = Streamer.PickCollision(origin, dir, out float colT);
-        if (col != null && (gm == null || colT <= meshT)) return col;
+        // A crash prop is drawn instanced, so the mesh pick can only ever return its whole cloud (and in fact
+        // skips it). Picking one copy is its own pass; it wins over the cloud's prototype at the same spot,
+        // which is what makes clicking a street lamp select that lamp.
+        SceneNode? crash = Streamer.PickCrash(origin, dir, out float crashT);
+
+        if (col != null && (gm == null || colT <= meshT) && (crash == null || colT <= crashT)) return col;
+        if (crash != null && (gm == null || crashT <= meshT)) return crash;
         return gm?.Owner as SceneNode;
     }
 

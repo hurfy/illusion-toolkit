@@ -254,36 +254,28 @@ internal static class NativeMiscProbes
                     $"{ssTyped}/{ssFiles.Length} typed");
             }
 
-            // .tra — read-only: every file must parse and carry instances.
+            // .tra — the placement table city_crash spawns from. The write half re-quantizes
+            // every placement rather than echoing its packed words, so a byte-identical re-save
+            // is what proves the quantizers are exact inverses.
             {
-                string[] files = Directory.GetFiles(root, "*.tra", SearchOption.AllDirectories);
-                int parsed = 0, errors = 0;
+                string[] traFiles = Directory.GetFiles(root, "*.tra", SearchOption.AllDirectories);
                 long instances = 0;
-                foreach (string file in files)
+                RunFixpointFamily("tra", traFiles, Check, details, file =>
                 {
-                    try
+                    var loader = new Formats.Translokator.TranslokatorLoader();
+                    using var stream = new MemoryStream(File.ReadAllBytes(file), writable: false);
+                    using var reader = new BinaryReader(stream);
+                    loader.ReadFromFile(reader);
+                    foreach (Formats.Translokator.ObjectGroup group in loader.ObjectGroups)
                     {
-                        var loader = new Formats.Translokator.TranslokatorLoader();
-                        using var stream = new MemoryStream(File.ReadAllBytes(file), writable: false);
-                        using var reader = new BinaryReader(stream);
-                        loader.ReadFromFile(reader);
-                        foreach (Formats.Translokator.ObjectGroup group in loader.ObjectGroups)
+                        foreach (Formats.Translokator.Object obj in group.Objects)
                         {
-                            foreach (Formats.Translokator.Object obj in group.Objects)
-                            {
-                                instances += obj.Instances.Length;
-                            }
+                            instances += obj.Instances.Count;
                         }
-                        parsed++;
                     }
-                    catch (Exception ex)
-                    {
-                        errors++;
-                        details.AppendLine($"TRA ERROR {Path.GetFileName(file)}: {ex.Message}");
-                    }
-                }
-                Check("tra reads", errors == 0 && parsed == files.Length && instances > 0,
-                    $"{parsed}/{files.Length} ({instances} instances)");
+                    return loader.ToBytes();
+                });
+                Check("tra carries placements", instances > 0, $"{instances} placements");
             }
 
             // cityareas.bin — read-only.

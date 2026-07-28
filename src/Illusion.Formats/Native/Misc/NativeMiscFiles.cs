@@ -373,14 +373,13 @@ internal static class NativeMiscFiles
                     UnkBytes1 = objectWire.UnkBytes1,
                     GridMax = objectWire.GridMax,
                     GridMin = objectWire.GridMin,
-                    Instances = new Instance[objectWire.Instances.Count],
+                    Instances = new List<Instance>(objectWire.Instances.Count),
                 };
                 obj.Name.String = objectWire.Name;
                 obj.Name.Hash = objectWire.Hash;
-                for (int y = 0; y < objectWire.Instances.Count; y++)
+                foreach (Model.TraInstanceW wireInstance in objectWire.Instances)
                 {
-                    Model.TraInstanceW wireInstance = objectWire.Instances[y];
-                    var instance = new Instance
+                    obj.Instances.Add(new Instance
                     {
                         W0 = (ushort)wireInstance.W0,
                         W1 = (ushort)wireInstance.W1,
@@ -391,13 +390,82 @@ internal static class NativeMiscFiles
                         Scale = wireInstance.Scale,
                         Rotation = wireInstance.Rotation,
                         Position = wireInstance.Position,
-                    };
-                    obj.Instances[y] = instance;
+                    });
                 }
                 group.Objects[x] = obj;
             }
             loader.ObjectGroups[i] = group;
         }
+    }
+
+    internal static byte[] TranslokatorToBytes(TranslokatorLoader loader)
+    {
+        var wire = new Model.TranslokatorW
+        {
+            Version = loader.Version,
+            Unk1 = loader.Unk1,
+            Unk2 = loader.Unk2,
+            BoundsMin = loader.Bounds.Min,
+            BoundsMax = loader.Bounds.Max,
+        };
+
+        foreach (Grid grid in loader.Grids)
+        {
+            var gridWire = new Model.TraGridW
+            {
+                Key = grid.Key,
+                Origin = grid.Origin,
+                CellSizeX = grid.CellSize.X,
+                CellSizeY = grid.CellSize.Y,
+                Width = grid.Width,
+                Height = grid.Height,
+            };
+            gridWire.Data.AddRange(grid.Data);
+            wire.Grids.Add(gridWire);
+        }
+
+        foreach (ObjectGroup group in loader.ObjectGroups)
+        {
+            var groupWire = new Model.TraGroupW
+            {
+                ActorType = (int)group.ActorType,
+                Unk01 = group.Unk01,
+            };
+            foreach (Translokator.Object obj in group.Objects)
+            {
+                var objectWire = new Model.TraObjectW
+                {
+                    Unk02 = obj.Unk02,
+                    Hash = obj.Name.Hash,
+                    Name = obj.Name.String,
+                    UnkBytes1 = obj.UnkBytes1,
+                    GridMax = obj.GridMax,
+                    GridMin = obj.GridMin,
+                };
+                foreach (Instance instance in obj.Instances)
+                {
+                    // Position/Rotation/Scale are what the core re-quantizes; the packed
+                    // words ride along unread on this path (they are the read half's
+                    // convenience), so an edited transform reaches the file as edited.
+                    objectWire.Instances.Add(new Model.TraInstanceW
+                    {
+                        Position = instance.Position,
+                        Rotation = instance.Rotation,
+                        Scale = instance.Scale,
+                        Id = instance.ID,
+                        W0 = instance.W0,
+                        W1 = instance.W1,
+                        W2 = instance.W2,
+                        D4 = instance.D4,
+                        D5 = instance.D5,
+                    });
+                }
+                groupWire.Objects.Add(objectWire);
+            }
+            wire.Groups.Add(groupWire);
+        }
+
+        return NativeMisc.Save(wire.WriteTo, "mf_tra_save");
     }
 
     internal static IReadOnlyList<CityAreaEntry> ReadCityAreas(ReadOnlySpan<byte> bytes)

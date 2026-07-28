@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Runtime.InteropServices;
 using Illusion.Rendering.Gpu;
 using Illusion.Rendering.Shaders;
@@ -206,7 +206,10 @@ float4 PSMain(VOut i) : SV_TARGET
     /// selection is empty. Rebinds the target RTV itself, restores opaque blending, and leaves the mask SRV
     /// unbound — the caller only has to re-set its own rasterizer/depth state for the next frame.
     /// </summary>
-    public void Render(SharedRenderTarget target, Matrix4x4 viewProj, IReadOnlyList<GpuMesh> meshes)
+    /// <param name="placements">Selected copies of an instanced prototype: the same geometry drawn at one copy's
+    /// matrix. An instanced mesh has no World of its own, so a crash placement can only be outlined this way.</param>
+    public void Render(SharedRenderTarget target, Matrix4x4 viewProj, IReadOnlyList<GpuMesh> meshes,
+        IReadOnlyList<(GpuMesh Mesh, Matrix4x4 World)>? placements = null)
     {
         // Only outline VISIBLE geometry: the mesh pass skips hidden meshes, so a hidden selection must not
         // leave a contour floating around empty space. Checked at draw time (not just on select) because the
@@ -214,6 +217,11 @@ float4 PSMain(VOut i) : SV_TARGET
         bool any = false;
         foreach (GpuMesh m in meshes)
             if (m.Visible && m.VertexBuffer.Handle != null && m.IndexBuffer.Handle != null) { any = true; break; }
+        if (!any && placements != null)
+        {
+            foreach ((GpuMesh m, _) in placements)
+                if (m.Visible && m.VertexBuffer.Handle != null && m.IndexBuffer.Handle != null) { any = true; break; }
+        }
         if (!any) return;
 
         var ctx = _gpu.Context11;
@@ -244,6 +252,18 @@ float4 PSMain(VOut i) : SV_TARGET
         {
             if (!mesh.Visible || mesh.VertexBuffer.Handle == null || mesh.IndexBuffer.Handle == null) continue;
             var consts = new OutlineMaskConstants { Wvp = mesh.World * viewProj };
+            GpuBuffers.UpdateConstant(ctx, _maskCb, ref consts);
+
+            var vb = mesh.VertexBuffer.Handle;
+            ctx.IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+            ctx.IASetIndexBuffer(mesh.IndexBuffer, Format.FormatR32Uint, 0);
+            ctx.DrawIndexed((uint)(mesh.TriangleCount * 3), 0, 0);
+        }
+
+        foreach ((GpuMesh mesh, Matrix4x4 world) in placements ?? [])
+        {
+            if (!mesh.Visible || mesh.VertexBuffer.Handle == null || mesh.IndexBuffer.Handle == null) continue;
+            var consts = new OutlineMaskConstants { Wvp = world * viewProj };
             GpuBuffers.UpdateConstant(ctx, _maskCb, ref consts);
 
             var vb = mesh.VertexBuffer.Handle;

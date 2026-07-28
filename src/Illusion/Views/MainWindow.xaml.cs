@@ -663,8 +663,47 @@ public partial class MainWindow : Window
         restore.Click += (_, _) => ShowRestoreDialog(sds);
 
         var menu = new ContextMenu { PlacementTarget = Viewport };
+
+        // Placing a crash prop is only offered while city_crash is in the scene — it is the archive that holds
+        // both the props and the table saying where they stand.
+        if (Viewport.CanPlaceCrashObject)
+        {
+            var place = new MenuItem { Header = "Place Crash Object…" };
+            Point at = pos;
+            place.Click += (_, _) => ShowPlaceCrashObjectDialog(at);
+            menu.Items.Add(place);
+            menu.Items.Add(new Separator());
+        }
+
         menu.Items.Add(restore);
         menu.IsOpen = true;
+    }
+
+    // Pick a prop from the loaded crash table and drop a copy where the right-click landed.
+    private void ShowPlaceCrashObjectDialog(Point at)
+    {
+        var choices = new List<CrashObjectWindow.Choice>();
+        foreach ((string name, int count, float distance, object row) in Viewport.CrashObjectChoices())
+        {
+            choices.Add(new CrashObjectWindow.Choice(name, count, distance, row));
+        }
+        if (choices.Count == 0) return;
+
+        var win = new CrashObjectWindow(choices) { Owner = this };
+        win.SetSeasonalSwitchAvailable(Viewport.HasCrashSeasonTwin);
+        if (win.ShowDialog() != true || win.SelectedRow is not { } chosen) return;
+
+        if (!Viewport.PlaceCrashObject(chosen, Viewport.PickWorldPoint(at), win.BothSeasons))
+        {
+            AppDialog.Show(this, new DialogOptions
+            {
+                Title = "Place Crash Object",
+                Icon = DialogIcon.Info,
+                Heading = "No free placement id",
+                Text = "The crash table hands every copy a 16-bit id and this archive has used them all up. "
+                     + "Delete some placements first, and the ids they held become available again.",
+            });
+        }
     }
 
     private void ShowRestoreDialog(FileInfo? preselect)

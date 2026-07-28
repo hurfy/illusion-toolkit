@@ -80,6 +80,10 @@ internal sealed class SelectionController
         // Instanced collision hulls have no per-node mesh, so they highlight through a dedicated renderer path.
         _host.Streamer.UpdateCollisionSelection(_selected);
 
+        // Crash props are instanced too: one selected copy is outlined by re-drawing its prototype at that copy's
+        // matrix (an instanced mesh has no World of its own to outline).
+        _host.Rnd.SetSelectionPlacements(_host.Streamer.CrashSelectionOutlines(_selected));
+
         GizmoPivot = ComputeGroupPivot();
     }
 

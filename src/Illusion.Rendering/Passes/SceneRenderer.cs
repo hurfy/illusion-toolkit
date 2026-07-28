@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Illusion.Rendering.Gpu;
 using Illusion.Rendering.Scene;
 using Illusion.Rendering.Shaders;
@@ -74,6 +74,10 @@ public sealed unsafe class SceneRenderer : IDisposable
     // (SelectionOutlineRenderer), not a bounding box — so only mesh objects are ever highlighted.
     private readonly List<GpuMesh> _selectionMeshes = new(1);
 
+    // Selected copies of an instanced prototype (crash props): the same geometry outlined at one copy's matrix,
+    // since an instanced mesh carries no World of its own to outline.
+    private readonly List<(GpuMesh Mesh, System.Numerics.Matrix4x4 World)> _selectionPlacements = new(1);
+
     /// <summary>Highlights a set of meshes with a Blender-style silhouette outline (replaces any prior selection).</summary>
     public void SetSelectionMeshes(IReadOnlyList<GpuMesh> meshes)
     {
@@ -81,8 +85,19 @@ public sealed unsafe class SceneRenderer : IDisposable
         _selectionMeshes.AddRange(meshes);
     }
 
+    /// <summary>Highlights individual copies of instanced prototypes (crash placements), replacing any prior set.</summary>
+    public void SetSelectionPlacements(IReadOnlyList<(GpuMesh Mesh, System.Numerics.Matrix4x4 World)> placements)
+    {
+        _selectionPlacements.Clear();
+        _selectionPlacements.AddRange(placements);
+    }
+
     /// <summary>Clears the selection highlight (nothing selected, or only non-mesh containers are selected).</summary>
-    public void ClearSelection() => _selectionMeshes.Clear();
+    public void ClearSelection()
+    {
+        _selectionMeshes.Clear();
+        _selectionPlacements.Clear();
+    }
 
     /// <summary>Viewport shading mode (Blender-style toolbar toggle). Default = Material Preview.</summary>
     public RenderMode Mode { get; set; } = RenderMode.MaterialPreview;
@@ -280,6 +295,15 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// (buffers, textures) — the D3D11 device is free-threaded, so this is safe on a loader thread.</summary>
     public GpuMesh CreateMeshGpu(Domain.MeshData md) => GpuMesh.Create(_gpu, md, Textures);
 
+    /// <summary>Replaces the copies of an instanced mesh in place — a crash placement was moved, added or
+    /// removed. Only the matrix buffer is rebuilt; the mesh keeps its geometry, parts and texture leases, and
+    /// stays in the render list.</summary>
+    public void UpdateInstances(GpuMesh mesh, System.Numerics.Matrix4x4[] instances)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
+        mesh.SetInstances(_gpu, instances);
+    }
+
     /// <summary>Registers an already-created mesh with the render list. UI thread only —
     /// the render loop iterates the list without a lock.</summary>
     public void AttachMesh(GpuMesh gm)
@@ -389,7 +413,8 @@ public sealed unsafe class SceneRenderer : IDisposable
 
         // Selection silhouette outline (screen-space, on top of everything): an offscreen mask of the selected
         // mesh's exact geometry, then a dilation pass paints a constant-width contour — never a bounding box.
-        if (_selectionMeshes.Count > 0) _selectionOutline.Render(target, viewProj, _selectionMeshes);
+        if (_selectionMeshes.Count > 0 || _selectionPlacements.Count > 0)
+            _selectionOutline.Render(target, viewProj, _selectionMeshes, _selectionPlacements);
 
         // Leave a solid raster bound for the next frame: the sky (drawn first, before we re-pick the
         // mode raster) inherits whatever was last set — in wireframe mode its fullscreen triangle would

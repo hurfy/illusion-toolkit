@@ -56,9 +56,18 @@ public sealed unsafe class GpuMesh : IDisposable
     public object? Owner;
 
     // CPU geometry (local space) retained for ray-picking and world-AABB recompute after a transform edit.
-    // These reference the source MeshData arrays (no extra copy); null for instanced meshes (not pickable).
+    // These reference the source MeshData arrays (no extra copy). An instanced cloud keeps them too — not for the
+    // ordinary picker (which skips instanced meshes, since one silhouette cannot stand for thousands of copies)
+    // but so the crash-placement picker can test a ray against this prototype at one copy's matrix.
     public Vector3[]? PickPositions;
     public uint[]? PickIndices;
+
+    /// <summary>Local-space AABB of the prototype geometry — the crash-placement picker's broad phase transforms
+    /// its corners by a single copy's matrix.</summary>
+    public Vector3 LocalMin => _localMin;
+
+    /// <inheritdoc cref="LocalMin"/>
+    public Vector3 LocalMax => _localMax;
 
     // Local-space AABB, cached once so RecomputeBounds transforms 8 corners (O(1)) instead of every vertex.
     private Vector3 _localMin;
@@ -137,10 +146,8 @@ public sealed unsafe class GpuMesh : IDisposable
             Instanced = instanced,
             InstanceCount = instanced ? mesh.Instances!.Length : 1,
             InstanceCells = cells,
-            // Keep local positions/indices for a single (non-instanced) mesh so it can be picked and
-            // its world AABB recomputed when moved. Instanced clouds aren't pickable — skip.
-            PickPositions = instanced ? null : mesh.Positions,
-            PickIndices = instanced ? null : mesh.Indices,
+            PickPositions = mesh.Positions,
+            PickIndices = mesh.Indices,
         };
 
         fixed (MeshVertex* pVerts = verts)
@@ -223,7 +230,8 @@ public sealed unsafe class GpuMesh : IDisposable
     /// </summary>
     public void RecomputeBounds()
     {
-        if (PickPositions == null || _localMin.X > _localMax.X) return;
+        // An instanced cloud's bounds are the union of its cell AABBs, not this mesh's World — see SetInstances.
+        if (Instanced || PickPositions == null || _localMin.X > _localMax.X) return;
         var bmin = new Vector3(float.MaxValue);
         var bmax = new Vector3(float.MinValue);
         for (int i = 0; i < 8; i++)
@@ -238,6 +246,49 @@ public sealed unsafe class GpuMesh : IDisposable
         }
         BoundsMin = bmin;
         BoundsMax = bmax;
+    }
+
+    /// <summary>
+    /// Replaces the copies of an instanced cloud (a crash placement was moved, added or removed). Only the matrix
+    /// buffer is rebuilt — the geometry, its parts and every texture lease stay exactly as they are, which is what
+    /// makes this cheap enough to run on every frame of a gizmo drag. The buffer is immutable by design (it is
+    /// written once and read every frame), so "update" means release and re-upload; the cell partition and the
+    /// world AABB are rebuilt with it. An empty cloud leaves the mesh with nothing to draw.
+    /// </summary>
+    public void SetInstances(GpuContext gpu, Matrix4x4[] instances)
+    {
+        ArgumentNullException.ThrowIfNull(instances);
+        if (_disposed) return;
+
+        if (Instanced) InstanceBuffer.Dispose();
+        Instanced = instances.Length > 0;
+        InstanceCount = instances.Length;
+
+        if (!Instanced)
+        {
+            InstanceBuffer = default;
+            InstanceCells = null;
+            BoundsMin = new Vector3(float.MaxValue);
+            BoundsMax = new Vector3(float.MinValue);
+            return;
+        }
+
+        (Matrix4x4[] sorted, InstanceCell[] cells) = InstanceChunks.Build(instances, _localMin, _localMax);
+        InstanceCells = cells;
+
+        var bmin = new Vector3(float.MaxValue);
+        var bmax = new Vector3(float.MinValue);
+        foreach (InstanceCell cell in cells)
+        {
+            bmin = Vector3.Min(bmin, cell.Min);
+            bmax = Vector3.Max(bmax, cell.Max);
+        }
+        BoundsMin = bmin;
+        BoundsMax = bmax;
+
+        fixed (Matrix4x4* pInst = sorted)
+            InstanceBuffer = GpuBuffers.CreateImmutable(
+                gpu, pInst, (uint)(sorted.Length * sizeof(Matrix4x4)), BindFlag.VertexBuffer);
     }
 
     public void Dispose()

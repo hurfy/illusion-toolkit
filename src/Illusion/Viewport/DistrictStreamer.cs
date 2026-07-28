@@ -8,6 +8,8 @@ using Illusion.Assets.Sds;
 using Illusion.Assets.World;
 using Illusion.Domain;
 using Illusion.Formats.Collisions;
+using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.Translokator;
 using Illusion.Rendering.Gpu;
 using Illusion.Rendering.Passes;
 using Illusion.Rendering.Scene;
@@ -60,6 +62,20 @@ internal sealed class DistrictStreamer
         public ulong CoverageAttemptKey;                   // mesh set a full re-decode was last attempted for (see LiveUpdateCollision)
     }
 
+    // The crash archive's placement layer: one entry while city_crash is loaded. Unlike collision hulls the props
+    // are drawn by the ordinary mesh pipeline (hardware-instanced prototypes), so there is no separate overlay —
+    // an edit refreshes the affected prototype's copy matrices in place.
+    private readonly List<CrashSource> _crashSources = new();
+
+    private sealed class CrashSource
+    {
+        public required SceneNode Sds;                        // the SDS tree node this layer hangs under
+        public required CrashPlacements Placements;           // table rows ↔ prototype meshes
+        public required SceneNode Layer;                      // the "Crash objects" tree node
+        // Prototype mesh → its tree leaf, so an edited row can find the GpuMesh whose copies must be re-uploaded.
+        public required Dictionary<FrameObjectSingleMesh, SceneNode> Leaves;
+    }
+
     // .sds load queue (single area / city_univers when streaming). One item at a time.
     private readonly Queue<(FileInfo File, string Label, string? District)> _loadQueue = new();
     private bool _hasFramedOnce; // frame the camera ONCE (first load), don't reset afterwards
@@ -86,6 +102,9 @@ internal sealed class DistrictStreamer
         public SceneNode? CollisionLayer;                            // the "Collisions" tree node (built for any district with a .col)
         public CollisionDocumentAdapter? CollisionDoc;               // the .col save unit backing the layer
         public CollisionRenderData? Collision;                       // decoded hull overlay, when the toggle was on at load
+        public SceneNode? CrashLayer;                                // the "Crash objects" tree node (city_crash only)
+        public CrashPlacements? Crash;                               // the .tra save unit + prototype correspondence
+        public Dictionary<FrameObjectSingleMesh, SceneNode>? CrashLeaves; // prototype mesh → its tree leaf
         public IReadOnlyList<Vector3>? NavLines;                     // decoded .nov road graph (edge endpoint pairs), null if none
         public IReadOnlyList<Vector3>? NavMeshLines;                // decoded .nov AI-mesh box wireframe, null if none
         public IReadOnlyList<Vector3>? NavWorldLines;               // decoded .nav path-object boxes, null if none
@@ -121,6 +140,8 @@ internal sealed class DistrictStreamer
 
         // Repaint any collision district whose placements were just edited (live during a gizmo drag).
         LiveUpdateCollision();
+        // …and the crash props, whose copies live in the instance buffers of their prototypes.
+        LiveUpdateCrash();
     }
 
     // Ray-picks the nearest collision placement under a viewport ray (CPU): collision hulls are hardware-instanced
@@ -368,6 +389,174 @@ internal sealed class DistrictStreamer
         return (layer, doc);
     }
 
+    // Builds the "Crash objects" tree layer: the Translokator save unit at the top, one container per table row
+    // (the prop and how many copies of it stand in the world) and one selectable node per copy. Rows come from
+    // CrashPlacements, so only props that actually resolve to prototype geometry are listed — the same set the
+    // viewport draws. A plain POCO tree here; it data-binds once its SDS root attaches on the UI thread.
+    private static SceneNode BuildCrashTree(CrashPlacements placements)
+    {
+        var layer = new SceneNode("Crash objects", "Crash", true) { Source = placements.Document };
+        foreach (Formats.Translokator.Object row in placements.Rows)
+        {
+            var rowNode = new SceneNode($"{row.Name.String} — {row.Instances.Count}", "CrashObject", true);
+            foreach (Instance copy in row.Instances)
+            {
+                // Label by the placement id, not by position in the list: ids are stable across adds and
+                // deletes, so a row's nodes keep their names while the list around them changes.
+                rowNode.AddChild(new SceneNode($"copy #{copy.ID}", "CrashInstance", false)
+                {
+                    Source = placements.Document.Node(copy, row),
+                });
+            }
+            layer.AddChild(rowNode);
+        }
+        return layer;
+    }
+
+    // Re-uploads the copy matrices of the prototypes whose placements were just edited (live during a gizmo drag).
+    // Only the edited ROWS are refreshed: the crash archive carries ~800 prototype meshes holding 134 000 copies
+    // between them, and rebuilding all of them per frame is what made a drag stutter. Only the instance buffer is
+    // rebuilt — geometry and textures stay as they are.
+    //
+    // Deliberately no RaiseSceneChanged here: the scene stats and the tree do not change when a prop moves, and
+    // raising it per drag frame put a full stats recount plus a collection-view refresh in the frame budget.
+    private void LiveUpdateCrash()
+    {
+        if (_host.Rnd == null) return;
+        foreach (CrashSource src in _crashSources)
+        {
+            if (!src.Placements.Document.RenderDirty) continue;
+            src.Placements.Document.RenderDirty = false;
+
+            var stale = new HashSet<FrameObjectSingleMesh>();
+            foreach (Formats.Translokator.Object row in src.Placements.Document.ConsumeDirtyRows())
+            {
+                foreach (FrameObjectSingleMesh mesh in src.Placements.MeshesOf(row)) stale.Add(mesh);
+            }
+
+            foreach (FrameObjectSingleMesh mesh in stale)
+            {
+                if (!src.Leaves.TryGetValue(mesh, out SceneNode? leaf) || leaf.Mesh == null) continue;
+                _host.Rnd.UpdateInstances(leaf.Mesh, src.Placements.MatricesFor(mesh));
+            }
+        }
+    }
+
+    // Ray-picks the nearest crash placement under a viewport ray (CPU). The props are drawn hardware-instanced,
+    // so the ordinary GpuMesh pick cannot reach a single copy — it would have to stand for the whole cloud. This
+    // tests the ray against the prototype's own geometry at each copy's matrix instead, and resolves the hit back
+    // to that copy's tree node. Only rows whose prototype leaf is visible are considered.
+    public SceneNode? PickCrash(Vector3 origin, Vector3 dir, out float bestT)
+    {
+        bestT = float.PositiveInfinity;
+        SceneNode? best = null;
+        foreach (CrashSource src in _crashSources)
+        {
+            var rowNodes = new Dictionary<Formats.Translokator.Object, SceneNode>();
+            for (int i = 0; i < src.Placements.Rows.Count && i < src.Layer.Children.Count; i++)
+                rowNodes[src.Placements.Rows[i]] = src.Layer.Children[i];
+
+            foreach (Formats.Translokator.Object row in src.Placements.Rows)
+            {
+                if (!rowNodes.TryGetValue(row, out SceneNode? rowNode)) continue;
+
+                foreach (FrameObjectSingleMesh mesh in src.Placements.MeshesOf(row))
+                {
+                    if (!src.Leaves.TryGetValue(mesh, out SceneNode? leaf)) continue;
+                    GpuMesh? gm = leaf.Mesh;
+                    if (gm == null || !gm.Visible || gm.PickPositions == null || gm.PickIndices == null) continue;
+
+                    Matrix4x4 local = src.Placements.LocalOf(mesh, row);
+                    for (int i = 0; i < row.Instances.Count && i < rowNode.Children.Count; i++)
+                    {
+                        Instance copy = row.Instances[i];
+                        Matrix4x4 world = local * TransformMath.Compose(
+                            copy.Quaternion, new Vector3(copy.Scale), copy.Position);
+                        if (!PrototypeAabbHit(origin, dir, gm, world, out float tEnter) || tEnter > bestT) continue;
+
+                        Vector3[] pos = gm.PickPositions;
+                        uint[] idx = gm.PickIndices;
+                        for (int k = 0; k + 2 < idx.Length; k += 3)
+                        {
+                            Vector3 a = Vector3.Transform(pos[idx[k]], world);
+                            Vector3 b = Vector3.Transform(pos[idx[k + 1]], world);
+                            Vector3 c = Vector3.Transform(pos[idx[k + 2]], world);
+                            if (Picking.IntersectTriangle(origin, dir, a, b, c, out float t) && t < bestT)
+                            {
+                                bestT = t;
+                                best = rowNode.Children[i];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    // Broad phase: ray vs one copy's world AABB (the prototype's 8 local-AABB corners transformed by its matrix).
+    private static bool PrototypeAabbHit(Vector3 o, Vector3 d, GpuMesh mesh, Matrix4x4 world, out float tEnter)
+    {
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        for (int k = 0; k < 8; k++)
+        {
+            var corner = new Vector3(
+                (k & 1) == 0 ? mesh.LocalMin.X : mesh.LocalMax.X,
+                (k & 2) == 0 ? mesh.LocalMin.Y : mesh.LocalMax.Y,
+                (k & 4) == 0 ? mesh.LocalMin.Z : mesh.LocalMax.Z);
+            Vector3 wp = Vector3.Transform(corner, world);
+            min = Vector3.Min(min, wp);
+            max = Vector3.Max(max, wp);
+        }
+        return Picking.IntersectAabb(o, d, min, max, out tEnter);
+    }
+
+    /// <summary>
+    /// The prototype geometry and world matrix of each selected crash placement, for the silhouette highlight.
+    /// An instanced mesh has no World of its own — every copy shares one buffer — so a selected copy can only be
+    /// outlined by drawing the prototype again at that copy's matrix.
+    /// </summary>
+    public IReadOnlyList<(GpuMesh Mesh, Matrix4x4 World)> CrashSelectionOutlines(IReadOnlyList<SceneNode> selected)
+    {
+        var outlines = new List<(GpuMesh, Matrix4x4)>();
+        foreach (SceneNode node in selected)
+        {
+            if (node.Source is not TranslokatorInstanceAdapter adapter) continue;
+            foreach (CrashSource src in _crashSources)
+            {
+                if (!ReferenceEquals(src.Placements.Document, adapter.Document)) continue;
+                Matrix4x4 placement = TransformMath.Compose(
+                    adapter.Instance.Quaternion, new Vector3(adapter.Instance.Scale), adapter.Instance.Position);
+
+                foreach (FrameObjectSingleMesh mesh in src.Placements.MeshesOf(adapter.Owner))
+                {
+                    if (!src.Leaves.TryGetValue(mesh, out SceneNode? leaf) || leaf.Mesh == null) continue;
+                    outlines.Add((leaf.Mesh, src.Placements.LocalOf(mesh, adapter.Owner) * placement));
+                }
+            }
+        }
+        return outlines;
+    }
+
+    /// <summary>The tree node of the row a placement belongs to, and the placement's own node — so an edit that
+    /// adds or removes a copy can keep the tree in step with the table.</summary>
+    public SceneNode? CrashRowNode(Formats.Translokator.Object row)
+    {
+        foreach (CrashSource src in _crashSources)
+        {
+            for (int i = 0; i < src.Placements.Rows.Count && i < src.Layer.Children.Count; i++)
+            {
+                if (ReferenceEquals(src.Placements.Rows[i], row)) return src.Layer.Children[i];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The loaded crash placement layer, or null when city_crash is not in the scene — the entry point
+    /// for the edit commands.</summary>
+    public CrashPlacements? CrashLayer => _crashSources.Count > 0 ? _crashSources[0].Placements : null;
+
     // Adds one .nav tree bucket labelled with its object count (summed over the given NavPoint type ids).
     // Empty buckets are skipped so a district only shows the categories it actually has.
     private static void AddNavBucket(SceneNode parent, string label, Dictionary<int, int> counts, params int[] types)
@@ -523,9 +712,17 @@ internal sealed class DistrictStreamer
             renderer.Textures.AddFolder(extracted);
             ct.ThrowIfCancellationRequested();
 
-            (List<SdsFrameNode> roots, _, ISceneDocument? document) = crash
-                ? SdsMeshLoader.LoadCrashHierarchy(file)
-                : SdsMeshLoader.LoadHierarchy(file, districtNames);
+            List<SdsFrameNode> roots;
+            ISceneDocument? document;
+            CrashPlacements? placements = null;
+            if (crash)
+            {
+                (roots, _, document, placements) = SdsMeshLoader.LoadCrashHierarchy(file);
+            }
+            else
+            {
+                (roots, _, document) = SdsMeshLoader.LoadHierarchy(file, districtNames);
+            }
             ct.ThrowIfCancellationRequested();
 
             // SDS node → FrameResource node → frame tree; collect mesh leaves. The document wrapper mirrors
@@ -545,6 +742,25 @@ internal sealed class DistrictStreamer
                 GpuMesh gm = renderer.CreateMeshGpu(leaf.Pending!);
                 gm.Owner = leaf; // so a viewport ray-pick resolves back to this tree node
                 prepared.Add((leaf, gm));
+            }
+
+            // The crash archive's placement layer: one selectable node per copy, grouped by the table row it
+            // belongs to (57 648 copies in the shipped city, so a flat list would be a wall of rows). The
+            // prototype-mesh → leaf index lets an edited copy find the instanced mesh to re-upload.
+            SceneNode? crashLayer = null;
+            Dictionary<FrameObjectSingleMesh, SceneNode>? crashLeaves = null;
+            if (crash && placements != null)
+            {
+                crashLayer = BuildCrashTree(placements);
+                sds.AddChild(crashLayer);
+                crashLeaves = new Dictionary<FrameObjectSingleMesh, SceneNode>();
+                foreach (SceneNode leaf in meshLeaves)
+                {
+                    if (leaf.Source is FrameNodeAdapter fa && fa.Frame is FrameObjectSingleMesh sm)
+                    {
+                        crashLeaves[sm] = leaf;
+                    }
+                }
             }
 
             // ALWAYS build the selectable "Collisions" tree layer for a district that has a .col (cheap parse), so
@@ -645,6 +861,9 @@ internal sealed class DistrictStreamer
                 CollisionLayer = collisionLayer,
                 CollisionDoc = collisionDoc,
                 Collision = collisionData,
+                CrashLayer = crashLayer,
+                Crash = placements,
+                CrashLeaves = crashLeaves,
                 NavLines = navLines,
                 NavMeshLines = navMeshLines,
                 NavWorldLines = navWorldLines,
@@ -711,6 +930,19 @@ internal sealed class DistrictStreamer
             };
             _collisionSources.Add(source);
             if (CollisionEnabled) ShowCollisionOverlay(source, load.Collision);
+        }
+
+        // Register the crash placement layer (city_crash only). Its tree node is already grafted under load.Sds;
+        // this is what lets the edit commands, the placement picker and the live instance refresh find it.
+        if (load.Crash != null && load.CrashLayer != null && load.CrashLeaves != null)
+        {
+            _crashSources.Add(new CrashSource
+            {
+                Sds = load.Sds,
+                Placements = load.Crash,
+                Layer = load.CrashLayer,
+                Leaves = load.CrashLeaves,
+            });
         }
 
         // Navigation-graph overlay: uploaded per district (keyed by its SDS node); ShowNav gates drawing.
@@ -826,6 +1058,7 @@ internal sealed class DistrictStreamer
             _host.Rnd!.RemoveNavMeshDistrict(node);   // and its .nov AI-mesh overlay
             _host.Rnd!.RemoveNavWorldDistrict(node);  // and its .nav path-object overlay
             _collisionSources.RemoveAll(s => ReferenceEquals(s.Sds, node)); // its "Collisions" tree node leaves with the SDS subtree
+            _crashSources.RemoveAll(s => ReferenceEquals(s.Sds, node));     // …and its "Crash objects" layer
         }
         if (load.SdsNode != null && load.Folder != null)
         {
@@ -856,6 +1089,7 @@ internal sealed class DistrictStreamer
         _host.Rnd?.ClearNov();
         _host.Rnd?.ClearNavWorld();
         _collisionSources.Clear();
+        _crashSources.Clear();
         _host.Tree.Clear();
         _loadedDistricts.Clear();
     }

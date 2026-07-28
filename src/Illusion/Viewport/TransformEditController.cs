@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Frames;
 using Illusion.Domain;
@@ -200,7 +200,9 @@ internal sealed class TransformEditController
 
     /// <summary>Whether the selection has at least one frame object the duplicator can copy.</summary>
     public bool CanDuplicateSelection() =>
-        _host.Selection.Selected.Any(n => n.Source is IFrameNode fn && FrameDuplicator.CanDuplicate(fn));
+        _host.Selection.Selected.Any(n => n.Source is IFrameNode fn
+            && n.Source is not (CollisionInstanceAdapter or TranslokatorInstanceAdapter)
+            && FrameDuplicator.CanDuplicate(fn));
 
     /// <summary>Duplicates the selected static meshes (Ctrl+D / context menu) as ONE undoable edit: deep,
     /// independent copies at the source transform, selected afterwards. Unsupported objects are skipped
@@ -212,7 +214,8 @@ internal sealed class TransformEditController
         string? lastReason = null;
         foreach (SceneNode n in _host.Selection.Selected.ToList())
         {
-            if (n.Source is not IFrameNode fn || n.Source is CollisionInstanceAdapter) continue;
+            if (n.Source is not IFrameNode fn) continue;
+            if (n.Source is CollisionInstanceAdapter or TranslokatorInstanceAdapter) continue;
             if (n.Parent is null || n.OwningDocumentNode()?.Source is not ISceneDocument doc) continue;
             FrameDuplicator.DuplicatedObject? dup = FrameDuplicator.TryDuplicate(doc, fn, out string? reason);
             if (dup == null)
@@ -377,9 +380,10 @@ internal sealed class TransformEditController
         var sel = new HashSet<SceneNode>(_host.Selection.Selected);
         var roots = new List<SceneNode>();
         foreach (SceneNode n in _host.Selection.Selected)
-            // Collision placements are IFrameNode too, but they delete through CollisionEditController's
-            // own .col path, not this one.
-            if (n.Source is IFrameNode and not CollisionInstanceAdapter && !HasSelectedAncestorNode(n, sel))
+            // Collision placements and crash props are IFrameNode too, but they delete through their own
+            // controllers (the .col and .tra paths), not this one.
+            if (n.Source is IFrameNode and not (CollisionInstanceAdapter or TranslokatorInstanceAdapter)
+                && !HasSelectedAncestorNode(n, sel))
                 roots.Add(n);
         return roots;
     }

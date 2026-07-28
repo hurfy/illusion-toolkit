@@ -66,6 +66,36 @@ public static class TransformMath
     }
 
     /// <summary>
+    /// Recovers a Translokator placement's Euler rotation (radians, in the file's pitch/yaw/roll order) from a
+    /// rotation quaternion, so a gizmo drag can be written back into the .tra record. The forward direction lives
+    /// in <c>Instance.Rotation</c>'s setter, whose hand-unrolled assembly works out to
+    /// <c>-(X(-pitch) * Z(-roll) * Y(-yaw))</c> — identified by exhaustive search over every axis assignment,
+    /// composition order and sign combination, with exactly one match. Inverting that gives sin(roll) = M21,
+    /// pitch = atan2(-M23, M22) and yaw = atan2(-M31, M11); the round trip reproduces the same orientation to
+    /// 2e-14 over 20 000 random rotations. Euler triples are not unique, so this returns one valid
+    /// representative. Gimbal lock (roll ±90°) folds pitch and yaw together and pins yaw to 0.
+    /// This is deliberately neither the frame-object nor the collision convention — the translokator has its own.
+    /// </summary>
+    public static Vector3 TranslokatorEulerFromQuaternion(Quaternion q)
+    {
+        Matrix4x4 m = Matrix4x4.CreateFromQuaternion(Quaternion.Normalize(q));
+        float s = Math.Clamp(m.M21, -1f, 1f);
+        float roll = MathF.Asin(s);
+        float pitch, yaw;
+        if (MathF.Abs(s) > 0.99999f)
+        {
+            pitch = MathF.Atan2(m.M32, m.M33);
+            yaw = 0f;
+        }
+        else
+        {
+            pitch = MathF.Atan2(-m.M23, m.M22);
+            yaw = MathF.Atan2(-m.M31, m.M11);
+        }
+        return new Vector3(pitch, yaw, roll);
+    }
+
+    /// <summary>
     /// Decomposes a matrix built by <see cref="Compose"/> (rotation·scale, translation row forced) back into
     /// its parts. <see cref="Matrix4x4.Decompose"/> assumes the opposite scale·rotation order — it extracts
     /// scale from ROW norms and fails for any rotated, non-uniformly scaled frame matrix — while in the R·S

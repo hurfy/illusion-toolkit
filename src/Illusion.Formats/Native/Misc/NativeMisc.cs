@@ -93,6 +93,7 @@ internal static class NativeMisc
                 "mf_gsd_save" => MiscNativeMethods.GsdSave(p, (ulong)wire.Length, out raw),
                 "mf_nhv_save" => MiscNativeMethods.NhvSave(p, (ulong)wire.Length, out raw),
                 "mf_stbl_save" => MiscNativeMethods.StblSave(p, (ulong)wire.Length, out raw),
+                "mf_tra_save" => MiscNativeMethods.TraSave(p, (ulong)wire.Length, out raw),
                 _ => throw new ArgumentOutOfRangeException(nameof(entryPoint), entryPoint, null),
             };
         }

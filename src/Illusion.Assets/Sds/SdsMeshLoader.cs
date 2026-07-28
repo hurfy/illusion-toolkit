@@ -128,65 +128,59 @@ public static class SdsMeshLoader
     /// referenced by the Translokator table become INSTANCED — their copies are placed according to
     /// the table (see <see cref="MeshData.Instances"/>). Meshes without references are drawn as usual.
     /// </summary>
-    public static (List<SdsFrameNode> Roots, List<MeshData> Meshes, ISceneDocument? Document) LoadCrashHierarchy(
-        FileInfo crashSds)
+    public static (List<SdsFrameNode> Roots, List<MeshData> Meshes, ISceneDocument? Document,
+        CrashPlacements? Placements) LoadCrashHierarchy(FileInfo crashSds)
     {
         var meshes = new List<MeshData>();
         FrameResource? fr = OpenFrameResource(crashSds, out string extracted);
-        if (fr == null) return (new List<SdsFrameNode>(), meshes, null);
+        if (fr == null) return (new List<SdsFrameNode>(), meshes, null, null);
 
         var document = new SceneDocumentAdapter(fr, crashSds);
-        var instanceMap = BuildCrashInstanceMap(extracted, fr);
-        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, instanceMap);
-        return (roots, meshes, document);
+        CrashPlacements? placements = LoadPlacements(crashSds, extracted, fr);
+        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildMatrixMap());
+        return (roots, meshes, document, placements);
     }
 
-    // Reads Translokator (.tra) and builds a map: prototype mesh → world matrices of all its copies.
-    // world = refTransform(mesh in prototype) · TRS(instance) — like InstanceTranslokatorPart in MafiaToolkit.
-    private static Dictionary<FrameObjectSingleMesh, Matrix4x4[]> BuildCrashInstanceMap(
-        string extractedDir, FrameResource fr)
+    // Reads the Translokator table (and the other season's, so an edit can be mirrored into it) and resolves its
+    // rows against the frame resource. Null when the archive carries no table — then the crash SDS just draws its
+    // prototypes where they stand.
+    private static CrashPlacements? LoadPlacements(FileInfo crashSds, string extracted, FrameResource fr)
     {
-        var map = new Dictionary<FrameObjectSingleMesh, Matrix4x4[]>();
-        string[] tras = Directory.GetFiles(extractedDir, "*.tra", SearchOption.AllDirectories);
-        if (tras.Length == 0) return map;
+        string? tra = SdsTranslokatorSaver.ResolvePath(extracted);
+        if (tra == null) return null;
 
-        var trans = new TranslokatorLoader(new FileInfo(tras[0]));
-        var acc = new Dictionary<FrameObjectSingleMesh, List<Matrix4x4>>();
+        TranslokatorLoader table;
+        try { table = new TranslokatorLoader(new FileInfo(tra)); }
+        catch { return null; } // a table we cannot read is a table we must not write back
 
-        foreach (ObjectGroup group in trans.ObjectGroups)
-            foreach (Formats.Translokator.Object obj in group.Objects)
-            {
-                FrameObjectBase? groupRef = fr.GetObjectByHash<FrameObjectBase>(obj.Name.Hash);
-                if (groupRef == null || !groupRef.HasMeshObject()) continue;
-
-                var parts = new List<(FrameObjectSingleMesh mesh, Matrix4x4 refT)>();
-                foreach (FrameObjectBase c in groupRef.Children) CollectParts(c, Matrix4x4.Identity, parts);
-                if (parts.Count == 0) continue;
-
-                foreach (Instance inst in obj.Instances)
-                {
-                    Matrix4x4 instTRS = TransformMath.Compose(inst.Quaternion, new Vector3(inst.Scale), inst.Position);
-                    foreach ((FrameObjectSingleMesh mesh, Matrix4x4 refT) in parts)
-                    {
-                        if (!acc.TryGetValue(mesh, out List<Matrix4x4>? list)) { list = new(); acc[mesh] = list; }
-                        list.Add(refT * instTRS);
-                    }
-                }
-            }
-
-        foreach (KeyValuePair<FrameObjectSingleMesh, List<Matrix4x4>> kv in acc)
-            map[kv.Key] = kv.Value.ToArray();
-        return map;
+        (TranslokatorLoader? twin, FileInfo? twinArchive) = LoadTwinTable(crashSds);
+        var document = new TranslokatorDocumentAdapter(table, crashSds, twin, twinArchive);
+        return CrashPlacements.Build(fr, document);
     }
 
-    // Collects prototype meshes with their local transform relative to the prototype root (groupRef).
-    private static void CollectParts(FrameObjectBase frame, Matrix4x4 parent,
-        List<(FrameObjectSingleMesh mesh, Matrix4x4 refT)> parts)
+    /// <summary>
+    /// The other season's table for a crash archive: <c>city_crash</c> ↔ <c>city_crash_z</c>. Both ship the same
+    /// placements, so loading the twin here — on the background loader, where extracting it costs no interaction —
+    /// is what lets an edit be applied to both seasons at once. Best-effort: an archive with no twin (Sicily), or
+    /// one that cannot be extracted, simply edits its own season.
+    /// </summary>
+    private static (TranslokatorLoader? Table, FileInfo? Archive) LoadTwinTable(FileInfo crashSds)
     {
-        Matrix4x4 refT = TransformMath.ComputeWorldTransform(frame.LocalTransform, parent);
-        refT.M44 = 1.0f;
-        if (frame is FrameObjectSingleMesh sm && sm.Geometry != null) parts.Add((sm, refT));
-        foreach (FrameObjectBase c in frame.Children) CollectParts(c, refT, parts);
+        string stem = Path.GetFileNameWithoutExtension(crashSds.Name);
+        string twinStem = stem.EndsWith("_z", StringComparison.OrdinalIgnoreCase) ? stem[..^2] : stem + "_z";
+        var twinArchive = new FileInfo(Path.Combine(crashSds.DirectoryName!, twinStem + ".sds"));
+        if (!twinArchive.Exists) return (null, null);
+
+        try
+        {
+            string twinExtracted = EnsureExtracted(twinArchive);
+            string? twinTra = SdsTranslokatorSaver.ResolvePath(twinExtracted);
+            return twinTra == null ? (null, null) : (new TranslokatorLoader(new FileInfo(twinTra)), twinArchive);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     // Builds tree roots from FrameResource. instanceMap (if provided) marks prototype meshes as instanced.

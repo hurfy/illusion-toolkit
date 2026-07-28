@@ -55,6 +55,15 @@ internal static class ProbeRunner
             case "--probe-crash":
                 SceneProbes.RunCrashProbe(args.Length >= 2 && args[1] == "winter");
                 return true;
+            // city_crash editing: the .tra write path, the placement transform round trip, the streaming-grid
+            // bookkeeping behind add/move/delete, and the summer↔winter mirror.
+            case "--probe-crash-edit":
+                CrashEditProbes.RunCrashEditProbe();
+                return true;
+            // Build cost of one archive, split into read+compress / write / backup (packs to a scratch file).
+            case "--probe-packperf":
+                PackPerfProbes.RunPackPerfProbe(args.Length >= 2 ? args[1] : null);
+                return true;
             // GPU smoke: context + renderer (compiling both shaders) + instanced draw.
             case "--probe-gpu":
                 GpuProbes.RunGpuProbe();

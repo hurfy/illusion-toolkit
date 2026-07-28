@@ -88,8 +88,14 @@ internal sealed class ScenePersistence
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<FileInfo>();
         foreach (SceneNode fr in _editedFrames)
-            if (fr.Source is ISceneDocument doc && _host.Tree.IsInScene(fr) && seen.Add(doc.SourceArchive.FullName))
-                list.Add(doc.SourceArchive);
+        {
+            if (fr.Source is not ISceneDocument doc || !_host.Tree.IsInScene(fr)) continue;
+            if (seen.Add(doc.SourceArchive.FullName)) list.Add(doc.SourceArchive);
+            // A seasonal crash edit also wrote the other season's archive — that one has no tree node of its
+            // own, so without this the build would leave it holding the previous table.
+            foreach (FileInfo companion in doc.CompanionArchives)
+                if (seen.Add(companion.FullName)) list.Add(companion);
+        }
         return list;
     }
 
@@ -108,26 +114,42 @@ internal sealed class ScenePersistence
         foreach (SceneNode fr in _editedFrames.ToList())
         {
             if (fr.Source is not ISceneDocument doc || !_host.Tree.IsInScene(fr)) { _editedFrames.Remove(fr); continue; }
-            FileInfo sds = doc.SourceArchive;
+            Enlist(doc.SourceArchive, fr);
+            // The other season's archive of a crash edit: packed alongside, and grouped under the same frame so a
+            // failure to pack either one keeps the edit buildable for a retry.
+            foreach (FileInfo companion in doc.CompanionArchives) Enlist(companion, fr);
+        }
+
+        void Enlist(FileInfo sds, SceneNode frame)
+        {
             if (!byArchive.TryGetValue(sds.FullName, out (FileInfo Sds, List<SceneNode> Frames) entry))
                 byArchive[sds.FullName] = entry = (sds, new List<SceneNode>());
-            entry.Frames.Add(fr);
+            entry.Frames.Add(frame);
         }
 
         var packed = new List<SdsWriter.PackResult>();
         var failed = new List<D3DImageHost.BuildFailure>();
+        var stillPending = new HashSet<SceneNode>();
+        var packedFrames = new HashSet<SceneNode>();
         DateTime when = DateTime.Now; // one stamp for the whole build, so co-packed archives group in backups\
         foreach ((FileInfo sds, List<SceneNode> frames) in byArchive.Values)
         {
             try
             {
                 packed.Add(SdsWriter.PackSds(sds, createBackup, when));
-                foreach (SceneNode fr in frames) _editedFrames.Remove(fr); // drop only on a successful pack
+                foreach (SceneNode fr in frames) packedFrames.Add(fr);
             }
             catch (Exception ex)
             {
-                failed.Add(new D3DImageHost.BuildFailure(sds.FullName, ex.Message)); // leave frames buildable for a retry
+                failed.Add(new D3DImageHost.BuildFailure(sds.FullName, ex.Message));
+                // A seasonal edit spans two archives under one frame: if either fails to pack, the frame stays
+                // buildable so a retry covers the archive that did not make it.
+                foreach (SceneNode fr in frames) stillPending.Add(fr);
             }
+        }
+        foreach (SceneNode fr in packedFrames)
+        {
+            if (!stillPending.Contains(fr)) _editedFrames.Remove(fr); // drop only on a fully successful pack
         }
         _host.RaiseDirtyChanged();
         return new D3DImageHost.BuildReport(packed, failed);

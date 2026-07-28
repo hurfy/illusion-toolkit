@@ -153,6 +153,9 @@ internal static partial class MiscNativeMethods
     [LibraryImport(NativeMethods.LibraryName, EntryPoint = "mf_tra_load")]
     internal static unsafe partial int TraLoad(byte* file, ulong len, out MfRawBuffer modelWire);
 
+    [LibraryImport(NativeMethods.LibraryName, EntryPoint = "mf_tra_save")]
+    internal static unsafe partial int TraSave(byte* modelWire, ulong len, out MfRawBuffer fileBytes);
+
     [LibraryImport(NativeMethods.LibraryName, EntryPoint = "mf_city_areas_load")]
     internal static unsafe partial int CityAreasLoad(byte* file, ulong len, out MfRawBuffer modelWire);
 

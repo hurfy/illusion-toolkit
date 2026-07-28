@@ -4,9 +4,8 @@ using Illusion.Formats.Mathematics;
 
 namespace Illusion.Formats.Translokator;
 
-// Vendored from MafiaToolkit (ResourceTypes/FileTypes/Translokator/Translokator.cs), READ-ONLY:
-// dropped write/compile/XML/grid-rebuild paths (Illusion only reads .tra to spawn instances).
-// Parse layout + decompression math copied verbatim so instance transforms match the toolkit.
+// Vendored from MafiaToolkit (ResourceTypes/FileTypes/Translokator/Translokator.cs): dropped the
+// compile/XML paths, and the byte layout now lives in the native core, which reads and writes it.
 // MathHelper.ToRadians/ToDegrees inlined (vendored MathHelpers lacks them).
 
 public sealed class Grid
@@ -76,7 +75,10 @@ public sealed class Object
     public byte[] UnkBytes1 = null!;
     public float GridMax;
     public float GridMin;
-    public Instance[] Instances = Array.Empty<Instance>();
+
+    /// <summary>Every placement of this object in the world. A list rather than an array because
+    /// the editor adds and removes placements.</summary>
+    public List<Instance> Instances = [];
 }
 
 public sealed class ObjectGroup
@@ -117,4 +119,11 @@ public sealed class TranslokatorLoader
         Native.Misc.NativeMiscFiles.ReadTranslokator(this, bytes);
     }
 
+    /// <summary>Encodes the table back to its on-disk form. Placements are re-quantized from
+    /// <see cref="Instance.Position"/>/<see cref="Instance.Rotation"/>/<see cref="Instance.Scale"/>,
+    /// so an untouched table round-trips byte for byte and an edited one carries the edit.</summary>
+    public byte[] ToBytes()
+    {
+        return Native.Misc.NativeMiscFiles.TranslokatorToBytes(this);
+    }
 }

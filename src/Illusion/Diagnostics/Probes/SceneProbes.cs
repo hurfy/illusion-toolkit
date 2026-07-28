@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Numerics;
 using System.Text;
 using Illusion.Assets;
@@ -1533,7 +1533,7 @@ internal static class SceneProbes
                 foreach (Formats.Translokator.Object obj in g.Objects)
                 {
                     objs++;
-                    totalInstances += obj.Instances.Length;
+                    totalInstances += obj.Instances.Count;
                     FrameObjectBase? groupRef = fr?.GetObjectByHash<FrameObjectBase>(obj.Name.Hash);
                     if (groupRef == null) continue;
                     resolved++;
@@ -1542,22 +1542,22 @@ internal static class SceneProbes
                     var parts = new List<(FrameObjectSingleMesh mesh, Matrix4x4 refT)>();
                     foreach (FrameObjectBase c in groupRef.Children) CollectParts(c, Matrix4x4.Identity, parts);
                     totalParts += parts.Count;
-                    totalRenderables += (long)parts.Count * obj.Instances.Length;
+                    totalRenderables += (long)parts.Count * obj.Instances.Count;
 
-                    if (sampleShown < 12 && parts.Count > 0 && obj.Instances.Length > 0)
+                    if (sampleShown < 12 && parts.Count > 0 && obj.Instances.Count > 0)
                     {
                         sampleShown++;
                         Instance inst = obj.Instances[0];
                         Matrix4x4 instTRS = TransformMath.Compose(inst.Quaternion, new Vector3(inst.Scale), inst.Position);
                         Matrix4x4 world = parts[0].refT * instTRS;
-                        sb.AppendLine($"[{g.ActorType}] '{obj.Name}' ({obj.Name.Hash:X}) inst={obj.Instances.Length} parts={parts.Count} " +
+                        sb.AppendLine($"[{g.ActorType}] '{obj.Name}' ({obj.Name.Hash:X}) inst={obj.Instances.Count} parts={parts.Count} " +
                                       $"mesh0='{parts[0].mesh.Name}' inst0.pos={inst.Position} scale={inst.Scale:F2} → world.T={world.Translation}");
                     }
                 }
             }
 
             // Full loader path (as at runtime): LoadCrashHierarchy → MeshData.Instances.
-            var (roots, allMeshes, _) = SdsMeshLoader.LoadCrashHierarchy(sds);
+            var (roots, allMeshes, _, _) = SdsMeshLoader.LoadCrashHierarchy(sds);
             int leaves = 0, instancedLeaves = 0;
             long loadedInstances = 0, instancedTris = 0;
             foreach (MeshData md in allMeshes)
