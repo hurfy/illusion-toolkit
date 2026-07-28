@@ -17,8 +17,8 @@ namespace Illusion.Rendering.Controls;
 
 /// <summary>
 /// Reusable WPF 3D viewport: owns the render pipeline once — <see cref="GpuContext"/> + <see cref="SceneRenderer"/>
-/// drawing into a shared <see cref="D3DImage"/> surface — plus a free fly-camera (WASD to move, middle mouse to
-/// look; speed comes solely from <see cref="Camera.MoveSpeed"/>), preset/orbit camera tweening, the <see cref="CompositionTarget.Rendering"/> render loop
+/// drawing into a shared <see cref="D3DImage"/> surface — plus a camera with two ways to drive it
+/// (<see cref="WalkMode"/>: mouse-only orbit/pan/zoom, or WASD flying with mouse-look), preset/orbit camera tweening, the <see cref="CompositionTarget.Rendering"/> render loop
 /// with a per-frame GPU-completion fence, and the navigation-gizmo surface (<see cref="IGizmoTarget"/>). It renders
 /// whatever meshes its <see cref="Renderer"/> holds and switches shading modes seamlessly, but it knows nothing about
 /// where geometry comes from: a caller/subclass owns the scene tree and feeds the renderer. Reuse it for any editor
@@ -35,8 +35,9 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     protected SceneRenderer? Renderer { get; private set; }
 
     private readonly HashSet<Key> _keys = new();
-    private bool _looking;
+    private bool _navigating;   // a middle-button drag is under way (look, orbit or pan)
     private Point _lastMouse;
+    private bool _walkMode;
 
     // Parent window we attach fly-camera key handlers to in OnLoaded — kept so Dispose can detach them
     // (an Unloaded→Loaded cycle, e.g. tab switch, would otherwise re-subscribe and leak).
@@ -61,6 +62,20 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         set { if (Renderer != null) Renderer.Camera.MoveSpeed = value; }
     }
     public event Action? CameraMoved;
+
+    /// <summary>
+    /// Walk mode: the keyboard flies the camera (WASD) and a middle-button drag looks around — the way you cross
+    /// a whole district. Off (the default) the camera is driven by the mouse alone, Blender-style: middle drag
+    /// orbits the point ahead, Shift+middle slides it, the wheel moves toward it. Off is what leaves the letter
+    /// keys free, so the modal transforms only exist there.
+    /// </summary>
+    public bool WalkMode
+    {
+        get => _walkMode;
+        // Keys held as the mode flips would otherwise stay "down" (no KeyUp reaches a mode that ignores them)
+        // and fly the camera by themselves the next time walk mode comes back.
+        set { if (_walkMode != value) { _walkMode = value; _keys.Clear(); } }
+    }
 
     // ── Navigation gizmo support (Blender-style axis widget) ──
 
@@ -190,8 +205,11 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
             // Alt+Tab away (e.g. to the game) delivers the KeyUp to the other app — a held WASD key would
             // stick and fly the camera unattended for as long as the window stays in the background.
             _onDeactivated = (_, _) => _keys.Clear();
-            _window.KeyDown += _onKeyDown;
-            _window.KeyUp += _onKeyUp;
+            // handledEventsToo: this set is the PHYSICAL state of the movement keys, not a command channel. The
+            // window swallows some of them on purpose (Ctrl+S is Save, but in walk mode it is also "creep
+            // backwards"), and a swallowed key-down with a delivered key-up would leave the set inconsistent.
+            _window.AddHandler(Keyboard.KeyDownEvent, _onKeyDown, handledEventsToo: true);
+            _window.AddHandler(Keyboard.KeyUpEvent, _onKeyUp, handledEventsToo: true);
             _window.Deactivated += _onDeactivated;
         }
 
@@ -254,7 +272,7 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
         OnFrameUpdate(dt);   // subclass: per-frame scene work (loading/streaming) before the camera moves
 
-        if (_tweening && (_looking || AnyMoveKey())) _tweening = false; // manual input cancels the preset animation
+        if (_tweening && (_navigating || AnyMoveKey())) _tweening = false; // manual input cancels the preset animation
         UpdateCameraTween(dt);
         UpdateCamera(dt);
         CameraMoved?.Invoke();
@@ -281,9 +299,15 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
     private void UpdateCamera(float dt)
     {
-        // WASD only: forward/back along the look direction, strafe left/right. No dedicated vertical keys and no
-        // speed modifier — altitude is gained by looking up/down and moving forward; speed is Camera.MoveSpeed.
-        float speed = Renderer!.Camera.MoveSpeed * dt;
+        if (!_walkMode) return;   // navigation mode is mouse-only — the letter keys belong to the editor there
+
+        // WASD only: forward/back along the look direction, strafe left/right. No dedicated vertical keys —
+        // altitude is gained by looking up/down and moving forward. Base speed is Camera.MoveSpeed (the status
+        // bar's field); held Shift covers ground, held Ctrl creeps. Read from the live modifier state rather
+        // than the held-key set, so a modifier released while the window was in the background cannot stick.
+        ModifierKeys mods = Keyboard.Modifiers;
+        float speed = Renderer!.Camera.MoveSpeed * dt * CameraNavigator.SpeedMultiplier(
+            (mods & ModifierKeys.Shift) != 0, (mods & ModifierKeys.Control) != 0);
         float fwd = 0, right = 0;
         if (_keys.Contains(Key.W)) fwd += 1;
         if (_keys.Contains(Key.S)) fwd -= 1;
@@ -352,11 +376,29 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     {
         if (Renderer == null) return;
         _tweening = false;
+        CameraNavigator.Orbit(Renderer.Camera, _orbitDistance, deltaYaw, deltaPitch);
+    }
+
+    /// <summary>
+    /// Tween the camera to frame a sphere — an object the user asked to look at — keeping the direction it is
+    /// already looking from, and make that sphere's centre the point it orbits and zooms around from now on.
+    /// </summary>
+    public void FrameOn(Vector3 center, float radius)
+    {
+        if (Renderer == null) return;
         Camera cam = Renderer.Camera;
-        Vector3 pivot = cam.Position + cam.Forward * _orbitDistance;
-        cam.Yaw += deltaYaw;
-        cam.Pitch = Math.Clamp(cam.Pitch + deltaPitch, -PitchLimit, PitchLimit);
-        cam.Position = pivot - cam.Forward * _orbitDistance;
+        (Vector3 eye, float distance) = CameraNavigator.FrameOn(cam, center, radius);
+        _orbitDistance = distance;
+
+        _tweenStartPos = cam.Position;
+        _tweenStartYaw = cam.Yaw;
+        _tweenStartPitch = cam.Pitch;
+        _tweenEndPos = eye;
+        _tweenEndYaw = cam.Yaw;       // only the standoff changes; the viewing direction is kept
+        _tweenEndPitch = cam.Pitch;
+        _tweenT = 0f;
+        _tweenDur = 0.28f;
+        _tweening = true;
     }
 
     private void UpdateCameraTween(float dt)
@@ -385,8 +427,9 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         Focus();
         if (e.ChangedButton == MouseButton.Middle)
         {
-            // Middle mouse drives the free-look (replaces the old right-mouse look).
-            _looking = true;
+            // Middle mouse is the whole navigation stick: it looks around in walk mode, and orbits (or pans with
+            // Shift) otherwise.
+            _navigating = true;
             _lastMouse = e.GetPosition(this);
             CaptureMouse();
         }
@@ -402,10 +445,10 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     {
         if (e.ChangedButton == MouseButton.Middle)
         {
-            _looking = false;
+            _navigating = false;
             ReleaseMouseCapture();
         }
-        else if (e.ChangedButton == MouseButton.Right && !_looking)
+        else if (e.ChangedButton == MouseButton.Right && !_navigating)
         {
             // Right-click on the render surface — subclass hook (context menu). On release, the Windows
             // convention for context menus; the right button plays no part in camera navigation (that is
@@ -417,24 +460,53 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_looking || Renderer == null) return;
-        // Defend against a lost/stale look state: if the middle button isn't actually held, stop looking (and
+        if (!_navigating || Renderer == null) return;
+        // Defend against a lost/stale drag state: if the middle button isn't actually held, stop navigating (and
         // don't apply a huge delta against a stale _lastMouse). OnLostMouseCapture is the primary safety net.
-        if (e.MiddleButton != MouseButtonState.Pressed) { _looking = false; return; }
+        if (e.MiddleButton != MouseButtonState.Pressed) { _navigating = false; return; }
         Point p = e.GetPosition(this);
         float dx = (float)(p.X - _lastMouse.X);
         float dy = (float)(p.Y - _lastMouse.Y);
         _lastMouse = p;
         const float sens = 0.005f;
-        Renderer.Camera.AddLook(-dx * sens, -dy * sens);
+
+        if (_walkMode)
+        {
+            Renderer.Camera.AddLook(-dx * sens, -dy * sens);   // stand still and turn on the spot
+            return;
+        }
+
+        // Shift is read per move, not at button-down, so a drag can slide into a pan and back without letting go.
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+            CameraNavigator.Pan(Renderer.Camera, _orbitDistance, dx, dy, ActualHeight);
+        else
+            CameraNavigator.Orbit(Renderer.Camera, _orbitDistance, -dx * sens, -dy * sens);
     }
 
-    // Mouse capture can be lost without a button-up (window deactivation / Alt+Tab) — end look mode so a later
+    /// <summary>Moves the camera toward (positive notches) or away from the point it is aimed at. Public so an
+    /// overlay that sits on top of the render surface — and therefore swallows the wheel — can hand it back.</summary>
+    public void Zoom(float notches)
+    {
+        if (Renderer == null) return;
+        _tweening = false;
+        _orbitDistance = CameraNavigator.Dolly(Renderer.Camera, _orbitDistance, notches);
+    }
+
+    /// <summary>Wheel zooms toward the point the camera is aimed at. Overridden by a subclass that orbits
+    /// something of its own — it must NOT call this base, or both zooms would apply to one notch.</summary>
+    protected override void OnMouseWheel(MouseWheelEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        Zoom(e.Delta / (float)Mouse.MouseWheelDeltaForOneLine);
+        e.Handled = true;
+    }
+
+    // Mouse capture can be lost without a button-up (window deactivation / Alt+Tab) — end the drag so a later
     // bare mouse-move can't spin the camera against a stale anchor. Capture is already gone; don't release again.
     protected override void OnLostMouseCapture(MouseEventArgs e)
     {
         base.OnLostMouseCapture(e);
-        _looking = false;
+        _navigating = false;
     }
 
     /// <summary>Hook: left-click on the render surface at <paramref name="pos"/>. Base does nothing; a subclass picks/selects.</summary>
@@ -483,8 +555,8 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         CompositionTarget.Rendering -= OnRendering;
         if (_window != null)
         {
-            if (_onKeyDown != null) _window.KeyDown -= _onKeyDown;
-            if (_onKeyUp != null) _window.KeyUp -= _onKeyUp;
+            if (_onKeyDown != null) _window.RemoveHandler(Keyboard.KeyDownEvent, _onKeyDown);
+            if (_onKeyUp != null) _window.RemoveHandler(Keyboard.KeyUpEvent, _onKeyUp);
             if (_onDeactivated != null) _window.Deactivated -= _onDeactivated;
             _window = null;
         }

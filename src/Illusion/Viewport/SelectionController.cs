@@ -87,6 +87,30 @@ internal sealed class SelectionController
         GizmoPivot = ComputeGroupPivot();
     }
 
+    /// <summary>Combined world bounds of the selection — what "look at this" has to fit in frame. A node with no
+    /// measurable geometry (a frame with no mesh) contributes its origin, so a selection of those still yields a
+    /// point to fly to. False when nothing is selected.</summary>
+    public bool TryGetSelectionBounds(out Vector3 min, out Vector3 max)
+    {
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+        foreach (SceneNode n in _selected)
+        {
+            if (n.TryGetWorldBounds(out Vector3 lo, out Vector3 hi))
+            {
+                min = Vector3.Min(min, lo);
+                max = Vector3.Max(max, hi);
+            }
+            else if (n.Source is IFrameNode fn)
+            {
+                Vector3 p = fn.WorldTransform.Translation;
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+            }
+        }
+        return min.X <= max.X;
+    }
+
     /// <summary>True when at least one selected node is a transformable frame object.</summary>
     public bool AnyTransformable()
     {

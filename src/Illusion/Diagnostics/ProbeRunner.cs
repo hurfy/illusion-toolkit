@@ -95,6 +95,18 @@ internal static class ProbeRunner
             case "--probe-edit":
                 EditorProbes.RunEditProbe();
                 return true;
+            // Viewport navigation (headless): the mouse-only camera (orbit keeps its pivot, pan follows the zoom
+            // level, zoom stops short of the pivot, frame-selected really puts the object on screen) and the
+            // modal transform's lifecycle (starts, owns the keyboard, ends kept or put back).
+            case "--probe-navigation":
+                NavigationProbes.RunNavigationProbe();
+                return true;
+            // Blender-style axis lock (headless): the X/Y/Z + Shift toggle state machine and the constrained
+            // drag solve — locked moves stay on their axis, plane locks leave the excluded one alone, and an
+            // edge-on view refuses rather than flinging the object.
+            case "--probe-axislock":
+                EditorProbes.RunAxisLockProbe();
+                return true;
             // UI smoke: the Vector3Box control loads + its copy/paste format round-trips (no game data, no GPU).
             case "--probe-ui":
                 EditorProbes.RunUiProbe();

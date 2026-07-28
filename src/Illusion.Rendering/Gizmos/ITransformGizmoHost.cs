@@ -14,6 +14,9 @@ public interface ITransformGizmoHost
     GizmoMode GizmoMode { get; }
     /// <summary>A transformable frame object is selected and a manipulation tool is active.</summary>
     bool HasGizmoTarget { get; }
+    /// <summary>A transformable frame object is selected, whatever tool is active — a modal transform is
+    /// started from the keyboard and does not go through the tool shelf.</summary>
+    bool CanTransformSelection { get; }
     /// <summary>World-space pivot the gizmo sits at (selection bounds centre).</summary>
     Vector3 GizmoPivot { get; }
     /// <summary>Raised each frame the camera changes so the overlay repaints.</summary>
@@ -22,4 +25,7 @@ public interface ITransformGizmoHost
     void GizmoBeginDrag();
     void GizmoApplyWorldDelta(Matrix4x4 totalWorldDelta);
     void GizmoEndDrag();
+    /// <summary>Abandons the drag in progress: the objects go back to where they started and nothing is
+    /// recorded. The caller has already applied an identity delta, so this only drops the drag's state.</summary>
+    void GizmoCancelDrag();
 }

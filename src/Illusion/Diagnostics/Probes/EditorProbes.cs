@@ -2,6 +2,7 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -228,6 +229,216 @@ internal static class EditorProbes
             sb.Insert(0, "EDIT PROBE: FAIL\n\n");
         }
         finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    // Blender-style axis lock (headless, no game data, no GPU): the X/Y/Z + Shift toggle state machine, and the
+    // constrained-drag solve behind it — a locked drag must move along exactly the axis it names, a plane-locked
+    // one must leave the excluded axis untouched, and a viewpoint that cannot answer must refuse rather than
+    // fling the object across the map. Output: %TEMP%\illusion_axislock.txt
+    internal static void RunAxisLockProbe()
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_axislock.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        try
+        {
+            // 1) The toggle state machine — one key press at a time, exactly as the gizmo feeds it.
+            AxisConstraint c = AxisConstraint.None;
+            Check("a drag starts with no lock", !c.IsSome);
+
+            c = AxisConstraint.Toggle(c, 0, plane: false);
+            Check("X locks the X axis", c is { Axis: 0, IsPlane: false });
+
+            c = AxisConstraint.Toggle(c, 0, plane: false);
+            Check("X again releases the lock", !c.IsSome);
+
+            c = AxisConstraint.Toggle(AxisConstraint.Toggle(c, 0, plane: false), 0, plane: true);
+            Check("X then Shift+X swaps the axis lock for its plane", c is { Axis: 0, IsPlane: true });
+
+            c = AxisConstraint.Toggle(c, 1, plane: false);
+            Check("Y takes over from a plane lock", c is { Axis: 1, IsPlane: false });
+            Check("Shift+Y on top of a Y lock becomes the plane across Y", AxisConstraint.Toggle(c, 1, plane: true).IsPlane);
+
+            // 2) What each lock lets through.
+            var lockX = new AxisConstraint(0, false);
+            var planeZ = new AxisConstraint(2, true);
+            Check("an axis lock passes only its own axis",
+                lockX.Includes(0) && !lockX.Includes(1) && !lockX.Includes(2));
+            Check("a plane lock passes everything but the excluded axis",
+                planeZ.Includes(0) && planeZ.Includes(1) && !planeZ.Includes(2));
+            Check("no lock passes all three axes",
+                AxisConstraint.None.Includes(0) && AxisConstraint.None.Includes(1) && AxisConstraint.None.Includes(2));
+
+            Check("labels name the axis / the free pair",
+                lockX.Label == "X" && planeZ.Label == "XY" && new AxisConstraint(1, true).Label == "XZ",
+                $"{lockX.Label} {planeZ.Label} {new AxisConstraint(1, true).Label}");
+
+            Check("an axis lock resizes only its axis", Approx(lockX.ScaleFactors(2f), new Vector3(2, 1, 1)));
+            Check("a plane lock resizes the other two", Approx(planeZ.ScaleFactors(2f), new Vector3(2, 2, 1)));
+
+            // 3) The constrained solve, on a 3/4 view where no world axis is edge-on. Pivot at the origin.
+            var cam = new Camera { AspectRatio = 4f / 3f };
+            cam.LookAt(new Vector3(0f, -60f, 40f), Vector3.Zero);
+            Matrix4x4 vp = cam.ViewProjection;
+            const int w = 800, h = 600;
+            (Vector3 Origin, Vector3 Dir) RayAt(double x, double y) => Picking.BuildRay(vp, cam.Position, x, y, w, h);
+
+            (Vector3 Origin, Vector3 Dir) centre = RayAt(w / 2.0, h / 2.0);
+
+            bool okX = GizmoRayMath.TryConstrainedMove(Vector3.Zero, lockX, centre, RayAt(w / 2.0 + 120, h / 2.0), out Vector3 dx);
+            Check("an X lock moves along X only", okX && dx.X > 0f && dx.Y == 0f && dx.Z == 0f, dx.ToString());
+
+            GizmoRayMath.TryConstrainedMove(Vector3.Zero, lockX, centre, RayAt(w / 2.0 + 240, h / 2.0), out Vector3 dx2);
+            Check("a longer pointer travel gives a longer move", MathF.Abs(dx2.X) > MathF.Abs(dx.X), $"{dx.X:F2} → {dx2.X:F2}");
+
+            // Dragging diagonally under a plane lock: both free axes move, the excluded one does not budge.
+            bool okPlane = GizmoRayMath.TryConstrainedMove(Vector3.Zero, planeZ, centre, RayAt(w / 2.0 + 150, h / 2.0 + 90), out Vector3 dp);
+            Check("a plane lock never touches the excluded axis", okPlane && MathF.Abs(dp.Z) < 1e-4f, dp.ToString());
+            Check("a plane lock does move along both free axes",
+                MathF.Abs(dp.X) > 1e-3f && MathF.Abs(dp.Y) > 1e-3f, dp.ToString());
+
+            // 4) A plane the camera is looking straight along cannot be solved — the drag must hold, not fling.
+            var flat = new Camera { AspectRatio = 4f / 3f };
+            flat.LookAt(new Vector3(0f, -60f, 0f), Vector3.Zero);   // dead level: the view lies inside the XY plane
+            Matrix4x4 flatVp = flat.ViewProjection;
+            (Vector3 Origin, Vector3 Dir) FlatRayAt(double x) => Picking.BuildRay(flatVp, flat.Position, x, h / 2.0, w, h);
+            Check("an edge-on plane lock refuses instead of flinging the object",
+                !GizmoRayMath.TryConstrainedMove(Vector3.Zero, planeZ, FlatRayAt(w / 2.0), FlatRayAt(w / 2.0 + 120), out _));
+
+            // 5) Rotation about the locked axis: a swept pointer gives an angle, and sweeping back undoes it.
+            bool okRot = GizmoRayMath.TryConstrainedRotate(Vector3.Zero, 2, RayAt(w / 2.0 + 150, h / 2.0),
+                RayAt(w / 2.0, h / 2.0 + 150), out float ang);
+            Check("a Z lock reads an angle off the pointer sweep", okRot && MathF.Abs(ang) > 1e-3f, $"{ang:F4} rad");
+
+            GizmoRayMath.TryConstrainedRotate(Vector3.Zero, 2, RayAt(w / 2.0, h / 2.0 + 150),
+                RayAt(w / 2.0 + 150, h / 2.0), out float back);
+            Check("sweeping the other way is the same angle negated", MathF.Abs(ang + back) < 1e-3f, $"{ang:F4} vs {back:F4}");
+
+            CheckOverlayClipping(Check);
+            CheckGuideCost(Check, sb);
+
+            sb.Insert(0, $"AXIS LOCK PROBE: {pass} passed, {fail} failed\n\n");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("EXCEPTION: " + ex);
+            sb.Insert(0, "AXIS LOCK PROBE: FAIL\n\n");
+        }
+        finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    // The transform overlay must never paint outside the viewport it sits on — WPF does not clip an element to
+    // its own bounds by default, and the axis-lock guide lines are deliberately many times the handle length, so
+    // unclipped they run straight across the hierarchy tree and the property panel. Clipping is a property of the
+    // ELEMENT, not of a drawing call, so this proves it with an ordinary Move handle: the pivot is put close to
+    // the right edge, where its X arm reaches past the boundary and is asserted to stop at it.
+    private const int OverlayW = 400, OverlayH = 300;
+
+    private static void CheckOverlayClipping(Action<string, bool, string> check)
+    {
+        const int elemW = OverlayW, elemH = OverlayH, bmpW = 600, bmpH = 500;
+
+        // Identity view-projection: a pivot in normalized device coordinates lands at a known pixel — x = 0.9
+        // puts it at 380 of 400, and the 90px axis arm wants to end at 470.
+        var host = new FakeTransformGizmoHost { GizmoPivot = new Vector3(0.9f, 0f, 0f) };
+        var gizmo = new TransformGizmo();
+        gizmo.Attach(host);
+        gizmo.Measure(new Size(elemW, elemH));
+        gizmo.Arrange(new Rect(0, 0, elemW, elemH));
+        gizmo.UpdateLayout();
+
+        // Rendered into a surface half again as large, so anything that escapes the element has somewhere to land.
+        var rtb = new RenderTargetBitmap(bmpW, bmpH, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(gizmo);
+        int stride = bmpW * 4;
+        var px = new byte[stride * bmpH];
+        rtb.CopyPixels(px, stride, 0);
+
+        int inside = 0, outside = 0, atEdge = 0;
+        for (int y = 0; y < bmpH; y++)
+        {
+            for (int x = 0; x < bmpW; x++)
+            {
+                if (px[y * stride + x * 4 + 3] == 0) continue;          // fully transparent — nothing drawn here
+                if (x >= elemW || y >= elemH) { outside++; continue; }
+                inside++;
+                if (x >= elemW - 10) atEdge++;
+            }
+        }
+
+        check("the overlay drew something to judge", inside > 0, $"{inside} px");
+        check("the handle really does reach the viewport edge (the check is not vacuous)", atEdge > 0, $"{atEdge} px");
+        check("nothing the overlay draws escapes the viewport bounds", outside == 0,
+            $"{outside} px outside {elemW}x{elemH}");
+    }
+
+    // A guide line runs far past the pivot, so its far end can land a hair in front of the camera — where the
+    // perspective divide throws the projected point millions of pixels off screen. Drawing a DASHED line that
+    // long, every frame the camera moves, is what a dropped frame rate feels like. A plane lock draws twice as
+    // many of them, which is why it shows up there first. Swept over pivot distances because whether the
+    // shortening loop lands on such an endpoint depends on where the camera happens to be.
+    private static void CheckGuideCost(Action<string, bool, string> check, StringBuilder sb)
+    {
+        var cam = new Camera { AspectRatio = (float)OverlayW / OverlayH };
+        cam.LookAt(Vector3.Zero, new Vector3(0f, 1f, 0f));   // at the origin, looking down +Y
+        var host = new FakeTransformGizmoHost
+        {
+            GizmoViewProjection = cam.ViewProjection,
+            GizmoCameraPosition = cam.Position,
+        };
+        var gizmo = new TransformGizmo();
+        gizmo.Attach(host);
+        gizmo.Measure(new Size(OverlayW, OverlayH));
+        gizmo.Arrange(new Rect(0, 0, OverlayW, OverlayH));
+        gizmo.UpdateLayout();
+
+        var centre = new Point(OverlayW / 2.0, OverlayH / 2.0);
+        var clock = new System.Diagnostics.Stopwatch();
+
+        // One timed sweep over pivot distances: the pivot sits straight ahead, so the guide along Y runs directly
+        // at the camera and out through the back of it. Returns the worst single repaint and where it happened.
+        (double Worst, float At, double Total) Sweep()
+        {
+            double worst = 0, total = 0;
+            float worstAt = 0;
+            for (int i = 0; i < 60; i++)
+            {
+                float distance = 2f + i * 0.37f;
+                host.GizmoPivot = new Vector3(0f, distance, 0f);
+                gizmo.BeginModal(GizmoMode.Move, centre);
+                gizmo.HandleModalKey(Key.Z, ModifierKeys.Shift);   // plane across Z → guides along BOTH X and Y
+
+                clock.Restart();
+                RenderOverlay(gizmo);
+                clock.Stop();
+                gizmo.EndModal(commit: false);
+
+                double ms = clock.Elapsed.TotalMilliseconds;
+                total += ms;
+                if (ms > worst) { worst = ms; worstAt = distance; }
+            }
+            return (worst, worstAt, total);
+        }
+
+        Sweep();                                  // discarded: the first constrained repaint pays for JIT,
+        (double worst, float at, double total) = Sweep();   // the text machinery and the dash geometry
+
+        sb.AppendLine($"       (guide-line repaint: worst {worst:F2} ms at pivot distance {at:F2}, " +
+                      $"mean {total / 60.0:F2} ms over 60)");
+        check("a plane lock's guide lines stay cheap to draw", worst < 5.0, $"worst frame {worst:F2} ms");
+    }
+
+    private static void RenderOverlay(TransformGizmo gizmo)
+    {
+        gizmo.InvalidateVisual();
+        gizmo.UpdateLayout();
+        new RenderTargetBitmap(OverlayW, OverlayH, 96, 96, PixelFormats.Pbgra32).Render(gizmo);
     }
 
     // UI smoke test: constructs the reusable Vector3Box (validates its XAML loads) and checks the copy/paste

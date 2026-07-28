@@ -624,6 +624,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <summary>True when at least one transformable frame object is selected and a manipulation tool is active.</summary>
     public bool HasGizmoTarget => GizmoMode != GizmoMode.None && Selection.AnyTransformable();
 
+    /// <summary>True when something transformable is selected, whatever the tool shelf says — the modal
+    /// transforms are keyboard-started and work under the Select tool too.</summary>
+    public bool CanTransformSelection => Selection.AnyTransformable();
+
     /// <summary>World pivot the gizmo sits at (cached group centroid — see SelectionController).</summary>
     public Vector3 GizmoPivot => Selection.GizmoPivot;
 
@@ -635,6 +639,18 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     /// <inheritdoc cref="TransformEditController.GizmoEndDrag"/>
     public void GizmoEndDrag() => Editing.GizmoEndDrag();
+
+    /// <inheritdoc cref="TransformEditController.GizmoCancelDrag"/>
+    public void GizmoCancelDrag() => Editing.GizmoCancelDrag();
+
+    /// <summary>Frames the selection: tweens the camera onto the selected objects' combined bounds and makes
+    /// their centre the point the camera orbits and zooms around. False when nothing measurable is selected.</summary>
+    public bool FrameSelection()
+    {
+        if (!Selection.TryGetSelectionBounds(out Vector3 min, out Vector3 max)) return false;
+        FrameOn((min + max) * 0.5f, (max - min).Length() * 0.5f);
+        return true;
+    }
 
     // ── Collaborator plumbing ──
 

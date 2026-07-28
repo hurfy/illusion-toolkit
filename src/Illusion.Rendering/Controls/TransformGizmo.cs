@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Input;
@@ -14,6 +15,8 @@ namespace Illusion.Rendering.Controls;
 /// (like the navigation gizmo) — it projects world handles to screen and maps drags back to world deltas.
 /// Hit-testing is limited to the handles (<see cref="HitTestCore"/> returns null elsewhere) so empty-space
 /// clicks fall through to the viewport for picking and camera look.
+/// Mid-drag, <see cref="HandleAxisKey"/> takes Blender's axis-lock keys (X/Y/Z, Shift+X/Y/Z) and re-solves the
+/// drag against that axis or plane instead of the grabbed handle.
 /// </summary>
 public sealed class TransformGizmo : FrameworkElement
 {
@@ -31,11 +34,13 @@ public sealed class TransformGizmo : FrameworkElement
     private static readonly Color HighlightColor = Color.FromRgb(0xFF, 0xD2, 0x4A); // hovered / active handle
 
     private static readonly Pen[] AxisPens = new Pen[3];
+    private static readonly Pen[] GuidePens = new Pen[3];   // axis-lock guide lines (thin, dashed)
     private static readonly Brush[] AxisBrushes = new Brush[3];
     private static readonly Pen HighlightPen;
     private static readonly Brush HighlightBrush;
     private static readonly Brush CenterBrush;
     private static readonly Pen CenterPen;
+    private static readonly Typeface LabelFace = new("Segoe UI");
 
     static TransformGizmo()
     {
@@ -44,6 +49,9 @@ public sealed class TransformGizmo : FrameworkElement
             AxisPens[i] = Freeze(new Pen(new SolidColorBrush(AxisColors[i]), 2.0)
             { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
             AxisBrushes[i] = Freeze(new SolidColorBrush(AxisColors[i]));
+            GuidePens[i] = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(
+                0xB4, AxisColors[i].R, AxisColors[i].G, AxisColors[i].B)), 1.0)
+            { DashStyle = new DashStyle(new double[] { 5, 4 }, 0) });
         }
         HighlightPen = Freeze(new Pen(new SolidColorBrush(HighlightColor), 2.6)
         { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
@@ -56,7 +64,9 @@ public sealed class TransformGizmo : FrameworkElement
 
     private ITransformGizmoHost? _host;
 
-    private enum HandleKind { None, MoveAxis, MovePlane, RotateAxis, ScaleAxis, ScaleUniform }
+    // RotateView is the modal free rotate: it turns about the axis pointing at the viewer, so the object spins
+    // in the screen plane. There is no ring for it — only the keyboard starts it.
+    private enum HandleKind { None, MoveAxis, MovePlane, RotateAxis, RotateView, ScaleAxis, ScaleUniform }
     private readonly record struct Handle(HandleKind Kind, int Axis)
     {
         public static readonly Handle None = new(HandleKind.None, -1);
@@ -74,13 +84,25 @@ public sealed class TransformGizmo : FrameworkElement
     private Vector3 _dragStartVec;      // rotate
     private Vector3 _dragPlaneNormal;   // move-plane / rotate
     private Vector3 _dragStartHit;      // move-plane
-    private double _dragStartScreenDist; // uniform scale
+    private double _dragStartScreenDist; // uniform / axis-locked scale
+    private Point _dragStartMouse;      // pointer at drag-start — an axis lock re-solves the drag from here
+    private Point _lastDragMouse;       // last pointer seen, so a key press can re-solve without mouse motion
+
+    // Keyboard axis lock (X/Y/Z, Shift+X/Y/Z) for the drag in progress. Cleared when the drag ends.
+    private AxisConstraint _constraint = AxisConstraint.None;
+
+    private bool _modal;            // the drag was started from the keyboard, with no button held
+    private bool _swallowRelease;   // a modal ended on a button PRESS; its release must not also click the viewport
 
     public TransformGizmo()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch;
         VerticalAlignment = VerticalAlignment.Stretch;
         Focusable = false;
+        // WPF does not clip an element's drawing to its own bounds. Without this the overlay paints across the
+        // whole window — the axis-lock guide lines run far past the pivot by design, and even a plain handle
+        // overflows once the pivot sits near an edge. The element fills the viewport cell, so bounds == viewport.
+        ClipToBounds = true;
     }
 
     /// <summary>Binds the gizmo to a host; it repaints whenever the camera moves.</summary>
@@ -115,7 +137,8 @@ public sealed class TransformGizmo : FrameworkElement
         // During a rotate/scale drag, anchor the whole gizmo to the FIXED drag pivot: the selection's AABB centre
         // (GizmoPivot) wanders as the object rotates/scales (a rotated box has a different AABB centre), which
         // otherwise makes the gizmo visibly jitter mid-drag. Move keeps following the object (its pivot is exact).
-        l.PivotWorld = _active.Kind is HandleKind.RotateAxis or HandleKind.ScaleAxis or HandleKind.ScaleUniform
+        l.PivotWorld = _active.Kind is HandleKind.RotateAxis or HandleKind.RotateView
+            or HandleKind.ScaleAxis or HandleKind.ScaleUniform
             ? _dragPivot : _host.GizmoPivot;
         if (!Project(vp, l.PivotWorld, w, h, out Point sp, out double ndcZ)) return l;
         l.Pivot = sp;
@@ -132,7 +155,7 @@ public sealed class TransformGizmo : FrameworkElement
             l.AxisEnd[i] = se;
         }
 
-        if (_host.GizmoMode == GizmoMode.Rotate)
+        if (EffectiveMode == GizmoMode.Rotate)
         {
             l.Rings = new Point[3][];
             for (int i = 0; i < 3; i++) l.Rings[i] = BuildRing(vp, l.PivotWorld, TransformOps.WorldAxes[i], l.HandleWorld, w, h);
@@ -193,15 +216,54 @@ public sealed class TransformGizmo : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
-        if (_host == null || !_host.HasGizmoTarget) return;
+        // A modal transform runs under any tool, Select included — so a drag in progress is reason enough to
+        // draw even when the tool shelf would show no gizmo at all.
+        if (_host == null || (!_host.HasGizmoTarget && !_active.IsSome)) return;
         Layout l = BuildLayout();
         if (!l.Valid) return;
 
-        switch (_host.GizmoMode)
+        DrawConstraint(dc, l);  // under the handles, so the guide lines never hide them
+
+        switch (EffectiveMode)
         {
             case GizmoMode.Move: DrawTranslate(dc, l); break;
             case GizmoMode.Scale: DrawScale(dc, l); break;
             case GizmoMode.Rotate: DrawRotate(dc, l); break;
+        }
+    }
+
+    // The axis lock made visible: a dashed guide line through the pivot along every axis the drag may still act
+    // on (one for an axis lock, two for a plane lock), plus a short label naming it.
+    private void DrawConstraint(DrawingContext dc, Layout l)
+    {
+        if (!_constraint.IsSome) return;
+        for (int i = 0; i < 3; i++)
+        {
+            if (!_constraint.Includes(i)) continue;
+            DrawGuideHalf(dc, GuidePens[i], l, TransformOps.WorldAxes[i]);
+            DrawGuideHalf(dc, GuidePens[i], l, -TransformOps.WorldAxes[i]);
+        }
+
+        Brush brush = _constraint.IsPlane ? CenterPen.Brush : AxisBrushes[_constraint.Axis];
+        var text = new FormattedText(_constraint.Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+            LabelFace, 12.0, brush, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        dc.DrawText(text, new Point(l.Pivot.X + CenterR + 5, l.Pivot.Y + CenterR - 2));
+    }
+
+    // One half of a guide line, pivot outwards. A world-long line easily reaches behind the camera (where it
+    // cannot be projected), so the length is halved until the far end lands in front of it — and the result is
+    // then cut down to the viewport. That trim is not cosmetic: an endpoint that ends up just barely in front of
+    // the camera projects millions of pixels away, and handing a dashed line that long to the graphics layer
+    // costs whole frames (measured at 17 ms for one overlay repaint) even though almost none of it is visible.
+    private void DrawGuideHalf(DrawingContext dc, Pen pen, Layout l, Vector3 dir)
+    {
+        Matrix4x4 vp = _host!.GizmoViewProjection;
+        double w = ActualWidth, h = ActualHeight;
+        for (double len = l.HandleWorld * 40; len >= l.HandleWorld; len *= 0.5)
+        {
+            if (!Project(vp, l.PivotWorld + dir * (float)len, w, h, out Point end, out _)) continue;
+            if (ScreenClip.SegmentToRect(l.Pivot, end, w, h, out Point from, out Point to)) dc.DrawLine(pen, from, to);
+            return;
         }
     }
 
@@ -251,8 +313,11 @@ public sealed class TransformGizmo : FrameworkElement
         }
     }
 
+    // Which handle draws highlighted: normally the hovered (or dragged) one — but an axis lock overrides it, so
+    // the axes the drag may still act on light up instead of whichever handle the pointer happened to grab.
     private bool IsHot(HandleKind kind, int axis)
     {
+        if (_constraint.IsSome) return axis >= 0 && _constraint.Includes(axis);
         Handle h = _active.IsSome ? _active : _hover;
         return h.Kind == kind && h.Axis == axis;
     }
@@ -350,6 +415,17 @@ public sealed class TransformGizmo : FrameworkElement
     {
         base.OnMouseLeftButtonDown(e);
         if (_host == null) return;
+
+        // A click is how a modal transform is accepted. Capture is held until the button comes back up, so the
+        // release cannot fall through to the viewport and re-pick whatever is under the pointer.
+        if (_modal)
+        {
+            Finish(commit: true, releaseCapture: false);
+            _swallowRelease = true;
+            e.Handled = true;
+            return;
+        }
+
         Point p = e.GetPosition(this);
         Handle h = HitTest(p);
         if (!h.IsSome) return;
@@ -361,11 +437,29 @@ public sealed class TransformGizmo : FrameworkElement
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonUp(e);
+        if (_swallowRelease) { _swallowRelease = false; ReleaseMouseCapture(); e.Handled = true; return; }
         if (!_active.IsSome) return;
-        _active = Handle.None;
-        _host?.GizmoEndDrag();
+        Finish(commit: true, releaseCapture: true);
+        e.Handled = true;
+    }
+
+    // Right-click abandons a modal transform, the way it does in Blender. Same capture trick as the left button:
+    // letting the release through would pop the viewport's context menu on top of the cancel.
+    protected override void OnMouseRightButtonDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseRightButtonDown(e);
+        if (!_modal) return;
+        Finish(commit: false, releaseCapture: false);
+        _swallowRelease = true;
+        e.Handled = true;
+    }
+
+    protected override void OnMouseRightButtonUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseRightButtonUp(e);
+        if (!_swallowRelease) return;
+        _swallowRelease = false;
         ReleaseMouseCapture();
-        InvalidateVisual();
         e.Handled = true;
     }
 
@@ -382,8 +476,19 @@ public sealed class TransformGizmo : FrameworkElement
     {
         base.OnLostMouseCapture(e);
         if (!_active.IsSome) return;
+        // Keep what the user had built up rather than silently reverting it — a wrong result is one Ctrl+Z away,
+        // a lost one is not.
+        Finish(commit: true, releaseCapture: false);
+    }
+
+    // The single exit from any drag or modal: hand the result to the host (or put it back), then drop the state.
+    private void Finish(bool commit, bool releaseCapture)
+    {
         _active = Handle.None;
-        _host?.GizmoEndDrag();
+        _constraint = AxisConstraint.None;
+        _modal = false;
+        if (commit) _host?.GizmoEndDrag(); else _host?.GizmoCancelDrag();
+        if (releaseCapture && IsMouseCaptured) ReleaseMouseCapture();
         InvalidateVisual();
     }
 
@@ -391,9 +496,18 @@ public sealed class TransformGizmo : FrameworkElement
     {
         if (_host == null) return;
         _active = h;
+        _constraint = AxisConstraint.None;   // every drag starts free; the lock is per-drag
+        _swallowRelease = false;             // no stale "eat the next button release" from an earlier modal
+        _precision.Reset();                  // Ctrl-precision is per-drag too: no offset carried in from the last
         _host.GizmoBeginDrag();
         _dragPivot = _host.GizmoPivot;
-        _dragHandleWorld = Math.Max(1e-4, BuildLayout().HandleWorld);
+        Layout layout = BuildLayout();
+        _dragHandleWorld = Math.Max(1e-4, layout.HandleWorld);
+        // Kept for every handle, not just the uniform one: an axis lock measures scale by pointer distance to
+        // the pivot whatever was grabbed, and re-solves a move/rotate from the pointer position it started at.
+        _dragStartScreenDist = Math.Max(1.0, Dist(mouse, layout.Pivot));
+        _dragStartMouse = mouse;
+        _lastDragMouse = mouse;
         (Vector3 o, Vector3 d) = Ray(mouse);
 
         switch (h.Kind)
@@ -401,21 +515,19 @@ public sealed class TransformGizmo : FrameworkElement
             case HandleKind.MoveAxis:
             case HandleKind.ScaleAxis:
                 _dragAxis = TransformOps.WorldAxes[h.Axis];
-                _dragStartAxisT = ClosestAxisParam(_dragPivot, _dragAxis, o, d);
+                _dragStartAxisT = GizmoRayMath.ClosestAxisParam(_dragPivot, _dragAxis, o, d);
                 break;
             case HandleKind.MovePlane:
                 _dragPlaneNormal = ViewDir();
-                RayPlane(o, d, _dragPivot, _dragPlaneNormal, out _dragStartHit);
+                GizmoRayMath.RayPlane(o, d, _dragPivot, _dragPlaneNormal, out _dragStartHit);
                 break;
             case HandleKind.RotateAxis:
-                _dragAxis = TransformOps.WorldAxes[h.Axis];
+            case HandleKind.RotateView:
+                // A ring turns about its own world axis; the modal free rotate turns about the line of sight.
+                _dragAxis = h.Kind == HandleKind.RotateView ? ViewDir() : TransformOps.WorldAxes[h.Axis];
                 _dragPlaneNormal = _dragAxis;
-                RayPlane(o, d, _dragPivot, _dragPlaneNormal, out Vector3 hit);
+                GizmoRayMath.RayPlane(o, d, _dragPivot, _dragPlaneNormal, out Vector3 hit);
                 _dragStartVec = hit - _dragPivot;
-                break;
-            case HandleKind.ScaleUniform:
-                Layout l = BuildLayout();
-                _dragStartScreenDist = Math.Max(1.0, Dist(mouse, l.Pivot));
                 break;
         }
         CaptureMouse();
@@ -427,17 +539,119 @@ public sealed class TransformGizmo : FrameworkElement
     private const float RotateStepDeg = 15f;  // degrees
     private const float ScaleStep = 0.1f;     // factor
 
+    // Held Ctrl is the opposite of stepping: the transform follows a tenth of the pointer's movement, so the
+    // last little bit can be dialled in without the mouse fighting back. It works by slowing the POINTER the
+    // tools are solved against, which is why no tool has to know about it.
+    private readonly PrecisionPointer _precision = new();
+
+    private Point SolvePointer(Point raw) =>
+        _precision.Solve(raw, (Keyboard.Modifiers & ModifierKeys.Control) != 0);
+
+    /// <summary>True while a keyboard-started transform is running and owns the pointer.</summary>
+    public bool IsModalActive => _modal;
+
+    /// <summary>
+    /// Starts a modal transform (Blender's <c>G</c> / <c>R</c> / <c>S</c>): the selection follows the pointer with
+    /// no button held until it is accepted (left click / Enter) or abandoned (right click / Esc). With no handle
+    /// grabbed the tools behave the way Blender's do — move across the screen plane, turn about the line of sight,
+    /// resize about the pivot — and the axis-lock keys narrow that down from there. Starting one while another is
+    /// running restarts from the ORIGINAL state, so <c>G</c> then <c>R</c> rotates instead of rotating what was
+    /// already moved. False when there is nothing to transform or a handle is being dragged with the mouse.
+    /// </summary>
+    public bool BeginModal(GizmoMode mode, Point pointer)
+    {
+        if (_host == null || mode == GizmoMode.None || !_host.CanTransformSelection) return false;
+        if (_active.IsSome && !_modal) return false;      // a handle drag is under way — leave it alone
+        // Everything is measured from where the pointer started, so a pointer resting on the scene tree or the
+        // property panel would fling the object the moment it crossed into the viewport. Blender scopes its
+        // keymaps to the editor under the mouse for the same reason.
+        if (pointer.X < 0 || pointer.Y < 0 || pointer.X > ActualWidth || pointer.Y > ActualHeight) return false;
+        if (_modal) Finish(commit: false, releaseCapture: false);
+
+        Handle handle = mode switch
+        {
+            GizmoMode.Rotate => new Handle(HandleKind.RotateView, -1),
+            GizmoMode.Scale => new Handle(HandleKind.ScaleUniform, -1),
+            _ => new Handle(HandleKind.MovePlane, -1),
+        };
+        BeginDrag(handle, pointer);
+        _modal = true;   // after BeginDrag: it clears the per-drag state this flag is part of
+        return true;
+    }
+
+    /// <summary>Ends the modal transform: <paramref name="commit"/> keeps the result, otherwise everything goes
+    /// back exactly as it was and nothing is recorded. No-op when none is running.</summary>
+    public void EndModal(bool commit)
+    {
+        if (_modal) Finish(commit, releaseCapture: true);
+    }
+
+    /// <summary>
+    /// The keys a running modal transform owns: Enter/Space accept it, Esc abandons it, <c>G</c>/<c>R</c>/<c>S</c>
+    /// switch which transform it is, and anything else falls through to the axis lock. True when the key was
+    /// consumed — while one is running that is nearly everything, which is what "modal" means.
+    /// </summary>
+    public bool HandleModalKey(Key key, ModifierKeys modifiers)
+    {
+        if (!_modal) return false;
+        if ((modifiers & ~ModifierKeys.Shift) != 0) return false;   // Ctrl/Alt shortcuts still belong to the app
+        switch (key)
+        {
+            case Key.Enter or Key.Space: EndModal(commit: true); return true;
+            case Key.Escape: EndModal(commit: false); return true;
+            case Key.G: return BeginModal(GizmoMode.Move, _lastDragMouse);
+            case Key.R: return BeginModal(GizmoMode.Rotate, _lastDragMouse);
+            case Key.S: return BeginModal(GizmoMode.Scale, _lastDragMouse);
+            default: return HandleAxisKey(key, modifiers);
+        }
+    }
+
+    /// <summary>
+    /// Blender's axis-lock keys, offered to the gizmo by the window while a drag is in progress: <c>X</c>/<c>Y</c>/
+    /// <c>Z</c> pin the drag to that world axis, <c>Shift</c>+<c>X</c>/<c>Y</c>/<c>Z</c> pin it to the plane across
+    /// that axis (excluding it), and the same combination again releases the lock. The drag re-solves at once, so
+    /// the object jumps onto the axis without waiting for the pointer to move. Returns true when the key was
+    /// consumed — false leaves it to whatever else the window does with it.
+    /// </summary>
+    public bool HandleAxisKey(Key key, ModifierKeys modifiers)
+    {
+        if (_host == null || !_active.IsSome) return false;         // only meaningful inside a drag
+        if ((modifiers & ~ModifierKeys.Shift) != 0) return false;   // Ctrl/Alt combinations belong to the app
+        int axis = key switch { Key.X => 0, Key.Y => 1, Key.Z => 2, _ => -1 };
+        if (axis < 0) return false;
+
+        // A rotation happens about ONE axis, so there is no such thing as a plane-locked rotate: swallow the key
+        // (it is unmistakably aimed at the drag) but leave the lock alone.
+        bool plane = (modifiers & ModifierKeys.Shift) != 0;
+        if (plane && _host.GizmoMode == GizmoMode.Rotate) return true;
+
+        _constraint = AxisConstraint.Toggle(_constraint, axis, plane);
+        DragTo(_lastDragMouse);
+        return true;
+    }
+
     private void DragTo(Point mouse)
     {
         if (_host == null) return;
-        (Vector3 o, Vector3 d) = Ray(mouse);
+        _lastDragMouse = mouse;                 // the RAW pointer, so a key press re-solves from the same place
+        Point solve = SolvePointer(mouse);      // ...which Ctrl may slow down before anything is solved against it
+        (Vector3 o, Vector3 d) = Ray(solve);
         bool snap = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+
+        // An axis lock replaces the grabbed handle entirely — the pointer drives the locked axis (or plane)
+        // whatever was originally clicked, so Move-centre + X becomes a move along X.
+        if (_constraint.IsSome)
+        {
+            DragConstrained(solve, (o, d), snap);
+            InvalidateVisual();
+            return;
+        }
 
         switch (_active.Kind)
         {
             case HandleKind.MoveAxis:
             {
-                float t = ClosestAxisParam(_dragPivot, _dragAxis, o, d);
+                float t = GizmoRayMath.ClosestAxisParam(_dragPivot, _dragAxis, o, d);
                 Vector3 delta = _dragAxis * (t - _dragStartAxisT);
                 if (snap) delta = TransformOps.SnapVector(delta, MoveStep);
                 _host.GizmoApplyWorldDelta(TransformOps.MoveDelta(delta));
@@ -445,7 +659,7 @@ public sealed class TransformGizmo : FrameworkElement
             }
             case HandleKind.MovePlane:
             {
-                if (RayPlane(o, d, _dragPivot, _dragPlaneNormal, out Vector3 hit))
+                if (GizmoRayMath.RayPlane(o, d, _dragPivot, _dragPlaneNormal, out Vector3 hit))
                 {
                     Vector3 delta = hit - _dragStartHit;
                     if (snap) delta = TransformOps.SnapVector(delta, MoveStep);
@@ -454,10 +668,11 @@ public sealed class TransformGizmo : FrameworkElement
                 break;
             }
             case HandleKind.RotateAxis:
+            case HandleKind.RotateView:
             {
-                if (RayPlane(o, d, _dragPivot, _dragPlaneNormal, out Vector3 hit))
+                if (GizmoRayMath.RayPlane(o, d, _dragPivot, _dragPlaneNormal, out Vector3 hit))
                 {
-                    float ang = SignedAngle(_dragStartVec, hit - _dragPivot, _dragAxis);
+                    float ang = GizmoRayMath.SignedAngle(_dragStartVec, hit - _dragPivot, _dragAxis);
                     if (snap) ang = TransformOps.SnapAngle(ang, RotateStepDeg);
                     _host.GizmoApplyWorldDelta(TransformOps.RotateDelta(_dragPivot, _dragAxis, ang));
                 }
@@ -465,7 +680,7 @@ public sealed class TransformGizmo : FrameworkElement
             }
             case HandleKind.ScaleAxis:
             {
-                float t = ClosestAxisParam(_dragPivot, _dragAxis, o, d);
+                float t = GizmoRayMath.ClosestAxisParam(_dragPivot, _dragAxis, o, d);
                 float f = MathF.Max(0.01f, 1f + (float)((t - _dragStartAxisT) / _dragHandleWorld));
                 if (snap) f = TransformOps.SnapScale(f, ScaleStep);
                 _host.GizmoApplyWorldDelta(TransformOps.ScaleDelta(_dragPivot, AxisFactor(_active.Axis, f)));
@@ -475,7 +690,7 @@ public sealed class TransformGizmo : FrameworkElement
             {
                 Layout l = BuildLayout();
                 if (!l.Valid) break; // pivot behind the camera mid-drag — a default (0,0) pivot yields garbage
-                float f = MathF.Max(0.01f, (float)(Dist(mouse, l.Pivot) / _dragStartScreenDist));
+                float f = MathF.Max(0.01f, (float)(Dist(solve, l.Pivot) / _dragStartScreenDist));
                 if (snap) f = TransformOps.SnapScale(f, ScaleStep);
                 _host.GizmoApplyWorldDelta(TransformOps.ScaleDelta(_dragPivot, new Vector3(f)));
                 break;
@@ -483,6 +698,59 @@ public sealed class TransformGizmo : FrameworkElement
         }
         InvalidateVisual();
     }
+
+    // The axis-locked drag. Everything is measured from the pointer position the drag STARTED at (not from the
+    // previous frame), so locking mid-drag re-solves the whole drag on the new axis — Blender's behaviour — and
+    // toggling the lock on and off cannot accumulate drift. A solve the viewpoint cannot answer (a plane seen
+    // edge-on) simply leaves the object where it is.
+    private void DragConstrained(Point mouse, (Vector3 Origin, Vector3 Dir) now, bool snap)
+    {
+        (Vector3 Origin, Vector3 Dir) start = Ray(_dragStartMouse);
+        switch (ModeOf(_active.Kind))
+        {
+            case GizmoMode.Move:
+                if (GizmoRayMath.TryConstrainedMove(_dragPivot, _constraint, start, now, out Vector3 delta))
+                {
+                    if (snap) delta = TransformOps.SnapVector(delta, MoveStep);
+                    _host!.GizmoApplyWorldDelta(TransformOps.MoveDelta(delta));
+                }
+                break;
+
+            case GizmoMode.Rotate:
+                if (GizmoRayMath.TryConstrainedRotate(_dragPivot, _constraint.Axis, start, now, out float ang))
+                {
+                    if (snap) ang = TransformOps.SnapAngle(ang, RotateStepDeg);
+                    _host!.GizmoApplyWorldDelta(
+                        TransformOps.RotateDelta(_dragPivot, TransformOps.WorldAxes[_constraint.Axis], ang));
+                }
+                break;
+
+            case GizmoMode.Scale:
+            {
+                // A locked scale has no single axis line to slide along (a plane lock resizes two axes at once),
+                // so its magnitude comes from the pointer's distance to the pivot — the uniform-handle measure —
+                // and the lock only decides which axes it lands on.
+                Layout l = BuildLayout();
+                if (!l.Valid) break;
+                float f = MathF.Max(0.01f, (float)(Dist(mouse, l.Pivot) / _dragStartScreenDist));
+                if (snap) f = TransformOps.SnapScale(f, ScaleStep);
+                _host!.GizmoApplyWorldDelta(TransformOps.ScaleDelta(_dragPivot, _constraint.ScaleFactors(f)));
+                break;
+            }
+        }
+    }
+
+    // Which transform a grabbed handle performs — the axis lock replaces the handle but never the tool.
+    private static GizmoMode ModeOf(HandleKind kind) => kind switch
+    {
+        HandleKind.RotateAxis or HandleKind.RotateView => GizmoMode.Rotate,
+        HandleKind.ScaleAxis or HandleKind.ScaleUniform => GizmoMode.Scale,
+        _ => GizmoMode.Move,
+    };
+
+    // What the overlay is currently doing: the drag in progress if there is one (a modal transform is started
+    // from the keyboard under ANY tool, Select included), otherwise whatever the tool shelf has selected.
+    private GizmoMode EffectiveMode => _active.IsSome ? ModeOf(_active.Kind) : _host?.GizmoMode ?? GizmoMode.None;
 
     private (Vector3 Origin, Vector3 Dir) Ray(Point mouse) =>
         Picking.BuildRay(_host!.GizmoViewProjection, _host.GizmoCameraPosition, mouse.X, mouse.Y, ActualWidth, ActualHeight);
@@ -496,38 +764,6 @@ public sealed class TransformGizmo : FrameworkElement
 
     private static Vector3 AxisFactor(int axis, float f) =>
         axis == 0 ? new Vector3(f, 1, 1) : axis == 1 ? new Vector3(1, f, 1) : new Vector3(1, 1, f);
-
-    // Parameter t along the axis line (P + t·A, A unit) of the point closest to the ray (O + s·D, D unit).
-    private static float ClosestAxisParam(Vector3 p, Vector3 a, Vector3 o, Vector3 d)
-    {
-        Vector3 r = p - o;
-        float b = Vector3.Dot(a, d);
-        float c = Vector3.Dot(a, r);
-        float f = Vector3.Dot(d, r);
-        float denom = 1f - b * b;
-        if (denom < 1e-6f) return 0f;   // axis nearly parallel to the view ray
-        return (b * f - c) / denom;
-    }
-
-    private static bool RayPlane(Vector3 o, Vector3 d, Vector3 planePoint, Vector3 n, out Vector3 hit)
-    {
-        float dn = Vector3.Dot(d, n);
-        if (MathF.Abs(dn) < 1e-6f) { hit = planePoint; return false; }
-        float t = Vector3.Dot(planePoint - o, n) / dn;
-        hit = o + d * t;
-        return t > 0f;
-    }
-
-    private static float SignedAngle(Vector3 v1, Vector3 v2, Vector3 axis)
-    {
-        if (v1.LengthSquared() < 1e-10f || v2.LengthSquared() < 1e-10f) return 0f;
-        v1 = Vector3.Normalize(v1);
-        v2 = Vector3.Normalize(v2);
-        float cos = Math.Clamp(Vector3.Dot(v1, v2), -1f, 1f);
-        float ang = MathF.Acos(cos);
-        if (Vector3.Dot(Vector3.Cross(v1, v2), axis) < 0f) ang = -ang;
-        return ang;
-    }
 
     private static double Dist(Point a, Point b) => (a - b).Length;
 

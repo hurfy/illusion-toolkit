@@ -145,6 +145,16 @@ public partial class MainWindow : Window
             viewportGrid.Children.Insert(1, _transformGizmo);
             _transformGizmo.Attach(Viewport);
 
+            // The overlay sits on top of the render surface, so a wheel notch over a handle (or anywhere at all
+            // while a modal transform holds the pointer) never reaches the viewport on its own. Hand it back —
+            // except during a modal, where the camera has to hold still: the transform is solved against the
+            // pointer position it started from, and moving the camera under it would drag the object with it.
+            _transformGizmo.MouseWheel += (_, e) =>
+            {
+                if (!_transformGizmo.IsModalActive) Viewport.Zoom(e.Delta / (float)Mouse.MouseWheelDeltaForOneLine);
+                e.Handled = true;
+            };
+
             var gizmo = new ViewportGizmo();
             viewportGrid.Children.Add(gizmo);
             gizmo.Attach(Viewport);
@@ -152,6 +162,11 @@ public partial class MainWindow : Window
 
         // The layers list is a look, not a decision: hovering the button is enough to open it.
         HoverPopup.Attach(LayersBtn, LayersPopup);
+
+        // Walk mode (the shelf's top button / Space): WASD flying instead of the mouse-only orbit camera. A modal
+        // transform is dropped on the way in — its keys are about to mean "fly" instead.
+        ToolWalk.Checked += (_, _) => { _transformGizmo?.EndModal(commit: false); Viewport.WalkMode = true; };
+        ToolWalk.Unchecked += (_, _) => Viewport.WalkMode = false;
 
         // Viewport tool shelf → gizmo mode. ToolSelect is the default (select-only, no gizmo).
         ToolSelect.Checked += (_, _) => SetGizmoMode(GizmoMode.None);
@@ -189,6 +204,14 @@ public partial class MainWindow : Window
     // Falls through untouched while typing in a text field or with a modifier held.
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
+        // The viewport's own keys, intercepted here for the same reason Tab is: the gizmo overlay is not
+        // focusable and a bare letter cannot be a KeyGesture.
+        if (!IsTextFieldFocused() && HandleViewportKey(e.Key, Keyboard.Modifiers, e.IsRepeat))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (Keyboard.Modifiers == ModifierKeys.None && !IsTextFieldFocused())
         {
             if (e.Key == Key.Tab)
@@ -214,6 +237,54 @@ public partial class MainWindow : Window
             }
         }
         base.OnPreviewKeyDown(e);
+    }
+
+    /// <summary>
+    /// Keys the 3D viewport claims before the rest of the window sees them. The order is the point: a running
+    /// modal transform owns the keyboard (that is what modal means), then a handle drag's axis lock, and only
+    /// then the keys that START something. Returns true when the key was consumed.
+    /// </summary>
+    private bool HandleViewportKey(Key key, ModifierKeys modifiers, bool isRepeat)
+    {
+        if (_transformGizmo == null) return false;
+
+        // In walk mode Ctrl is the camera's "creep" modifier, so Ctrl+W/A/S/D is flying — not Save and not
+        // Duplicate. Creeping backwards must not write files, and creeping right must not clone the selection.
+        // Checked before the auto-repeat gate below: a HELD Ctrl+S would otherwise fire Save on every repeat.
+        // The camera still sees these keys — it listens for handled ones too, precisely for this.
+        if (Viewport.WalkMode && (modifiers & ModifierKeys.Control) != 0
+            && key is Key.W or Key.A or Key.S or Key.D)
+        {
+            return true;
+        }
+
+        // Everything below either starts or toggles something, so a held-down key must not repeat it.
+        if (isRepeat) return false;
+        if (_transformGizmo.HandleModalKey(key, modifiers)) return true;
+        if (_transformGizmo.HandleAxisKey(key, modifiers)) return true;
+        if (modifiers != ModifierKeys.None) return false;
+
+        // Space goes through the shelf button rather than straight to the viewport, so the button, the hotkey
+        // and the camera can never disagree about which mode is on.
+        if (key == Key.Space)
+        {
+            ToolWalk.IsChecked = ToolWalk.IsChecked != true;
+            return true;
+        }
+
+        // '/' flies to whatever is selected — main row or numpad. Nothing selected: not ours, let it pass.
+        if (key is Key.OemQuestion or Key.Divide) return Viewport.FrameSelection();
+
+        // The modal transforms only exist where the letter keys are free; walk mode spends them on flying.
+        if (Viewport.WalkMode) return false;
+        GizmoMode mode = key switch
+        {
+            Key.G => GizmoMode.Move,
+            Key.R => GizmoMode.Rotate,
+            Key.S => GizmoMode.Scale,
+            _ => GizmoMode.None,
+        };
+        return mode != GizmoMode.None && _transformGizmo.BeginModal(mode, Mouse.GetPosition(_transformGizmo));
     }
 
     private void SetGizmoMode(GizmoMode mode)

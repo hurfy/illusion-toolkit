@@ -45,6 +45,10 @@
         <StreamGeometry x:Key="IconToolRotate">M8,3 A5,5 0 1 1 3.67,5.5 M6.8,1.6 L8.4,3 L6.8,4.4</StreamGeometry>
         <StreamGeometry x:Key="IconToolScale">M4,12 L12,4 M4,12 L4,8.5 M4,12 L7.5,12 M12,4 L12,7.5 M12,4 L8.5,4</StreamGeometry>
 
+        <!-- Walk mode: a figure mid-stride — solid head, heavy limbs with round caps. Drawn thick on
+             purpose: at 22px a hairline stick figure reads as a scribble. -->
+        <StreamGeometry x:Key="IconToolWalk">M9.2,1.6 A1.9,1.9 0 1 1 9.19,1.6 M9.1,5.6 L7.7,9.2 L5.2,12.2 M7.7,9.2 L10.6,11 L11.2,14.4 M5.2,12.2 L4.6,14.4 M8.6,6.6 L11.9,7.8</StreamGeometry>
+
         <!-- The Blender mark, verbatim from the official logo SVG (body-with-eye-hole subpaths plus
              the eye ball appended as an absolute subpath) — even-odd fill turns it into the
              monochrome logo: solid body, empty ring, filled pupil. -->
@@ -260,8 +264,46 @@
             </Setter>
         </Style>
 
+        <!-- Plain shelf toggle: gray idle, accent-blue when on — the same on/off colours the tool
+             radio buttons above it use, so "this mode is active" always looks the same. -->
+        <Style x:Key="ToolToggleButton" TargetType="ToggleButton">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Blender edit-mode toggle (bottom of the tool shelf): gray like the other tools when idle,
-             Blender-orange while a bridge session is active. IsChecked mirrors the REAL session
+             Blender-orange while a bridge session is active — the one place the brand colour is the point,
+             which is why it does not share the blue toggle above. IsChecked mirrors the REAL session
              state (set from code) — the click only requests the toggle. -->
         <Style x:Key="BlenderToolButton" TargetType="ToggleButton">
             <Setter Property="Width" Value="40" />
@@ -805,21 +847,24 @@
                                       Data="{StaticResource IconToolSelect}" />
                             </RadioButton>
                             <RadioButton x:Name="ToolMove" GroupName="ViewportTool" Margin="0,8,0,0"
-                                         Style="{StaticResource ToolButton}" ToolTip="Move">
+                                         Style="{StaticResource ToolButton}"
+                                         ToolTip="Move — while dragging: X/Y/Z locks an axis, Shift+X/Y/Z locks a plane, Shift snaps to steps, Ctrl slows it down for fine work">
                                 <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
                                       Stroke="#ECECEC" StrokeThickness="1.3" StrokeLineJoin="Round"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                       Data="{StaticResource IconToolMove}" />
                             </RadioButton>
                             <RadioButton x:Name="ToolRotate" GroupName="ViewportTool" Margin="0,8,0,0"
-                                         Style="{StaticResource ToolButton}" ToolTip="Rotate">
+                                         Style="{StaticResource ToolButton}"
+                                         ToolTip="Rotate — while dragging: X/Y/Z picks the axis to turn about, Shift snaps to 15°, Ctrl slows it down for fine work">
                                 <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
                                       Stroke="#ECECEC" StrokeThickness="1.3" StrokeLineJoin="Round"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                       Data="{StaticResource IconToolRotate}" />
                             </RadioButton>
                             <RadioButton x:Name="ToolScale" GroupName="ViewportTool" Margin="0,8,0,0"
-                                         Style="{StaticResource ToolButton}" ToolTip="Scale">
+                                         Style="{StaticResource ToolButton}"
+                                         ToolTip="Scale — while dragging: X/Y/Z locks an axis, Shift+X/Y/Z locks a plane, Shift snaps to steps, Ctrl slows it down for fine work">
                                 <Path Width="22" Height="22" Stretch="Uniform" Fill="Transparent"
                                       Stroke="#ECECEC" StrokeThickness="1.3" StrokeLineJoin="Round"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
@@ -828,8 +873,19 @@
 
                             <Border Height="1" Background="#33FFFFFF" Margin="4,10,4,0" />
 
+                            <!-- Below the rule sit the two MODE toggles — the ones that change what the app
+                                 does rather than which handle the gizmo shows. -->
+                            <ToggleButton x:Name="ToolWalk" Margin="0,10,0,0"
+                                          Style="{StaticResource ToolToggleButton}"
+                                          ToolTip="Walk mode (Space) — the keyboard flies the camera: WASD to move, Shift to cover ground, Ctrl to creep, middle drag to look. Off: the camera is mouse-only (middle drag orbits, Shift+middle pans, wheel zooms) and G / R / S move, rotate and scale the selection.">
+                                <Path Width="22" Height="22" Stretch="Uniform" Fill="#ECECEC"
+                                      Stroke="#ECECEC" StrokeThickness="2.1" StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="{StaticResource IconToolWalk}" />
+                            </ToggleButton>
+
                             <!-- Blender edit mode (Tab): the official Blender mark (see IconBlender). -->
-                            <ToggleButton x:Name="ToolBlender" Margin="0,10,0,0"
+                            <ToggleButton x:Name="ToolBlender" Margin="0,8,0,0"
                                           Style="{StaticResource BlenderToolButton}"
                                           ToolTip="Edit the selection in Blender (Tab); click again to leave"
                                           Click="BlenderTool_Click">

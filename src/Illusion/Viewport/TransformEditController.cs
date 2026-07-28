@@ -77,6 +77,11 @@ internal sealed class TransformEditController
         if (!_gizmoMoved) { _gizmoMoved = true; _host.RaiseGizmoEdited(_host.GizmoMode); } // first real move → reveal the panel
     }
 
+    /// <summary>Abandons the drag: drops the snapshots without recording anything. The caller has already put
+    /// the objects back by applying an identity delta — which also unwinds a collision placement's previewed
+    /// scale, so there is nothing left to mint either.</summary>
+    public void GizmoCancelDrag() => _dragGroup.Clear();
+
     /// <summary>Ends the drag: pushes the whole group move as ONE undoable edit.</summary>
     public void GizmoEndDrag()
     {

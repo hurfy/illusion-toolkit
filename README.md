@@ -106,11 +106,35 @@ Search-as-you-type with automatic expansion to matches, per-node visibility eyes
 (archive, scene, mesh, model, light, camera, collision, navigation), and live counters for loaded
 files, meshes and polygons. FPS, draw calls and drawn instances sit in the status bar.
 
+### Navigating
+
+The camera has two modes, switched by the top button of the viewport tool shelf or by **Space**.
+
+- **Default — mouse only, as in Blender.** Middle-drag orbits the point ahead of the camera, **Shift**+middle
+  slides the view, and the wheel moves toward that point (slowing as it closes in, never passing through).
+  **`/`** flies to the selected object and makes it the point everything turns around.
+- **Walk mode** hands the keyboard to the camera instead: **WASD** flies, middle-drag looks around. Base speed
+  is the value in the status bar; **Shift** multiplies it by 2.5 to cover ground and **Ctrl** divides by the
+  same to creep — the same division of labour those keys have during a transform. While walk mode is on,
+  `Ctrl+W/A/S/D` belong to the camera, so Save and Duplicate keep to the menus until you leave it. The modal
+  transforms below do not exist here — those letters are flying.
+
 ### Editing
 
 - Click to select in the viewport or the tree; **Ctrl+click** to multi-select.
-- **Move / Rotate / Scale** gizmos with **Shift** to snap (1 unit, 15°, 0.1); a floating panel with
-  editable X/Y/Z appears for whatever you just changed.
+- **Modal transforms** outside walk mode, as in Blender: **G** moves, **R** rotates, **S** scales the selection
+  from wherever the pointer is, under any tool including Select. Left-click or **Enter** keeps the result;
+  right-click or **Esc** puts everything back. Pressing another of `G`/`R`/`S` mid-transform switches to it
+  from the original state.
+- **Move / Rotate / Scale** gizmos; a floating panel with editable X/Y/Z appears for whatever you just
+  changed. **Shift** snaps to steps (1 unit, 15°, 0.1) and **Ctrl** does the opposite — the transform
+  follows a tenth of the mouse, for the last bit of precision. Both work on handle drags and on the modal
+  transforms, and neither makes anything jump when pressed or released mid-drag.
+- **Axis lock** during any transform — a handle drag or a modal one — as in Blender: **X**, **Y** or **Z**
+  pins it to that world axis, **Shift+X/Y/Z** pins it to the plane across that axis, and the same key again
+  releases it. It overrides the handle you grabbed — drag the centre square and press `Z` to move straight
+  up — and the locked axes are drawn as dashed guide lines through the pivot. Rotation turns about one axis,
+  so it takes `X`/`Y`/`Z` only.
 - **Undo/redo** across everything, shared with the Material Editor window.
 - **Delete** and **Duplicate** objects and collision placements as single undoable actions.
   *Duplicate currently supports static single-mesh objects; other object types are skipped.*

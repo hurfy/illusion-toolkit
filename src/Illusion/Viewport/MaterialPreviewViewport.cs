@@ -83,9 +83,10 @@ public sealed class MaterialPreviewViewport : ViewportControl
         Rebuild();
     }
 
+    // The sphere sits at the origin and is zoomed between hard limits, so this replaces the base viewport's
+    // free dolly outright — calling base here would apply both moves to a single wheel notch.
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
-        base.OnMouseWheel(e);
         if (Renderer == null) return;
         Camera cam = Renderer.Camera;
         float dist = cam.Position.Length(); // the orbit pivot is the sphere at the origin
