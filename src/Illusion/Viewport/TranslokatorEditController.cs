@@ -41,10 +41,11 @@ internal sealed class TranslokatorEditController
         foreach (SceneNode node in _host.Selection.Selected)
         {
             if (node.Source is not TranslokatorInstanceAdapter adapter) continue;
-            if (node.Parent is not { } rowNode) continue;
+            // The index is the placement's slot in the TABLE, not in the tree: restoring it there is what keeps
+            // an undone delete byte-identical, while the tree only has to hold the node again.
             items.Add(new CrashListEdit.Item(
-                adapter.Document, rowNode, adapter.Owner, rowNode.Children.IndexOf(node),
-                adapter.Instance, node, adapter.SeasonLinked));
+                adapter.Document, adapter.Owner, adapter.Owner.Instances.IndexOf(adapter.Instance),
+                adapter.Instance, adapter.SeasonLinked));
         }
         if (items.Count == 0) return;
 
@@ -62,25 +63,23 @@ internal sealed class TranslokatorEditController
         foreach (SceneNode node in _host.Selection.Selected)
         {
             if (node.Source is not TranslokatorInstanceAdapter adapter) continue;
-            if (node.Parent is not { } rowNode) continue;
 
             Instance copy = TranslokatorDocumentAdapter.Clone(adapter.Instance);
             if (!adapter.Document.TryAllocateId(out ushort id)) continue; // table full — see TryAllocateId
             copy.ID = id;
 
-            TranslokatorInstanceAdapter copyAdapter = adapter.Document.Node(copy, adapter.Owner);
-            copyAdapter.SeasonLinked = adapter.SeasonLinked;
-            var copyNode = new SceneNode($"copy #{copy.ID}", "CrashInstance", false) { Source = copyAdapter };
+            adapter.Document.Node(copy, adapter.Owner).SeasonLinked = adapter.SeasonLinked;
             items.Add(new CrashListEdit.Item(
-                adapter.Document, rowNode, adapter.Owner, rowNode.Children.Count, copy, copyNode,
-                adapter.SeasonLinked));
+                adapter.Document, adapter.Owner, adapter.Owner.Instances.Count, copy, adapter.SeasonLinked));
         }
         if (items.Count == 0) return;
 
         var edit = new CrashListEdit(_host, items, added: true);
         edit.Redo();
         History.Push(edit);
-        _host.Selection.SetSelection(items.Select(i => i.Node).ToList(), items[^1].Node);
+
+        var nodes = edit.Nodes.ToList();
+        if (nodes.Count > 0) _host.Selection.SetSelection(nodes, nodes[^1]);
     }
 
     /// <summary>
@@ -93,8 +92,6 @@ internal sealed class TranslokatorEditController
         ArgumentNullException.ThrowIfNull(row);
         CrashPlacements? placements = _host.Streamer.CrashLayer;
         if (placements == null) return null;
-        SceneNode? rowNode = _host.Streamer.CrashRowNode(row);
-        if (rowNode == null) return null;
         if (!placements.Document.TryAllocateId(out ushort id)) return null;
 
         var instance = new Instance
@@ -107,15 +104,15 @@ internal sealed class TranslokatorEditController
 
         TranslokatorInstanceAdapter adapter = placements.Document.Node(instance, row);
         adapter.SeasonLinked = bothSeasons && placements.Document.Twin != null;
-        var node = new SceneNode($"copy #{id}", "CrashInstance", false) { Source = adapter };
 
         var edit = new CrashListEdit(_host,
-            [new CrashListEdit.Item(placements.Document, rowNode, row, rowNode.Children.Count, instance, node,
-                adapter.SeasonLinked)],
+            [new CrashListEdit.Item(placements.Document, row, row.Instances.Count, instance, adapter.SeasonLinked)],
             added: true);
         edit.Redo();
         History.Push(edit);
-        _host.Selection.SetSelection([node], node);
+
+        SceneNode? node = edit.Nodes.FirstOrDefault();
+        if (node != null) _host.Selection.SetSelection([node], node);
         return node;
     }
 
@@ -125,9 +122,12 @@ internal sealed class TranslokatorEditController
     // (persist + repaint) and mirror into the other season for linked placements.
     private sealed class CrashListEdit : INodeEdit
     {
+        /// <summary>Index is the placement's slot in the TABLE — restoring it there is what makes an undone
+        /// delete byte-identical. The tree node is not part of the edit: it is materialised on demand, and only
+        /// the placements that someone actually looked at have one.</summary>
         public readonly record struct Item(
-            TranslokatorDocumentAdapter Doc, SceneNode RowNode, Formats.Translokator.Object Row, int Index,
-            Instance Placement, SceneNode Node, bool Mirror);
+            TranslokatorDocumentAdapter Doc, Formats.Translokator.Object Row, int Index,
+            Instance Placement, bool Mirror);
 
         private readonly D3DImageHost _host;
         private readonly Item[] _items;
@@ -140,38 +140,53 @@ internal sealed class TranslokatorEditController
             _added = added;
         }
 
-        public IEnumerable<SceneNode> Nodes { get { foreach (Item i in _items) yield return i.Node; } }
+        public IEnumerable<SceneNode> Nodes
+        {
+            get
+            {
+                foreach (Item i in _items)
+                {
+                    if (_host.Streamer.CrashNodeFor(i.Placement, i.Row) is { } node) yield return node;
+                }
+            }
+        }
 
         public void Redo() { if (_added) Add(); else Remove(); }
         public void Undo() { if (_added) Remove(); else Add(); }
 
         private void Add()
         {
-            // Ascending, so several restores land back in their original slots (both lists grow in lockstep).
+            // Ascending, so several restores land back in their original table slots.
             foreach (Item it in _items.OrderBy(i => i.Index))
             {
-                int index = Math.Clamp(it.Index, 0, it.Row.Instances.Count);
-                it.Doc.InsertPlacement(it.Row, it.Placement, index, it.Mirror);
-                it.RowNode.InsertChild(index, it.Node);
+                it.Doc.InsertPlacement(it.Row, it.Placement, Math.Clamp(it.Index, 0, it.Row.Instances.Count),
+                    it.Mirror);
+                _host.Streamer.CrashNodeFor(it.Placement, it.Row); // give it a node so it can be selected
             }
             Finish();
         }
 
         private void Remove()
         {
+            var dropped = new List<SceneNode>();
             foreach (Item it in _items)
             {
+                if (_host.Streamer.CrashNodeFor(it.Placement, it.Row) is { } node)
+                {
+                    node.Parent?.Children.Remove(node);
+                    dropped.Add(node);
+                }
                 it.Doc.RemovePlacement(it.Row, it.Placement, it.Mirror);
-                it.RowNode.Children.Remove(it.Node);
+                _host.Streamer.ForgetCrashNode(it.Placement);
             }
-            DropFromSelection();
+            DropFromSelection(dropped);
             Finish();
         }
 
-        private void DropFromSelection()
+        private void DropFromSelection(List<SceneNode> dropped)
         {
-            if (!_host.Selection.Selected.Any(n => _items.Any(i => ReferenceEquals(i.Node, n)))) return;
-            var keep = _host.Selection.Selected.Where(n => _items.All(i => !ReferenceEquals(i.Node, n))).ToList();
+            if (!_host.Selection.Selected.Any(dropped.Contains)) return;
+            var keep = _host.Selection.Selected.Where(n => !dropped.Contains(n)).ToList();
             _host.Selection.SetSelection(keep, keep.Count > 0 ? keep[^1] : null);
         }
 
@@ -179,9 +194,10 @@ internal sealed class TranslokatorEditController
         {
             foreach (Item it in _items)
             {
-                it.Doc.MarkRowDirty(it.Row);                      // re-upload just this row's copies next frame
-                it.RowNode.Name = $"{it.Row.Name.String} — {it.Row.Instances.Count}";
-                _host.Persistence.MarkFrameModified(it.RowNode);  // enlist the .tra for save/build
+                it.Doc.MarkRowDirty(it.Row);                          // re-upload just this row's copies next frame
+                if (_host.Streamer.CrashRowNode(it.Row) is not { } rowNode) continue;
+                rowNode.Name = $"{it.Row.Name.String} — {it.Row.Instances.Count}";
+                _host.Persistence.MarkFrameModified(rowNode);         // enlist the .tra for save/build
             }
             _host.RaiseSceneChanged();
         }

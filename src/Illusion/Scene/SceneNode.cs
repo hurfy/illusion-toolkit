@@ -81,6 +81,23 @@ public sealed class SceneNode : INotifyPropertyChanged
         RecomputeAggregate();
     }
 
+    /// <summary>
+    /// Adds many children at once, recomputing the visibility aggregate a single time at the end. <see cref="AddChild"/>
+    /// recomputes on every call, which walks the children built so far — filling a crash row with a thousand
+    /// placements one by one is quadratic in the row's size. Same wiring otherwise.
+    /// </summary>
+    public void AddChildren(IReadOnlyList<SceneNode> children)
+    {
+        ArgumentNullException.ThrowIfNull(children);
+        foreach (SceneNode child in children)
+        {
+            child.Parent = this;
+            child.PropertyChanged += OnChildChanged;
+            Children.Add(child);
+        }
+        RecomputeAggregate();
+    }
+
     /// <summary>Re-parents <paramref name="child"/> under this node at <paramref name="index"/> (clamped). Used to
     /// restore a node to its original slot on undo of a delete; the child keeps its existing change subscription
     /// (it was added once via <see cref="AddChild"/>), so this does not re-subscribe.</summary>

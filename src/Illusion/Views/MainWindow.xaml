@@ -1,4 +1,4 @@
-<Window x:Class="Illusion.Views.MainWindow"
+﻿<Window x:Class="Illusion.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:r="clr-namespace:Illusion.Scene"
@@ -665,24 +665,6 @@
                                                 <ToggleButton Grid.Column="2" x:Name="CrashToggle"
                                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
                                                               Checked="Crash_Changed" Unchecked="Crash_Changed" />
-                                            </Grid>
-                                            <!-- The crash table gives every prop its own draw range (a bin at 20 m,
-                                                 a billboard at 300 m). Honouring it is what the game does, so it is
-                                                 on by default; off draws all 57 000 copies at any range. -->
-                                            <Grid Margin="24,4,0,4"
-                                                  ToolTip="Draw crash objects only as far as the game does — each prop has its own range in the table">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="Game draw distance"
-                                                           Foreground="#A0FFFFFF" FontSize="12"
-                                                           VerticalAlignment="Center" />
-                                                <ToggleButton Grid.Column="1" x:Name="CrashDistanceToggle"
-                                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
-                                                              IsChecked="True"
-                                                              Checked="CrashDistance_Changed"
-                                                              Unchecked="CrashDistance_Changed" />
                                             </Grid>
                                             <Grid Margin="0,4"
                                                   ToolTip="Collision hulls — translucent, per district">

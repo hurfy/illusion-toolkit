@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Diagnostics;
+using System.IO;
 using System.Numerics;
 using System.Text;
 using Illusion.Assets;
@@ -1557,7 +1558,7 @@ internal static class SceneProbes
             }
 
             // Full loader path (as at runtime): LoadCrashHierarchy → MeshData.Instances.
-            var (roots, allMeshes, _, _) = SdsMeshLoader.LoadCrashHierarchy(sds);
+            var (roots, allMeshes, _, placements) = SdsMeshLoader.LoadCrashHierarchy(sds);
             int leaves = 0, instancedLeaves = 0;
             long loadedInstances = 0, instancedTris = 0;
             foreach (MeshData md in allMeshes)
@@ -1576,6 +1577,7 @@ internal static class SceneProbes
             // Cell chunking (InstanceChunks): correctness invariant + per-cell stats + a simulated
             // frustum cull from three camera poses — verifies the per-cell culling path without a GPU.
             AppendChunkStats(sb, allMeshes, (trans.Bounds.Min + trans.Bounds.Max) * 0.5f);
+            AppendTreeCost(sb, placements);
 
             sb.Insert(0, $"OBJECTS: {objs} | resolved-in-frame: {resolved} | resolved-no-mesh: {noMesh} | " +
                          $"unresolved: {objs - resolved}\nINSTANCES total: {totalInstances} | prototype-parts: {totalParts} | " +
@@ -1640,10 +1642,15 @@ internal static class SceneProbes
             Frustum frustum = Frustum.FromMatrix(cam.ViewProjection);
 
             long visInst = 0, visTris = 0, allInst = 0, allTris = 0, rangedInst = 0;
+            // What the renderer actually issues: contiguous surviving cells merge into one
+            // DrawIndexedInstanced per mesh PART, so this is the draw-call count of the instanced pass.
+            long ranges = 0, drawCalls = 0, meshesDrawn = 0;
             foreach ((MeshData md, InstanceCell[] cells) in chunked)
             {
                 allInst += md.Instances!.Length;
                 allTris += (long)md.TriangleCount * md.Instances.Length;
+                long meshRanges = 0;
+                uint runEnd = uint.MaxValue;
                 foreach (InstanceCell c in cells)
                 {
                     if (!frustum.Intersects(c.Min, c.Max)) continue;
@@ -1655,6 +1662,14 @@ internal static class SceneProbes
                         continue;
                     }
                     rangedInst += c.Count;
+                    if (c.Start == runEnd) { runEnd += c.Count; }
+                    else { meshRanges++; runEnd = c.Start + c.Count; }
+                }
+                if (meshRanges > 0)
+                {
+                    meshesDrawn++;
+                    ranges += meshRanges;
+                    drawCalls += meshRanges * Math.Max(1, md.Parts.Length);
                 }
             }
             sb.AppendLine($"  cull[{pose}]: instances {visInst}/{allInst} " +
@@ -1662,7 +1677,54 @@ internal static class SceneProbes
                           $"({(allTris > 0 ? 100.0 * visTris / allTris : 0):F1}%)" +
                           $" | with game draw range: {rangedInst} " +
                           $"({(allInst > 0 ? 100.0 * rangedInst / allInst : 0):F1}%)");
+            sb.AppendLine($"    → meshes drawn {meshesDrawn}, instance ranges {ranges}, " +
+                          $"DRAW CALLS {drawCalls}");
         }
+    }
+
+    // What materialising every placement WOULD cost: one scene node (each with its own observable child
+    // collection) and one adapter per copy. The streamer deliberately does not do this — it builds the rows and
+    // fills a row in on demand — because these objects would stay live for the session and every later gen2
+    // collection would walk them, which is what made unrelated frames stutter while streaming.
+    private static void AppendTreeCost(StringBuilder sb, CrashPlacements? placements)
+    {
+        if (placements == null) return;
+
+        long before = GC.GetTotalAllocatedBytes(precise: true);
+        int gen2Before = GC.CollectionCount(2);
+        var sw = Stopwatch.StartNew();
+
+        int nodes = 0;
+        var layer = new SceneNode("Crash objects", "Crash", true);
+        foreach (Formats.Translokator.Object row in placements.Rows)
+        {
+            var rowNode = new SceneNode($"{row.Name.String}", "CrashObject", true);
+            foreach (Formats.Translokator.Instance copy in row.Instances)
+            {
+                rowNode.AddChild(new SceneNode($"copy #{copy.ID}", "CrashInstance", false)
+                {
+                    Source = placements.Document.Node(copy, row),
+                });
+                nodes++;
+            }
+            layer.AddChild(rowNode);
+        }
+        sw.Stop();
+
+        long allocated = GC.GetTotalAllocatedBytes(precise: true) - before;
+        sb.AppendLine();
+        sb.AppendLine($"Placement tree if fully materialised (the streamer does NOT): {nodes} nodes + adapters " +
+                      $"in {sw.Elapsed.TotalMilliseconds:F0} ms, " +
+                      $"{allocated / 1024.0 / 1024.0:F1} MB allocated, gen2 collections {GC.CollectionCount(2) - gen2Before}");
+        sb.AppendLine($"  rows: {placements.Rows.Count}, largest row: {LargestRow(placements)} copies");
+        GC.KeepAlive(layer);
+    }
+
+    private static int LargestRow(CrashPlacements placements)
+    {
+        int max = 0;
+        foreach (Formats.Translokator.Object row in placements.Rows) max = Math.Max(max, row.Instances.Count);
+        return max;
     }
 
     // Squared distance from a point to an AABB (0 inside) — the renderer's own per-cell range test.

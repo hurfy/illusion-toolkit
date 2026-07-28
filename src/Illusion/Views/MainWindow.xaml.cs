@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -84,6 +84,8 @@ public partial class MainWindow : Window
         // Plain tree click → single-select (Ctrl+click is intercepted below and multi-selects instead).
         SceneTree.SelectedItemChanged += (_, e) => { if (e.NewValue is SceneNode n) Viewport.Select(n); };
         SceneTree.PreviewMouseLeftButtonDown += SceneTree_PreviewMouseLeftButtonDown;
+        // Crash rows fill in when opened — their placements are not materialised until someone looks.
+        SceneTree.AddHandler(TreeViewItem.ExpandedEvent, new RoutedEventHandler(SceneTree_ItemExpanded));
         Viewport.SelectionChanged += OnSelectionChanged;
         Viewport.SelectionTransformChanged += _selection.RefreshTransform;
         Viewport.SelectionPropertiesChanged += _selection.RefreshPropertyValues;
@@ -387,6 +389,15 @@ public partial class MainWindow : Window
     private void RemoveUnusedHulls_Click(object sender, RoutedEventArgs e) => Viewport.RemoveUnusedHulls();
 
     private void EditMenu_SubmenuOpened(object sender, RoutedEventArgs e) => RefreshUnusedHullsItems();
+
+    // A crash row was opened in the tree: build the nodes for its placements now.
+    private void SceneTree_ItemExpanded(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is TreeViewItem { DataContext: SceneNode { Kind: "CrashObject" } row })
+        {
+            Viewport.ExpandCrashRow(row);
+        }
+    }
 
     private void SceneTreeContextMenu_Opened(object sender, RoutedEventArgs e)
     {
@@ -941,14 +952,6 @@ public partial class MainWindow : Window
     {
         if (!IsInitialized || Viewport == null) return;
         Viewport.ShowCrash = CrashToggle.IsChecked == true;
-    }
-
-    // Whether crash props obey the per-object range their table gives them (what the game draws), or are all
-    // drawn at any distance. Only affects drawing — nothing is loaded or unloaded.
-    private void CrashDistance_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsInitialized || Viewport == null) return;
-        Viewport.CrashGameDrawDistance = CrashDistanceToggle.IsChecked == true;
     }
 
     // Collision is an additive per-district layer: the ShowCollision setter loads/unloads it without a scene reload.

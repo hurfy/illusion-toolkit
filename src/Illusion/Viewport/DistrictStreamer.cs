@@ -74,6 +74,15 @@ internal sealed class DistrictStreamer
         public required SceneNode Layer;                      // the "Crash objects" tree node
         // Prototype mesh → its tree leaf, so an edited row can find the GpuMesh whose copies must be re-uploaded.
         public required Dictionary<FrameObjectSingleMesh, SceneNode> Leaves;
+
+        // Placement → its tree node, for the copies that have been materialised. The shipped city holds 57 652
+        // of them; building a node (each with its own observable child collection) and an adapter for every one
+        // up front is ~170 000 objects that stay live for the session, and every later gen2 collection walks
+        // them. They are created on demand instead — when a copy is clicked, or when its row is expanded.
+        public readonly Dictionary<Instance, SceneNode> Nodes = new();
+
+        // Row → its tree node, so a placement can be materialised under the right parent without a lookup.
+        public readonly Dictionary<Formats.Translokator.Object, SceneNode> RowNodes = new();
     }
 
     // .sds load queue (single area / city_univers when streaming). One item at a time.
@@ -398,19 +407,72 @@ internal sealed class DistrictStreamer
         var layer = new SceneNode("Crash objects", "Crash", true) { Source = placements.Document };
         foreach (Formats.Translokator.Object row in placements.Rows)
         {
-            var rowNode = new SceneNode($"{row.Name.String} — {row.Instances.Count}", "CrashObject", true);
-            foreach (Instance copy in row.Instances)
+            // Rows only — the copies under them are materialised on demand (see CrashNodeFor / ExpandCrashRow).
+            layer.AddChild(new SceneNode($"{row.Name.String} — {row.Instances.Count}", "CrashObject", true));
+        }
+        return layer;
+    }
+
+    /// <summary>
+    /// The tree node of one placement, created on first use and cached. A node is what selection, the property
+    /// panel and the undo stack key on, so anything that hands a placement to the user goes through here.
+    /// </summary>
+    public SceneNode? CrashNodeFor(Instance placement, Formats.Translokator.Object row)
+    {
+        foreach (CrashSource src in _crashSources)
+        {
+            if (!src.RowNodes.TryGetValue(row, out SceneNode? rowNode)) continue;
+            if (src.Nodes.TryGetValue(placement, out SceneNode? node)) return node;
+
+            node = new SceneNode($"copy #{placement.ID}", "CrashInstance", false)
             {
                 // Label by the placement id, not by position in the list: ids are stable across adds and
                 // deletes, so a row's nodes keep their names while the list around them changes.
-                rowNode.AddChild(new SceneNode($"copy #{copy.ID}", "CrashInstance", false)
-                {
-                    Source = placements.Document.Node(copy, row),
-                });
-            }
-            layer.AddChild(rowNode);
+                Source = src.Placements.Document.Node(placement, row),
+            };
+            src.Nodes[placement] = node;
+            rowNode.AddChild(node);
+            return node;
         }
-        return layer;
+        return null;
+    }
+
+    /// <summary>
+    /// Materialises every placement of a crash row — what expanding the row in the tree needs. Copies already
+    /// created (by a viewport click) keep their nodes; the rest are added in one batch, so filling a row of a
+    /// thousand costs one aggregate recompute rather than a thousand.
+    /// </summary>
+    public void ExpandCrashRow(SceneNode rowNode)
+    {
+        ArgumentNullException.ThrowIfNull(rowNode);
+        foreach (CrashSource src in _crashSources)
+        {
+            foreach ((Formats.Translokator.Object row, SceneNode candidate) in src.RowNodes)
+            {
+                if (!ReferenceEquals(candidate, rowNode)) continue;
+                if (rowNode.Children.Count == row.Instances.Count) return; // already whole
+
+                var fresh = new List<SceneNode>(row.Instances.Count - rowNode.Children.Count);
+                foreach (Instance copy in row.Instances)
+                {
+                    if (src.Nodes.ContainsKey(copy)) continue;
+                    var node = new SceneNode($"copy #{copy.ID}", "CrashInstance", false)
+                    {
+                        Source = src.Placements.Document.Node(copy, row),
+                    };
+                    src.Nodes[copy] = node;
+                    fresh.Add(node);
+                }
+                rowNode.AddChildren(fresh);
+                return;
+            }
+        }
+    }
+
+    /// <summary>Forgets a placement's node (it was deleted) so a later undo materialises a fresh one.</summary>
+    public void ForgetCrashNode(Instance placement)
+    {
+        foreach (CrashSource src in _crashSources) src.Nodes.Remove(placement);
     }
 
     // Re-uploads the copy matrices of the prototypes whose placements were just edited (live during a gizmo drag).
@@ -450,17 +512,12 @@ internal sealed class DistrictStreamer
     public SceneNode? PickCrash(Vector3 origin, Vector3 dir, out float bestT)
     {
         bestT = float.PositiveInfinity;
-        SceneNode? best = null;
+        Instance? hit = null;
+        Formats.Translokator.Object? hitRow = null;
         foreach (CrashSource src in _crashSources)
         {
-            var rowNodes = new Dictionary<Formats.Translokator.Object, SceneNode>();
-            for (int i = 0; i < src.Placements.Rows.Count && i < src.Layer.Children.Count; i++)
-                rowNodes[src.Placements.Rows[i]] = src.Layer.Children[i];
-
             foreach (Formats.Translokator.Object row in src.Placements.Rows)
             {
-                if (!rowNodes.TryGetValue(row, out SceneNode? rowNode)) continue;
-
                 foreach (FrameObjectSingleMesh mesh in src.Placements.MeshesOf(row))
                 {
                     if (!src.Leaves.TryGetValue(mesh, out SceneNode? leaf)) continue;
@@ -468,9 +525,8 @@ internal sealed class DistrictStreamer
                     if (gm == null || !gm.Visible || gm.PickPositions == null || gm.PickIndices == null) continue;
 
                     Matrix4x4 local = src.Placements.LocalOf(mesh, row);
-                    for (int i = 0; i < row.Instances.Count && i < rowNode.Children.Count; i++)
+                    foreach (Instance copy in row.Instances)
                     {
-                        Instance copy = row.Instances[i];
                         Matrix4x4 world = local * TransformMath.Compose(
                             copy.Quaternion, new Vector3(copy.Scale), copy.Position);
                         if (!PrototypeAabbHit(origin, dir, gm, world, out float tEnter) || tEnter > bestT) continue;
@@ -485,14 +541,16 @@ internal sealed class DistrictStreamer
                             if (Picking.IntersectTriangle(origin, dir, a, b, c, out float t) && t < bestT)
                             {
                                 bestT = t;
-                                best = rowNode.Children[i];
+                                hit = copy;
+                                hitRow = row;
                             }
                         }
                     }
                 }
             }
         }
-        return best;
+        // Only the winner is materialised — a pick must not build 57 000 nodes on its way past them.
+        return hit != null && hitRow != null ? CrashNodeFor(hit, hitRow) : null;
     }
 
     // Broad phase: ray vs one copy's world AABB (the prototype's 8 local-AABB corners transformed by its matrix).
@@ -546,10 +604,7 @@ internal sealed class DistrictStreamer
     {
         foreach (CrashSource src in _crashSources)
         {
-            for (int i = 0; i < src.Placements.Rows.Count && i < src.Layer.Children.Count; i++)
-            {
-                if (ReferenceEquals(src.Placements.Rows[i], row)) return src.Layer.Children[i];
-            }
+            if (src.RowNodes.TryGetValue(row, out SceneNode? node)) return node;
         }
         return null;
     }
@@ -937,13 +992,19 @@ internal sealed class DistrictStreamer
         // this is what lets the edit commands, the placement picker and the live instance refresh find it.
         if (load.Crash != null && load.CrashLayer != null && load.CrashLeaves != null)
         {
-            _crashSources.Add(new CrashSource
+            var source = new CrashSource
             {
                 Sds = load.Sds,
                 Placements = load.Crash,
                 Layer = load.CrashLayer,
                 Leaves = load.CrashLeaves,
-            });
+            };
+            // Row nodes are built in table order, so this pairs them up without a name lookup.
+            for (int i = 0; i < load.Crash.Rows.Count && i < load.CrashLayer.Children.Count; i++)
+            {
+                source.RowNodes[load.Crash.Rows[i]] = load.CrashLayer.Children[i];
+            }
+            _crashSources.Add(source);
         }
 
         // Navigation-graph overlay: uploaded per district (keyed by its SDS node); ShowNav gates drawing.
