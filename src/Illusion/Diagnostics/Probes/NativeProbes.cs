@@ -1,5 +1,7 @@
 using System.IO;
 using System.IO.Compression;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using Illusion.Assets;
 using Illusion.Assets.Sds;
@@ -38,6 +40,7 @@ internal static class NativeProbes
         try
         {
             CheckHandshake(Check);
+            CheckEntryPoints(Check);
             CheckEchoRoundtrip(Check);
             CheckErrorReporting(Check);
             CheckDoubleFree(Check);
@@ -63,6 +66,50 @@ internal static class NativeProbes
         uint rev = NativeFormats.AbiRev;
         check("ABI revision matches the facade", rev == NativeFormats.ExpectedAbiRev,
             $"native {rev} vs managed {NativeFormats.ExpectedAbiRev}");
+    }
+
+    /// <summary>
+    /// Every entry point the facade declares has to exist in the core that was actually loaded. This
+    /// is the gap the revision check leaves: a revision number says the shapes both halves already
+    /// share still agree, so a core that only GAINS an export can keep its number — and a DLL from
+    /// just before that addition would then load, answer the handshake, and fail nowhere until the
+    /// one call needing the new export is made. Convention here is to bump on any boundary change,
+    /// which is exactly the kind of convention worth having a test for rather than trusting. Read off
+    /// the metadata, so an import written tomorrow is covered without touching this.
+    /// </summary>
+    private static void CheckEntryPoints(CheckFn check)
+    {
+        Assembly facade = typeof(NativeFormats).Assembly;
+        if (!NativeLibrary.TryLoad(NativeMethods.LibraryName, facade, null, out nint core))
+        {
+            check("the native core can be opened for inspection", false, NativeMethods.LibraryName);
+            return;
+        }
+
+        var declared = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (Type type in facade.GetTypes())
+        {
+            const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic
+                | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+            foreach (MethodInfo method in type.GetMethods(all))
+            {
+                if (method.GetCustomAttribute<LibraryImportAttribute>() is not { } import) continue;
+                if (!string.Equals(import.LibraryName, NativeMethods.LibraryName, StringComparison.OrdinalIgnoreCase)) continue;
+                declared.Add(import.EntryPoint ?? method.Name);
+            }
+        }
+
+        var missing = new List<string>();
+        foreach (string entry in declared)
+        {
+            if (!NativeLibrary.TryGetExport(core, entry, out _)) missing.Add(entry);
+        }
+
+        check("the facade declares entry points at all", declared.Count > 0, $"{declared.Count} imports");
+        check("the loaded core exports every one of them", missing.Count == 0,
+            missing.Count == 0
+                ? $"{declared.Count} checked"
+                : $"missing {missing.Count}: {string.Join(", ", missing)} — this core is older than the facade");
     }
 
     private static void CheckEchoRoundtrip(CheckFn check)

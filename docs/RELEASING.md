@@ -9,21 +9,34 @@ symbols, no documents. The install instructions in the release notes name the tw
 ## The one thing the workflow cannot do
 
 `vendors/Mafia.Formats.dll` is committed, and the runner uses it as is (`MfCoreMode=Prebuilt`) — it
-has no access to the private core. **Refreshing that DLL is a manual step before the tag.** Ship a
-stale core and every format fix since the last release silently is not in the release.
+has no access to the private core. A **Release** build here refreshes that DLL by itself when the
+core sources are beside this repository, but **committing it is still on you**: a stale core takes
+every format fix since the last release out of the release with it, and once took the release past
+a boundary revision, which would have thrown on the first native call.
+
+Nothing else from the core's build folder travels — the vendoring step copies the one DLL, and the
+private test binary sitting next to it stays where it is.
 
 ## Checklist
 
-1. **Rebuild the core and bring it over.** With `illusion-core` checked out beside this repository,
-   a Release build here drives CMake automatically (Source mode wins when sources are found):
+1. **Rebuild the core.** With `illusion-core` checked out beside this repository, a Release build
+   here drives CMake automatically (Source mode wins when sources are found) and copies the result
+   over `vendors/Mafia.Formats.dll` itself:
 
    ```powershell
    dotnet build Illusion.slnx -c Release
-   Copy-Item ..\illusion-core\src\Mafia.Formats\native-build\release\bin\Mafia.Formats.dll vendors\ -Force
+   git status vendors     # did the core actually move?
    ```
 
-   A boundary-revision mismatch fails that build with an explicit message — `MF_ABI_REV` and
-   `ExpectedAbiRev` move together.
+   Only a Release build vendors, because that is the binary that ships — a Debug build produces a
+   RelWithDebInfo core and deliberately leaves the committed one alone, so day-to-day work cannot
+   downgrade a release by accident. `-p:MfVendorCore=false` opts out when building from an
+   experimental core.
+
+   Two guards sit under this. A boundary-revision mismatch fails the build outright — `MF_ABI_REV`
+   and `ExpectedAbiRev` move together — and `--probe-native` checks that the core actually loaded
+   exports every entry point the facade imports, which is the case a revision number cannot see (a
+   core that only gains an export may keep its number).
 
 2. **Run the guards** (they need the game installed; each prints its own verdict — read it, the
    probes exit 0 either way):

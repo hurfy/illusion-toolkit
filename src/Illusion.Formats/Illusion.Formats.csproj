@@ -165,4 +165,28 @@
              Text="Mafia.Formats: Prebuilt mode — using '$(MfPrebuiltDll)'" />
   </Target>
 
+  <!-- A source build keeps vendors\Mafia.Formats.dll in step with what it just built, so the
+       committed binary cannot quietly fall behind the core. It did once, by a whole revision: every
+       local build compiled the core from sources and never looked at the vendored copy, so nothing
+       here failed, while the release runner — which has no sources and uses that copy as is — would
+       have shipped an application that throws on its first native call.
+
+       Only a RELEASE native build is vendored. The committed binary is the one that ships: Release
+       is LTCG'd and roughly half the size of the RelWithDebInfo core a Debug app build produces, so
+       vendoring whichever config happened to be built would silently downgrade a release. A Debug
+       session therefore still leaves the vendored DLL behind — that is what the native probe's
+       entry-point check is for, and it runs against whatever core the build actually loaded.
+
+       Set MfVendorCore=false to build from experimental core sources without touching the repo. -->
+  <Target Name="MfVendorNative"
+          AfterTargets="MfCollectNative"
+          Condition="'$(MfCoreMode)' == 'Source' AND '$(MfNativeConfig)' == 'Release'
+                     AND '$(MfVendorCore)' != 'false' AND '$(DesignTimeBuild)' != 'true'"
+          Inputs="$(MfNativeDll)"
+          Outputs="$(MfPrebuiltDll)">
+    <Copy SourceFiles="$(MfNativeDll)" DestinationFiles="$(MfPrebuiltDll)" />
+    <Message Importance="high"
+             Text="Mafia.Formats: refreshed the vendored core — '$(MfPrebuiltDll)' now matches this Release build. Commit it." />
+  </Target>
+
 </Project>
