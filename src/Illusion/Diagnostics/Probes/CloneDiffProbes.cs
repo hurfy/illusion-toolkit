@@ -32,8 +32,10 @@ internal static class CloneDiffProbes
             if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
 
             string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
-            FrameResource? fr = SdsMeshLoader.OpenScene(extracted).FrameResource;
+            ExtractedSds scene = SdsMeshLoader.OpenScene(extracted);
+            FrameResource? fr = scene.FrameResource;
             if (fr?.FrameObjects == null) { sb.AppendLine("district carries no frame objects"); return; }
+            Assets.Actors.ActorPlacements placements = Assets.Actors.ActorPlacements.Load(scene.Manifest, fr);
 
             var byName = new Dictionary<string, FrameObjectBase>(StringComparer.Ordinal);
             var order = new List<FrameObjectBase>();
@@ -68,7 +70,7 @@ internal static class CloneDiffProbes
                 Compare(sb, fr, order, source, copy);
             }
 
-            CompareActors(sb, extracted, order);
+            CompareActors(sb, extracted, order, placements);
         }
         catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
         finally { File.WriteAllText(outFile, sb.ToString()); }
@@ -76,7 +78,8 @@ internal static class CloneDiffProbes
 
     // The other half of a copied actor: its record in the pack, and whether the edited pack on disk still
     // says the same thing when it is read and written again.
-    private static void CompareActors(StringBuilder sb, string extracted, List<FrameObjectBase> order)
+    private static void CompareActors(StringBuilder sb, string extracted, List<FrameObjectBase> order,
+        Assets.Actors.ActorPlacements placements)
     {
         foreach (string path in Directory.GetFiles(extracted, "*.act", SearchOption.AllDirectories))
         {
@@ -113,6 +116,18 @@ internal static class CloneDiffProbes
                 Formats.Actors.ActorSceneReference? copyRef =
                     pack.SceneReferences.FirstOrDefault(r => r.FrameHash == copy.FrameHash);
                 Line(sb, "reference row", Target(order, sourceRef), Target(order, copyRef));
+
+                // Drawn as geometry or as a glyph. A copy that came out as a glyph while its original is
+                // geometry means the placements found no mesh under the copied object.
+                Assets.Actors.ActorPlacements live = placements;
+                Formats.Actors.ActorEntry? liveSource =
+                    live.All.FirstOrDefault(a => a.EntityName == source.EntityName);
+                Formats.Actors.ActorEntry? liveCopy = live.All.FirstOrDefault(a => a.EntityName == copy.EntityName);
+                Line(sb, "drawn as",
+                    liveSource == null ? "(not resolved)" : live.HasGlyph(liveSource) ? "glyph" : "geometry",
+                    liveCopy == null ? "(not resolved)" : live.HasGlyph(liveCopy) ? "glyph" : "geometry");
+                Line(sb, "places", live.TargetOf(liveSource!)?.Name.String ?? "(nothing)",
+                    liveCopy == null ? "(not resolved)" : live.TargetOf(liveCopy)?.Name.String ?? "(nothing)");
             }
         }
     }

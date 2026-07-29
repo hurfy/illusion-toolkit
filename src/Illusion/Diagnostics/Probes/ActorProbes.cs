@@ -628,6 +628,25 @@ internal static class ActorProbes
                       $"sources with parent1: {withP1}, with parent2: {withP2}, flagged as anchored: {anchored}");
     }
 
+    // Prefers the object whose mesh sits DEEPEST under it. A mesh hanging straight off the holder and one two
+    // levels down (an animated platform puts its mesh under an anim node) are different cases for everything
+    // that walks the subtree, and the deep one is the one that has gone wrong in practice.
+    private static bool Deeper(FrameObjectBase candidate, FrameObjectBase current) =>
+        MeshDepth(candidate, 0, new HashSet<FrameObjectBase>()) >
+        MeshDepth(current, 0, new HashSet<FrameObjectBase>());
+
+    private static int MeshDepth(FrameObjectBase frame, int depth, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return -1;
+        if (frame is FrameObjectSingleMesh { Geometry: not null }) return depth;
+        int best = -1;
+        foreach (FrameObjectBase child in frame.Children)
+        {
+            best = Math.Max(best, MeshDepth(child, depth + 1, seen));
+        }
+        return best;
+    }
+
     // What a parent slot actually points at — a scene folder, another object, or nothing.
     private static string Describe(ActorPlacements placements, FrameObjectBase frame, FrameEntryRefTypes slot)
     {
@@ -649,8 +668,7 @@ internal static class ActorProbes
 
             if (!ActorPrototypeCloner.CanClone(target)) continue; // a skinned character is not copyable at all
             if (ActorPrototypeCloner.HullsOf(target) == 0) placing ??= a;
-            else physical ??= a;
-            if (placing != null && physical != null) break;
+            else if (physical == null || Deeper(target, placements.TargetOf(physical)!)) physical = a;
         }
 
         // An object built on collision copies like any other — it is only flagged to the user, because one such
@@ -665,6 +683,26 @@ internal static class ActorProbes
                 physicalClone == null
                     ? $"{physical.EntityName}: {physicalReason}"
                     : $"{physical.EntityName}: {ActorPrototypeCloner.HullsOf(physicalClone.Root)} hull(s)");
+
+            // A copy whose object has geometry must be drawn as that geometry. Landing in the glyph list means
+            // the placements could not see a mesh under the clone — which is what a copy showing up as a
+            // diamond looks like from the outside.
+            if (physicalClone != null && placements.PackOf(physical) is { } physicalPack)
+            {
+                ActorEntry? physicalCopy = physicalPack.Duplicate(physical,
+                    new ActorPlacedFrame(physicalClone.Root.Name.String, physicalClone.FrameIndex), out _);
+                if (physicalCopy != null)
+                {
+                    placements.AddCopy(physicalCopy, physical, physicalPack, physicalClone.Root);
+                    bool sourceDrawn = !placements.HasGlyph(physical);
+                    check("a copy is drawn the way its original is",
+                        placements.HasGlyph(physicalCopy) == placements.HasGlyph(physical),
+                        $"{physical.EntityName}: original {(sourceDrawn ? "geometry" : "glyph")}, " +
+                        $"copy {(placements.HasGlyph(physicalCopy) ? "glyph" : "geometry")}");
+                    placements.Detach(physicalCopy);
+                    physicalPack.RemoveCopy(physicalCopy);
+                }
+            }
             physicalClone?.Detach();
         }
 
@@ -714,6 +752,16 @@ internal static class ActorProbes
         check("a copy is registered as placing its own object",
             ReferenceEquals(placements.TargetOf(copy), clone.Root),
             placements.TargetOf(copy)?.Name.String ?? "(nothing)");
+
+        // The clone's geometry has to stand where the COPY stands. It is built at the prototype's own place —
+        // the origin — and only the placement moves it, so the copy's meshes have to be re-pushed once the
+        // placement exists. A copy whose geometry stayed at the origin looks, from the viewport, like a copy
+        // that was never made.
+        FrameObjectBase geometry = clone.Renderables.Count > 0 ? clone.Renderables[0].Frame : clone.Root;
+        System.Numerics.Matrix4x4 placement = placements.For(geometry);
+        check("the copy's geometry carries the copy's placement, not the prototype's",
+            !placement.IsIdentity && Approx(placement.Translation, copy.Position, 1e-3f),
+            $"{geometry.Name} placed at {placement.Translation}, copy at {copy.Position}");
 
         ActorPrototypeCloner.ClonedPrototype? second =
             ActorPrototypeCloner.TryClone(document, clone.Root, out string? secondReason);

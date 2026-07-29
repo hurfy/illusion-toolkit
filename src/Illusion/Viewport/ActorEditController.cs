@@ -287,6 +287,12 @@ internal sealed class ActorEditController
                 if (item.FrameRow != null) _owner._host.Persistence.MarkFrameModified(item.FrameRow);
                 item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack, item.Clone?.Root);
                 _owner._host.Streamer.AddActorNode(item.Document.Placements, item.Copy, item.Node);
+
+                // The cloned meshes were uploaded with the PROTOTYPE's own world transform, which for an
+                // actor's object is the origin — the placement only exists once AddCopy has registered it.
+                // Without this the copy's geometry is drawn at (0,0,0) and there is nothing where the copy
+                // was made.
+                _owner._host.Streamer.SyncActorMeshes(item.Node);
                 if (item.Parent != null)
                 {
                     // InsertChild, not Children.Insert: the list alone leaves the row without a parent, and a
