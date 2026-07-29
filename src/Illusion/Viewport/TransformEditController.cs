@@ -209,11 +209,15 @@ internal sealed class TransformEditController
     }
 
     // Pushes fresh world matrices (already cascaded by the LocalTransform setter) onto a node's GPU meshes.
-    private static void SyncNodeMeshes(SceneNode node)
+    private void SyncNodeMeshes(SceneNode node)
     {
         foreach (SceneNode leaf in node.DescendantMeshLeaves())
             if (leaf.Mesh != null && leaf.Source is IFrameNode fn)
                 leaf.Mesh.SetWorld(fn.WorldTransform);
+
+        // An actor's geometry does not hang under its tree node — it lives in the FrameResource branch, placed
+        // by the actor's matrix. Moving the actor has to push those meshes' new worlds too.
+        if (node.Source is ActorNodeAdapter) _host.Streamer.SyncActorMeshes(node);
     }
 
     /// <summary>Resyncs a node's GPU meshes to its current world, then refreshes the outline/pivot and the
@@ -540,7 +544,7 @@ internal sealed class TransformEditController
         {
             if (_node.Source is not IFrameNode child || !_doc.Reparent(child, parent.Source)) return false;
             _node.MoveTo(parent, parent.Children.Count);
-            SyncNodeMeshes(_node);                      // world transforms changed
+            _owner.SyncNodeMeshes(_node);                      // world transforms changed
             _owner._host.Selection.SetSelection(new[] { _node }, _node);
             return true;
         }
@@ -560,7 +564,7 @@ internal sealed class TransformEditController
             // node either — the tree and the frame graph would diverge, and a cycle hangs every tree walk.
             if (!_doc.Reparent(child, _oldParent.Source)) return;
             _node.MoveTo(_oldParent, _oldIndex);
-            SyncNodeMeshes(_node);
+            _owner.SyncNodeMeshes(_node);
             _owner._host.Persistence.MarkFrameModified(_node);
             _owner._host.Selection.SetSelection(new[] { _node }, _node);
             _owner._host.RaiseSceneChanged();

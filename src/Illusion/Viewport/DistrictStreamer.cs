@@ -196,6 +196,28 @@ internal sealed class DistrictStreamer
         return null;
     }
 
+    /// <summary>Re-uploads the world matrices of the geometry an actor places, after that actor moved. The
+    /// placement was already refreshed by the adapter, so each frame's node reports its new world.</summary>
+    public void SyncActorMeshes(SceneNode actorNode)
+    {
+        if (actorNode.Source is not ActorNodeAdapter actor || actor.Target is not { } target) return;
+        SyncSubtreeMeshes(target, new HashSet<FrameObjectBase>());
+    }
+
+    private void SyncSubtreeMeshes(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
+        {
+            if (map.TryGetValue(frame, out SceneNode? leaf) && leaf.Mesh is { Instanced: false } mesh
+                && leaf.Source is IFrameNode fn)
+            {
+                mesh.SetWorld(fn.WorldTransform);
+            }
+        }
+        foreach (FrameObjectBase child in frame.Children) SyncSubtreeMeshes(child, seen);
+    }
+
     /// <summary>GPU meshes to outline for the selected actors — an actor with geometry has no mesh of its own,
     /// so the highlight is the meshes of the subtree it places.</summary>
     public IReadOnlyList<GpuMesh> ActorSelectionOutlines(IReadOnlyList<SceneNode> selected)

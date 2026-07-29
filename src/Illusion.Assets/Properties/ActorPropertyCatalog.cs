@@ -1,4 +1,3 @@
-using System.Numerics;
 using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Domain.Properties;
@@ -8,9 +7,10 @@ using Illusion.Formats.Frames.ObjectTypes;
 namespace Illusion.Assets.Properties;
 
 /// <summary>
-/// Property panel groups for one actor. Everything is read-only in this build: the transform lives in the .act
-/// pack (which the toolkit reads but does not yet write back edits to), and the names are length-coupled to the
-/// pack's offset tables, so changing one would shift every entry after it.
+/// Property panel groups for one actor: what it is and what it is linked to. The transform is not here — the
+/// adapter is an <c>IFrameNode</c>, so the standard Object tab and the gizmo edit it. The fields below stay
+/// read-only: the names are length-coupled to the pack's offset tables, so changing one would shift every
+/// entry after it.
 /// </summary>
 internal static class ActorPropertyCatalog
 {
@@ -40,20 +40,8 @@ internal static class ActorPropertyCatalog
                         "Whether the game switches this actor on as soon as the pack streams in."),
                 },
             },
-            new()
-            {
-                Title = "Spawn transform",
-                IsTypeSpecific = true,
-                Properties = new[]
-                {
-                    VectorDesc("Actor.Position", "Position", () => actor.Position,
-                        "Where the game puts the actor — and, for an actor that places a frame object, where "
-                        + "that object's whole subtree goes. The frame itself sits at the origin."),
-                    VectorDesc("Actor.Rotation", "Rotation (deg)", () => ToEulerDegrees(actor.Rotation),
-                        "The stored value is a quaternion; this shows it as degrees for reading."),
-                    VectorDesc("Actor.Scale", "Scale", () => actor.Scale),
-                },
-            },
+            // Position / rotation / scale are edited through the standard Object tab — the adapter is an
+            // IFrameNode, so the gizmo and the numeric fields already drive them.
             new()
             {
                 Title = "Scene link",
@@ -90,24 +78,6 @@ internal static class ActorPropertyCatalog
         return invisible ? "no — empty holder frame, shown as a glyph" : "yes — mesh under the placed frame";
     }
 
-    // Quaternion → yaw/pitch/roll in degrees, for reading only (the panel never writes it back).
-    private static Vector3 ToEulerDegrees(Quaternion q)
-    {
-        float sinrCosp = 2 * (q.W * q.X + q.Y * q.Z);
-        float cosrCosp = 1 - 2 * (q.X * q.X + q.Y * q.Y);
-        float roll = MathF.Atan2(sinrCosp, cosrCosp);
-
-        float sinp = 2 * (q.W * q.Y - q.Z * q.X);
-        float pitch = MathF.Abs(sinp) >= 1 ? MathF.CopySign(MathF.PI / 2, sinp) : MathF.Asin(sinp);
-
-        float sinyCosp = 2 * (q.W * q.Z + q.X * q.Y);
-        float cosyCosp = 1 - 2 * (q.Y * q.Y + q.Z * q.Z);
-        float yaw = MathF.Atan2(sinyCosp, cosyCosp);
-
-        const float ToDeg = 180f / MathF.PI;
-        return new Vector3(roll * ToDeg, pitch * ToDeg, yaw * ToDeg);
-    }
-
     private static PropertyDescriptor ReadOnlyText(string id, string label, Func<string> get) => new()
     {
         Id = id,
@@ -132,16 +102,6 @@ internal static class ActorPropertyCatalog
         Id = id,
         Label = label,
         Kind = PropertyKind.Bool,
-        IsReadOnly = true,
-        Tooltip = tip,
-        Get = () => get(),
-    };
-
-    private static PropertyDescriptor VectorDesc(string id, string label, Func<Vector3> get, string? tip = null) => new()
-    {
-        Id = id,
-        Label = label,
-        Kind = PropertyKind.Vector3,
         IsReadOnly = true,
         Tooltip = tip,
         Get = () => get(),

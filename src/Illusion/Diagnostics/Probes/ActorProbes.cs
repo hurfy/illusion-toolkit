@@ -273,16 +273,81 @@ internal static class ActorProbes
 
                 IReadOnlyList<PropertyGroup> groups = adapter.GetPropertyGroups();
                 int fields = groups.Sum(g => g.Properties.Count);
-                Check("the property panel has the actor's fields", groups.Count >= 3 && fields >= 15,
+                Check("the property panel has the actor's fields", groups.Count >= 2 && fields >= 12,
                     $"{groups.Count} groups, {fields} fields");
 
-                PropertyDescriptor? position = groups.SelectMany(g => g.Properties)
-                    .FirstOrDefault(p => p.Id == "Actor.Position");
-                Check("the panel reports the actor's spawn position",
-                    position != null && position.Get() is System.Numerics.Vector3 v && Approx(v, sample.Position),
+                // The transform is not a catalog field — the adapter is an IFrameNode, so the Object tab and the
+                // gizmo read it straight off the actor.
+                Check("the actor reports its spawn transform as a frame node",
+                    Approx(adapter.LocalTransform.Translation, sample.Position)
+                    && adapter.ParentWorldTransform.IsIdentity
+                    && Approx(adapter.WorldTransform.Translation, sample.Position),
                     $"{adapter.Name} @ {sample.Position}");
-                Check("actor fields are read-only in this build",
+                Check("the actor's identity fields stay read-only",
                     groups.SelectMany(g => g.Properties).All(p => p.IsReadOnly && p.Set == null));
+            }
+
+            // ── Moving an actor: the subtree follows, the pack survives a round trip, nothing else shifts ──
+            ActorEntry? movable = null;
+            foreach (ActorEntry a in placements.All)
+            {
+                if (placements.TargetOf(a) != null && placements.PackOf(a) is { } p && p.Actors.Count > 1)
+                {
+                    movable = a;
+                    break;
+                }
+            }
+            if (movable != null && placements.PackOf(movable) is { } pack2)
+            {
+                FrameObjectBase target = placements.TargetOf(movable)!;
+                ActorNodeAdapter mover = document.ActorNode(movable);
+                System.Numerics.Vector3 before = movable.Position;
+                var offset = new System.Numerics.Vector3(3f, -4f, 5f);
+
+                // Snapshot a neighbour's bytes: moving one actor must not disturb any other.
+                ActorEntry neighbour = pack2.Actors.First(a => !ReferenceEquals(a, movable));
+                System.Numerics.Vector3 neighbourBefore = neighbour.Position;
+                byte[] packBefore = pack2.ToBytes();
+
+                mover.LocalTransform = mover.LocalTransform * System.Numerics.Matrix4x4.CreateTranslation(offset);
+
+                Check("moving an actor moves its own position",
+                    Approx(movable.Position, before + offset, 1e-2f), $"{before} → {movable.Position}");
+                Check("the placed subtree follows the actor",
+                    Approx(document.Node(target).WorldTransform.Translation, movable.Position, 1e-2f),
+                    $"{target.Name} at {document.Node(target).WorldTransform.Translation}");
+                Check("no other actor moved", Approx(neighbour.Position, neighbourBefore));
+
+                // Write the edited pack out and read it back: the move must survive, and the file must stay the
+                // same size — the transform is fixed-width, so no offset in the pack can have shifted.
+                string temp = Path.Combine(Path.GetTempPath(), "illusion_actor_move.act");
+                SdsActorsSaver.Save(pack2, temp);
+                byte[] packAfter = File.ReadAllBytes(temp);
+                Check("an edited pack keeps its size", packAfter.Length == packBefore.Length,
+                    $"{packBefore.Length} → {packAfter.Length}");
+
+                ActorsFile reread = ActorsFile.Load(temp);
+                ActorEntry roundTripped = reread.Actors[movable.Index];
+                Check("the move survives a save/load round trip",
+                    Approx(roundTripped.Position, movable.Position, 1e-3f)
+                    && QApprox(roundTripped.Rotation, movable.Rotation)
+                    && Approx(roundTripped.Scale, movable.Scale, 1e-3f),
+                    $"{roundTripped.EntityName} @ {roundTripped.Position}");
+
+                // Everything except this actor's own item bytes must be identical to the original pack.
+                int diffs = 0;
+                for (int i = 0; i < packBefore.Length && i < packAfter.Length; i++) if (packBefore[i] != packAfter[i]) diffs++;
+                Check("only the moved actor's bytes changed", diffs > 0 && diffs <= 40, $"{diffs} bytes differ");
+
+                // Put it back, so the probe leaves the working copy as it found it.
+                mover.LocalTransform = mover.LocalTransform * System.Numerics.Matrix4x4.CreateTranslation(-offset);
+                Check("restoring the actor restores the pack byte for byte",
+                    pack2.ToBytes().AsSpan().SequenceEqual(packBefore));
+                File.Delete(temp);
+            }
+            else
+            {
+                sb.AppendLine("(no movable actor with a frame in this district — move checks skipped)");
             }
         }
         catch (Exception ex)

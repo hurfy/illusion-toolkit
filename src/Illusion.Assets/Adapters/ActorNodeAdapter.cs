@@ -1,5 +1,7 @@
+using System.Numerics;
 using Illusion.Assets.Actors;
 using Illusion.Assets.Properties;
+using Illusion.Domain;
 using Illusion.Domain.Properties;
 using Illusion.Formats.Actors;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -7,22 +9,58 @@ using Illusion.Formats.Frames.ObjectTypes;
 namespace Illusion.Assets.Adapters;
 
 /// <summary>
-/// Adapts one placed actor (<see cref="ActorEntry"/>) into an <see cref="IPropertySource"/>, so the scene tree
-/// can list the scene's actors and the property panel can show what each one is: its type, the names that tie
-/// it to a definition and to a frame object, its spawn transform, and whether this scene actually has the frame
-/// it places.
+/// Adapts one placed actor (<see cref="ActorEntry"/>) into an <see cref="IFrameNode"/> (so the standard
+/// selection + gizmo + undo pipeline moves it) and an <see cref="IPropertySource"/> (so the property panel
+/// shows what it is).
 ///
-/// Deliberately NOT an <c>IFrameNode</c>: that port is what puts a gizmo on an object and lets a drag write a
-/// new transform, and an actor's transform belongs in the .act pack, which this build does not write yet.
-/// Showing a gizmo that silently edits the wrong file would be worse than showing none.
+/// An actor is a bare world placement: it has no parent frame, so <see cref="ParentWorldTransform"/> is
+/// identity and <see cref="WorldTransform"/> equals <see cref="LocalTransform"/> — the same shape
+/// <see cref="TranslokatorInstanceAdapter"/> has, and what makes a world-space drag land as-is. Moving it
+/// re-places the whole subtree it spawns, because that geometry is only its prototype.
 /// </summary>
-public sealed class ActorNodeAdapter : IPropertySource
+public sealed class ActorNodeAdapter : IFrameNode, IPropertySource
 {
-    internal ActorNodeAdapter(ActorEntry actor, ActorPlacements placements)
+    private readonly SceneDocumentAdapter _document;
+
+    internal ActorNodeAdapter(ActorEntry actor, ActorPlacements placements, SceneDocumentAdapter document)
     {
         Actor = actor;
         Placements = placements;
+        _document = document;
     }
+
+    /// <summary>The actor's spawn transform. Setting it moves the actor — and with it every frame object it
+    /// places — and marks the pack for saving. Rotation and scale come back out of the matrix in the same
+    /// rotation·scale convention frame matrices use.</summary>
+    public Matrix4x4 LocalTransform
+    {
+        get => Actor.Transform;
+        set
+        {
+            TransformMath.TryDecompose(value, out Vector3 scale, out Quaternion rotation, out Vector3 position);
+            Actor.Position = position;
+            // Compose→decompose is not bit-exact for the rotation and the scale (the quaternion comes back out
+            // of a normalized basis), so a pure drag would rewrite them by ~1e-7 and change bytes that nobody
+            // asked to change. Keep the stored values unless the edit actually turned or resized the actor.
+            if (MathF.Abs(Quaternion.Dot(rotation, Actor.Rotation)) < 1f - 1e-6f) Actor.Rotation = rotation;
+            if ((scale - Actor.Scale).LengthSquared() > 1e-12f) Actor.Scale = scale;
+            Placements.Refresh(Actor);
+            _document.MarkActorsDirty();
+        }
+    }
+
+    /// <summary>An actor stands in the world, not under a frame — its world IS its local.</summary>
+    public Matrix4x4 WorldTransform => Actor.Transform;
+
+    /// <summary>Identity: there is no parent frame to re-localize a world-space edit against.</summary>
+    public Matrix4x4 ParentWorldTransform => Matrix4x4.Identity;
+
+    public IFrameNode? Parent => null;
+
+    /// <summary>Actors are not frame-name-table entries; the flags there classify geometry, not placements.</summary>
+    public bool IsOnNameTable => false;
+
+    public int NameTableFlags => 0;
 
     /// <summary>The wrapped actor — the property descriptors read it directly.</summary>
     public ActorEntry Actor { get; }

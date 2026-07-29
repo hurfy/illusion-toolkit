@@ -82,6 +82,26 @@ public sealed class ActorPlacements
     public static ActorPlacements Empty { get; } =
         new(new Dictionary<FrameObjectBase, Matrix4x4>(), new Dictionary<FrameObjectBase, ActorEntry>());
 
+    /// <summary>The packs these placements came from, with the file each was read from (empty when the packs
+    /// were fed in directly, as the probes do) — the save side writes back through this.</summary>
+    public IReadOnlyList<(ActorsFile Pack, string Path)> Packs { get; private init; } = [];
+
+    /// <summary>The pack an actor belongs to, for a write-back that must touch only that file.</summary>
+    public ActorsFile? PackOf(ActorEntry actor) =>
+        _packByActor.TryGetValue(actor, out ActorsFile? pack) ? pack : null;
+
+    private Dictionary<ActorEntry, ActorsFile> _packByActor = new();
+
+    /// <summary>
+    /// Re-applies an actor's transform to the subtree it places, after that transform was edited. Only the
+    /// matrices change — which frames the actor covers is fixed by the pack, not by where it stands.
+    /// </summary>
+    public void Refresh(ActorEntry actor)
+    {
+        if (TargetOf(actor) is not { } target) return;
+        Respread(target, actor.Transform, _byFrame, new HashSet<FrameObjectBase>());
+    }
+
     /// <summary>
     /// Reads every actor pack the extracted folder lists and resolves it against <paramref name="resource"/>.
     /// A pack that cannot be read is skipped — a scene still loads without its actors, just unplaced.
@@ -89,17 +109,24 @@ public sealed class ActorPlacements
     public static ActorPlacements Load(SdsManifest manifest, FrameResource resource)
     {
         var packs = new List<ActorsFile>();
+        var files = new List<(ActorsFile, string)>();
         foreach (string path in manifest.GetFiles("Actors"))
         {
-            try { packs.Add(ActorsFile.Load(path)); }
+            try
+            {
+                ActorsFile pack = ActorsFile.Load(path);
+                packs.Add(pack);
+                files.Add((pack, path));
+            }
             catch (Exception) { /* an unreadable pack costs placement, never the scene */ }
         }
-        return Build(packs, resource);
+        return Build(packs, resource, files);
     }
 
     /// <summary>Resolves already-loaded packs. Separate from <see cref="Load"/> so the probes can feed
     /// packs in directly.</summary>
-    public static ActorPlacements Build(IReadOnlyList<ActorsFile> packs, FrameResource resource)
+    public static ActorPlacements Build(IReadOnlyList<ActorsFile> packs, FrameResource resource,
+        IReadOnlyList<(ActorsFile Pack, string Path)>? files = null)
     {
         if (packs.Count == 0 || resource.FrameObjects == null) return Empty;
 
@@ -113,6 +140,7 @@ public sealed class ActorPlacements
         var actorByCoveredFrame = new Dictionary<FrameObjectBase, ActorEntry>();
         var all = new List<ActorEntry>();
         var invisible = new List<ActorEntry>();
+        var packByActor = new Dictionary<ActorEntry, ActorsFile>();
         int unresolved = 0;
 
         foreach (ActorsFile pack in packs)
@@ -126,6 +154,7 @@ public sealed class ActorPlacements
             foreach (ActorEntry actor in pack.Actors)
             {
                 all.Add(actor);
+                packByActor[actor] = pack;
                 if (!actor.IsTyped) { unresolved++; invisible.Add(actor); continue; }
 
                 // An uncompressed pack stores no hashes — derive the key from the name it does store.
@@ -160,6 +189,8 @@ public sealed class ActorPlacements
             All = all,
             Invisible = invisible,
             _invisibleSet = new HashSet<ActorEntry>(invisible),
+            _packByActor = packByActor,
+            Packs = files ?? [],
             _targetByActor = targetByActor,
             _actorByCoveredFrame = actorByCoveredFrame,
         };
@@ -186,9 +217,21 @@ public sealed class ActorPlacements
 
     // The actor moves the whole subtree, not just the node it names: the prototype is an empty holder and
     // its meshes/collisions hang under it. Guarded against the cycles a malformed hierarchy can carry.
+    // TryAdd doubles as the cycle guard here: the first claim wins, which is also what stops two actors from
+    // fighting over one subtree.
     private static void Spread(FrameObjectBase frame, Matrix4x4 placement, Dictionary<FrameObjectBase, Matrix4x4> into)
     {
         if (!into.TryAdd(frame, placement)) return;
         foreach (FrameObjectBase child in frame.Children) Spread(child, placement, into);
+    }
+
+    // The edit path: the frames are already claimed, only the matrix changes — so the cycle guard has to be
+    // its own visited set rather than "already present".
+    private static void Respread(FrameObjectBase frame, Matrix4x4 placement,
+        Dictionary<FrameObjectBase, Matrix4x4> into, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        into[frame] = placement;
+        foreach (FrameObjectBase child in frame.Children) Respread(child, placement, into, seen);
     }
 }
