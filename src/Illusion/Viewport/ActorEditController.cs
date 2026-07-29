@@ -110,6 +110,11 @@ internal sealed class ActorEditController
             ActorNodeAdapter copyAdapter = document.ActorNode(copy);
             var copyNode = new SceneNode(copyAdapter.Name, "Actor", false) { Source = copyAdapter };
 
+            // A cloned object belongs to the archive's FRAME document, which hangs BESIDE the actors rather
+            // than under them — marking the actor's own document would save the pack and quietly leave the
+            // object out of the scene, giving the game a reference to a row that is not there.
+            SceneNode? frameRow = clone == null ? null : FrameDocumentRow(node, document);
+
             items.Add(new CopiedActor
             {
                 Source = adapter.Actor,
@@ -120,10 +125,12 @@ internal sealed class ActorEditController
                 Document = document,
                 Pack = pack,
                 Clone = clone,
+                FrameRow = frameRow,
                 Rows = clone == null || node.OwningDocumentNode() is not { } sdsRow
                     ? []
                     : BuildPrototypeRows(document, clone, adapter.Actor, sdsRow),
             });
+            if (frameRow != null) _host.Persistence.MarkFrameModified(frameRow);
         }
 
         if (items.Count > 0)
@@ -150,6 +157,9 @@ internal sealed class ActorEditController
 
         /// <summary>The clone of the object this actor places — null when it places nothing.</summary>
         public ClonedPrototype? Clone;
+
+        /// <summary>The archive's frame-document row, so undo and redo re-enlist the scene as well as the pack.</summary>
+        public SceneNode? FrameRow;
 
         /// <summary>The cloned geometry's tree rows and GPU meshes, so undo can take them off screen.</summary>
         public IReadOnlyList<PrototypeRow> Rows = [];
@@ -190,6 +200,19 @@ internal sealed class ActorEditController
         // inherited membership has to be in the rewritten one, or it is an object the table never mentions.
         if (clone.IsOnNameTable && rows.Count > 0) _host.Persistence.MarkNameTableDirty(rows[0].Node);
         return rows;
+    }
+
+    // The tree row that carries the archive's FRAME document. The actors branch sits beside it under the same
+    // SDS, so an edit to the objects has to be enlisted through this row — walking up from an actor only ever
+    // reaches the actors' own document.
+    private static SceneNode? FrameDocumentRow(SceneNode actorRow, ActorDocumentAdapter document)
+    {
+        if (actorRow.OwningDocumentNode()?.Parent is not { } sds) return null;
+        foreach (SceneNode child in sds.Children)
+        {
+            if (ReferenceEquals(child.Source, document.Scene)) return child;
+        }
+        return null;
     }
 
     // Any mesh of the actor's own prototype — used only to find which branch of the tree its copy belongs in.
@@ -251,6 +274,7 @@ internal sealed class ActorEditController
                     _owner._host.Persistence.MarkFrameModified(row.Node);
                 }
 
+                if (item.FrameRow != null) _owner._host.Persistence.MarkFrameModified(item.FrameRow);
                 item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack, item.Clone?.Root);
                 _owner._host.Streamer.AddActorNode(item.Document.Placements, item.Copy, item.Node);
                 if (item.Parent != null)
@@ -281,6 +305,7 @@ internal sealed class ActorEditController
                     _owner._host.Persistence.MarkFrameModified(row.Parent);
                 }
                 item.Clone?.Detach();
+                if (item.FrameRow != null) _owner._host.Persistence.MarkFrameModified(item.FrameRow);
             }
             _owner.AfterChange(Array.Empty<SceneNode>());
         }

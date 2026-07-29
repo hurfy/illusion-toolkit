@@ -68,6 +68,39 @@ internal static class ActorProbes
             Check("packs re-save byte-identically", fixpoint == packFiles.Length, $"{fixpoint}/{packFiles.Length}");
             Check("every actor is typed", raw == 0, $"typed={typed}, raw={raw}");
 
+            // Every scene reference must land on the object whose name it hashes. This is the invariant that
+            // catches a copy the editor made but never saved into the scene: the pack keeps the reference, the
+            // frame resource never gets the object, and the game is handed a row that holds something else —
+            // or nothing at all. Measured to hold for every reference the game ships.
+            var objectsInOrder = new List<FrameObjectBase>();
+            foreach (object value in fr.FrameObjects.Values)
+            {
+                if (value is FrameObjectBase f) objectsInOrder.Add(f);
+            }
+            int references = 0, offTarget = 0;
+            string firstOffTarget = "";
+            foreach (ActorsFile p in packs)
+            {
+                foreach (ActorSceneReference reference in p.SceneReferences)
+                {
+                    references++;
+                    string landed = reference.FrameIndex < objectsInOrder.Count
+                        ? objectsInOrder[(int)reference.FrameIndex].Name.String
+                        : "(out of range)";
+                    if (reference.FrameIndex < objectsInOrder.Count
+                        && Formats.Hashing.Fnv64.Hash(landed) == reference.FrameHash) continue;
+
+                    offTarget++;
+                    if (firstOffTarget.Length == 0)
+                    {
+                        firstOffTarget = $"row {reference.FrameIndex} holds '{landed}', " +
+                                         $"whose name does not hash to {reference.FrameHash:X16}";
+                    }
+                }
+            }
+            Check("every scene reference lands on the object it names", offTarget == 0,
+                $"{references} references, {offTarget} off target {firstOffTarget}");
+
             // A mesh whose flag says it hangs off a second parent, with that slot empty, was suspected of being
             // what a copied object got wrong. It is not an invariant: the shipped districts contain such
             // meshes themselves (distillery's 'Glow'), so the engine tolerates it. Recorded rather than
