@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Frames;
 using Illusion.Domain;

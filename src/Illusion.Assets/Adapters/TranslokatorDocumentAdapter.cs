@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
 using Illusion.Formats.Translokator;

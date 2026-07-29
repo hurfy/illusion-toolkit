@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Illusion.Rendering.Gpu;
 using Illusion.Rendering.Scene;
 using Illusion.Rendering.Shaders;
