@@ -1082,7 +1082,12 @@ internal sealed class DistrictStreamer
             {
                 ActorPlacements placements2 = sceneDoc.Placements;
                 actorPlacements = placements2;
-                var actors = new SceneNode("Actors", "Actors", true);
+                // Its own save unit: an edit is enlisted by walking UP to the nearest ISceneDocument, and the
+                // actors hang beside the FrameResource branch rather than under it.
+                var actors = new SceneNode("Actors", "Actors", true)
+                {
+                    Source = new ActorDocumentAdapter(placements2, file),
+                };
 
                 // Grouped by the entity type itself ("C_Sound", "LightEntity") — the tree stays a plain list of
                 // type → actor. Counts and coverage live in the property panel, not in the row labels.

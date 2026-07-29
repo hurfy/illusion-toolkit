@@ -10,6 +10,7 @@ using Illusion.Formats.Actors;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Rendering.Scene;
+using Illusion.Scene;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
 namespace Illusion.Diagnostics.Probes;
@@ -349,6 +350,23 @@ internal static class ActorProbes
             {
                 sb.AppendLine("(no movable actor with a frame in this district — move checks skipped)");
             }
+
+            // ── An actor edit must reach persistence: the tree enlists an edit by walking UP to the nearest
+            //    ISceneDocument, and the actors hang beside the FrameResource branch, not under it. Without a
+            //    document on the Actors node, moving an actor marked nothing and a build had nothing to pack.
+            var actorsDoc = new ActorDocumentAdapter(placements, new FileInfo(sds));
+            var actorsNode = new SceneNode("Actors", "Actors", true) { Source = actorsDoc };
+            var actorLeaf = new SceneNode("leaf", "Actor", false) { Source = document.ActorNode(placements.All[0]) };
+            actorsNode.AddChild(actorLeaf);
+
+            Check("an edited actor finds the document that saves it",
+                ReferenceEquals(actorLeaf.OwningDocumentNode(), actorsNode));
+            Check("that document points at this district's archive",
+                string.Equals(actorsDoc.SourceArchive.FullName, sds, StringComparison.OrdinalIgnoreCase),
+                actorsDoc.SourceArchive.Name);
+            Check("the packs it would write are on disk",
+                placements.Packs.Count > 0 && placements.Packs.All(p => File.Exists(p.Path)),
+                string.Join(", ", placements.Packs.Select(p => Path.GetFileName(p.Path))));
         }
         catch (Exception ex)
         {

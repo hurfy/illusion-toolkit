@@ -47,7 +47,7 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     {
         if (!_actorNodes.TryGetValue(actor, out ActorNodeAdapter? node))
         {
-            _actorNodes[actor] = node = new ActorNodeAdapter(actor, Placements, this);
+            _actorNodes[actor] = node = new ActorNodeAdapter(actor, Placements);
         }
         return node;
     }
@@ -68,21 +68,9 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     /// <inheritdoc cref="ISceneDocument.MarkNameTableDirty"/>
     public void MarkNameTableDirty() => _nameTableDirty = true;
 
-    private bool _actorsDirty;
-
-    /// <summary>Flags the scene's actor packs as edited — the next save rewrites them into the extracted
-    /// folder. Moving an actor only rewrites fixed-size fields, so every other actor's bytes come back
-    /// unchanged.</summary>
-    public void MarkActorsDirty() => _actorsDirty = true;
-
     public string SaveWorkingCopy()
     {
         string written = SdsWriter.SaveFrameResource(_frame, SourceArchive);
-        if (_actorsDirty)
-        {
-            SdsActorsSaver.SaveWorkingCopy(Placements);
-            _actorsDirty = false;
-        }
         if (_nameTableDirty)
         {
             // Must run AFTER SaveFrameResource: WriteToStream ran UpdateFrameData, so FrameObjects order and the

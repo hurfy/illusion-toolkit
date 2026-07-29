@@ -20,18 +20,16 @@ namespace Illusion.Assets.Adapters;
 /// </summary>
 public sealed class ActorNodeAdapter : IFrameNode, IPropertySource
 {
-    private readonly SceneDocumentAdapter _document;
-
-    internal ActorNodeAdapter(ActorEntry actor, ActorPlacements placements, SceneDocumentAdapter document)
+    internal ActorNodeAdapter(ActorEntry actor, ActorPlacements placements)
     {
         Actor = actor;
         Placements = placements;
-        _document = document;
     }
 
     /// <summary>The actor's spawn transform. Setting it moves the actor — and with it every frame object it
-    /// places — and marks the pack for saving. Rotation and scale come back out of the matrix in the same
-    /// rotation·scale convention frame matrices use.</summary>
+    /// places. Marking the pack as edited is the caller's job, through the same persistence path every other
+    /// edit uses (the "Actors" tree node carries an <see cref="ActorDocumentAdapter"/> to save into). Rotation
+    /// and scale come back out of the matrix in the same rotation·scale convention frame matrices use.</summary>
     public Matrix4x4 LocalTransform
     {
         get => Actor.Transform;
@@ -45,7 +43,6 @@ public sealed class ActorNodeAdapter : IFrameNode, IPropertySource
             if (MathF.Abs(Quaternion.Dot(rotation, Actor.Rotation)) < 1f - 1e-6f) Actor.Rotation = rotation;
             if ((scale - Actor.Scale).LengthSquared() > 1e-12f) Actor.Scale = scale;
             Placements.Refresh(Actor);
-            _document.MarkActorsDirty();
         }
     }
 
