@@ -754,6 +754,15 @@ internal static class ActorProbes
             && clone.FrameIndex != uint.MaxValue,
             $"{source.Name} → {clone.Root.Name} at row {clone.FrameIndex}");
 
+        // Only the root may be renamed. An animation is bound to an object's inner frames by name, so a
+        // renamed child is one the animation cannot find — and the shipped data has no problem with repeated
+        // names (eight wanted posters share one child name over eight differently-named roots).
+        int renamedChildren = clone.Pairs.Count(p =>
+            !ReferenceEquals(p.Key, source) && p.Key.Name.String != p.Value.Name.String);
+        check("a copy renames its root and nothing else",
+            renamedChildren == 0 && clone.Root.Name.String != source.Name.String,
+            $"{clone.Pairs.Count - 1} child frame(s), {renamedChildren} renamed");
+
         CheckCloneShape(placements, clone, sb, check);
 
         // The editor re-applies a copy after making it (and again on every redo), which runs the re-linking a

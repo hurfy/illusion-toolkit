@@ -160,7 +160,7 @@ public static class ActorPrototypeCloner
         var clone = new ClonedPrototype { Resource = adapter.Frame };
         var renderables = new List<(FrameObjectSingleMesh, MeshData)>();
 
-        FrameObjectBase? cloneRoot = CloneSubtree(document, adapter, root, clone, renderables,
+        FrameObjectBase? cloneRoot = CloneSubtree(document, adapter, root, isRoot: true, clone, renderables,
             new HashSet<FrameObjectBase>(), ref skipReason);
         if (cloneRoot == null)
         {
@@ -228,7 +228,7 @@ public static class ActorPrototypeCloner
     // blocks); every other type is copy-constructed and registered here. Parenting is deliberately NOT done
     // here — it needs every clone to exist first, so LinkLikeSources runs once at the end.
     private static FrameObjectBase? CloneSubtree(ISceneDocument document, SceneDocumentAdapter adapter,
-        FrameObjectBase source, ClonedPrototype into,
+        FrameObjectBase source, bool isRoot, ClonedPrototype into,
         List<(FrameObjectSingleMesh, MeshData)> renderables, HashSet<FrameObjectBase> seen, ref string? skipReason)
     {
         if (!seen.Add(source)) return null; // a malformed hierarchy can loop
@@ -254,11 +254,23 @@ public static class ActorPrototypeCloner
             }
             into.Holders.Add(copy);
         }
+
+        // Only the ROOT is renamed. It has to be: the actor's link is a hash of that name, and a copy sharing
+        // it would resolve to the original. Everything under it keeps the name it had, because animations are
+        // bound to an object's inner frames BY NAME — port ships 19_port_plosina-download.an2 for its platform
+        // — and a renamed child is a child the animation cannot find. The shipped data settles that names need
+        // not be unique: distillery repeats 'Dummy01' 233 times and 'lahev' 87, and uppertown's eight wanted
+        // posters are eight differently-named roots over eight children all called 'wanted01_poster'. Which is
+        // exactly the shape a copy should have.
+        copy.Name = new Formats.Hashing.HashName(isRoot
+            ? UniqueName(adapter.Frame, source.Name.String)
+            : source.Name.String);
         into.Clones[source] = copy;
 
         foreach (FrameObjectBase child in source.Children.ToList())
         {
-            if (CloneSubtree(document, adapter, child, into, renderables, seen, ref skipReason) == null)
+            if (CloneSubtree(document, adapter, child, isRoot: false, into, renderables, seen, ref skipReason)
+                == null)
             {
                 return null;
             }
@@ -282,7 +294,7 @@ public static class ActorPrototypeCloner
         };
         if (copy == null) return null;
 
-        copy.Name = new Formats.Hashing.HashName(UniqueName(resource, source.Name.String));
+        // Naming is the caller's business — only the subtree root gets a fresh name (see CloneSubtree).
         resource.FrameObjects.Add(copy.RefID, copy);
         return copy;
     }

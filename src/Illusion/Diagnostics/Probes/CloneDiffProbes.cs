@@ -47,6 +47,18 @@ internal static class CloneDiffProbes
             }
 
             sb.AppendLine($"CLONE DIFF — district={district}, {order.Count} frame objects");
+
+            // Whether frame names are unique in this archive. It decides whether a copy may keep its children's
+            // names: animations are bound to an object's inner frames BY NAME (this district ships
+            // 19_port_plosina-download.an2), so renaming them leaves the copy unanimated — but only if the
+            // shipped data insists on unique names is renaming necessary in the first place.
+            var repeats = order.Where(f => !f.Name.String.Contains("_copy", StringComparison.Ordinal))
+                .GroupBy(f => f.Name.String, StringComparer.Ordinal)
+                .Where(g => g.Count() > 1)
+                .OrderByDescending(g => g.Count())
+                .ToList();
+            sb.AppendLine($"frame names repeated in the shipped data: {repeats.Count} name(s), " +
+                          $"worst: {string.Join(", ", repeats.Take(5).Select(g => $"'{g.Key}' ×{g.Count()}"))}");
             var copies = order.Where(f => f.Name.String.Contains("_copy", StringComparison.Ordinal)).ToList();
             sb.AppendLine($"editor-made copies found: {copies.Count}");
             if (copies.Count == 0)
