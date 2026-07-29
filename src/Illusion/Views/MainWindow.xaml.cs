@@ -17,6 +17,7 @@ using Illusion.Rendering.Controls;
 using Illusion.Rendering.Gizmos;
 using Illusion.Rendering.Passes;
 using Illusion.Scene;
+using Illusion.Settings;
 using Illusion.ViewModels;
 using Illusion.Viewport;
 
@@ -28,23 +29,41 @@ public partial class MainWindow : Window
     private readonly SelectionViewModel _selection;
     private TransformGizmo? _transformGizmo;
 
-    /// <summary>Undo (Ctrl+Z) — bound to the Edit menu and a window-wide hotkey.</summary>
+    /// <summary>Undo — Edit menu; the key comes from <see cref="HotkeyId.Undo"/>.</summary>
     public static readonly RoutedUICommand UndoCmd = new("Undo", "Undo", typeof(MainWindow));
 
-    /// <summary>Redo (Ctrl+Shift+Z) — bound to the Edit menu and a window-wide hotkey.</summary>
+    /// <summary>Redo — Edit menu; the key comes from <see cref="HotkeyId.Redo"/>.</summary>
     public static readonly RoutedUICommand RedoCmd = new("Redo", "Redo", typeof(MainWindow));
 
-    /// <summary>Delete selected objects (Del key / hierarchy context menu).</summary>
+    /// <summary>Delete selected objects — hierarchy context menu; the key comes from <see cref="HotkeyId.Delete"/>.</summary>
     public static readonly RoutedUICommand DeleteCmd = new("Delete", "Delete", typeof(MainWindow));
 
-    /// <summary>Duplicate the selected collision placements (Ctrl+D / hierarchy context menu).</summary>
+    /// <summary>Duplicate the selection — hierarchy context menu; the key comes from <see cref="HotkeyId.Duplicate"/>.</summary>
     public static readonly RoutedUICommand DuplicateCmd = new("Duplicate", "Duplicate", typeof(MainWindow));
 
-    /// <summary>Save edits to disk (Ctrl+S) — bound to the File menu and a window-wide hotkey.</summary>
+    /// <summary>Save edits to disk — File menu; the key comes from <see cref="HotkeyId.Save"/>.</summary>
     public static readonly RoutedUICommand SaveCmd = new("Save", "Save", typeof(MainWindow));
 
-    /// <summary>Import an external model (Ctrl+I) — File menu; opens the import dialog.</summary>
+    /// <summary>Import an external model — File menu; the key comes from <see cref="HotkeyId.Import"/>.</summary>
     public static readonly RoutedUICommand ImportCmd = new("Import", "Import", typeof(MainWindow));
+
+    /// <summary>Open the settings window — File menu; the key comes from <see cref="HotkeyId.OpenSettings"/>.</summary>
+    public static readonly RoutedUICommand SettingsCmd = new("Settings", "Settings", typeof(MainWindow));
+
+    /// <summary>
+    /// The menu commands a key can fire, and which rebindable action fires them. Everything else the keyboard
+    /// does in this window is in <see cref="HandleViewportKey"/>, which the viewport gets first.
+    /// </summary>
+    private static readonly (HotkeyId Id, RoutedUICommand Command)[] CommandHotkeys =
+    {
+        (HotkeyId.Save, SaveCmd),
+        (HotkeyId.Import, ImportCmd),
+        (HotkeyId.OpenSettings, SettingsCmd),
+        (HotkeyId.Undo, UndoCmd),
+        (HotkeyId.Redo, RedoCmd),
+        (HotkeyId.Delete, DeleteCmd),
+        (HotkeyId.Duplicate, DuplicateCmd),
+    };
 
     private const string BaseTitle = "Illusion Toolkit";
 
@@ -95,43 +114,42 @@ public partial class MainWindow : Window
         MaterialsPanel.OpenRequested += OpenMaterialEditor;
         Viewport.MaterialsChanged += _selection.RefreshMaterials;
 
-        // Undo / redo: Edit-menu commands + window-wide Ctrl+Z / Ctrl+Shift+Z. The commands drive the viewport's
-        // edit history; their enabled state follows CanUndo/CanRedo (re-queried when the history changes).
+        // Undo / redo: Edit-menu commands, driving the viewport's edit history; their enabled state follows
+        // CanUndo/CanRedo (re-queried when the history changes). The keys that reach them come from the
+        // keymap — see OnPreviewKeyDown; no command below carries a KeyGesture of its own.
         CommandBindings.Add(new CommandBinding(UndoCmd, (_, _) => Viewport.Undo(), (_, e) => e.CanExecute = Viewport.History.CanUndo && !IsTextFieldFocused()));
         CommandBindings.Add(new CommandBinding(RedoCmd, (_, _) => Viewport.Redo(), (_, e) => e.CanExecute = Viewport.History.CanRedo && !IsTextFieldFocused()));
-        InputBindings.Add(new KeyBinding(UndoCmd, new KeyGesture(Key.Z, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(RedoCmd, new KeyGesture(Key.Z, ModifierKeys.Control | ModifierKeys.Shift)));
         Viewport.History.Changed += CommandManager.InvalidateRequerySuggested;
 
-        // Delete selected objects: Del key (gated off text fields so it still deletes characters there) + the
-        // hierarchy context menu. Right-click also selects the row so the menu acts on it. Disabled during a
-        // Blender edit session — deleting an object that is open in Blender would desync the bridge scene.
+        // Delete selected objects: the Delete key (gated off text fields so it still deletes characters there)
+        // + the hierarchy context menu. Right-click also selects the row so the menu acts on it. Disabled during
+        // a Blender edit session — deleting an object that is open in Blender would desync the bridge scene.
         CommandBindings.Add(new CommandBinding(DeleteCmd, (_, _) => Viewport.DeleteSelected(),
             (_, e) => e.CanExecute = Viewport.CanDeleteSelection() && !IsTextFieldFocused()
                 && Viewport.BridgeEditedCount == 0));
-        InputBindings.Add(new KeyBinding(DeleteCmd, new KeyGesture(Key.Delete)));
         SceneTree.PreviewMouseRightButtonDown += SceneTree_PreviewMouseRightButtonDown;
 
-        // Duplicate selected collision placements: Ctrl+D + the hierarchy context menu (collision only).
+        // Duplicate selected collision placements: hotkey + the hierarchy context menu (collision only).
         CommandBindings.Add(new CommandBinding(DuplicateCmd, (_, _) => Viewport.DuplicateSelected(),
             (_, e) => e.CanExecute = Viewport.CanDuplicateSelection() && !IsTextFieldFocused()
                 && Viewport.BridgeEditedCount == 0));
-        InputBindings.Add(new KeyBinding(DuplicateCmd, new KeyGesture(Key.D, ModifierKeys.Control)));
 
-        // Save edits (Ctrl+S / File → Save): writes the edited FrameResource(s) back to their extracted folders.
+        // Save edits (File → Save): writes the edited FrameResource(s) back to their extracted folders.
         // Enabled only while there are unsaved edits; the title shows a '*' in that window.
-        // Also enabled while a text field is focused so Ctrl+S can first COMMIT a just-typed transform value
-        // (Vector3Box commits on LostFocus) — otherwise a still-focused edit would be dropped by the save.
+        // Also enabled while a text field is focused so the save key can first COMMIT a just-typed transform
+        // value (Vector3Box commits on LostFocus) — otherwise a still-focused edit would be dropped by the save.
         CommandBindings.Add(new CommandBinding(SaveCmd, (_, _) => SaveEdits(),
             (_, e) => e.CanExecute = Viewport.HasUnsavedEdits
                 || Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase));
-        InputBindings.Add(new KeyBinding(SaveCmd, new KeyGesture(Key.S, ModifierKeys.Control)));
 
-        // Import an external OBJ (Ctrl+I / File → Import…) into a loaded document; needs a scene to land in.
+        // Import an external OBJ (File → Import…) into a loaded document; needs a scene to land in.
         CommandBindings.Add(new CommandBinding(ImportCmd, (_, _) => ShowImportDialog(),
             (_, e) => e.CanExecute = Viewport.Roots.Count > 0 && Viewport.BridgeEditedCount == 0));
-        InputBindings.Add(new KeyBinding(ImportCmd, new KeyGesture(Key.I, ModifierKeys.Control)));
         Viewport.DirtyChanged += () => Dispatcher.Invoke(() => { UpdateTitle(); CommandManager.InvalidateRequerySuggested(); });
+
+        // Settings (File → Settings…). No CanExecute: it is where the game path and the keymap live, and both
+        // have to be reachable even when nothing is loaded.
+        CommandBindings.Add(new CommandBinding(SettingsCmd, (_, _) => ShowSettings()));
 
         // Editable transform overlay (bottom-left): the changed state's X/Y/Z, bound to the active selection.
         // Hidden until a real gizmo edit reveals it (GizmoEdited); a selection change hides it again.
@@ -194,49 +212,76 @@ public partial class MainWindow : Window
         // editing started refusing things. They are reports, not decisions, so they belong in the viewport.
         Viewport.BridgeNotice += (message, isError) => Notices.Post(message, isError);
         Viewport.TransientNotice += (message, isError) => Notices.Post(message, isError);
+
+        // Last: the keymap reaches the gizmo and the camera, both of which exist by now. The map outlives this
+        // window (the launcher and the editor replace one another), so the handler has to come back off.
+        ApplyHotkeys();
+        HotkeyMap.Current.Changed += ApplyHotkeys;
+        Closed += (_, _) => HotkeyMap.Current.Changed -= ApplyHotkeys;
     }
 
-    // Tab TOGGLES the Blender edit mode, mirroring Blender's own: no session + selection → open it
-    // in Blender (everything else ghosts and becomes unselectable); session active → leave it (all
-    // objects un-ghost, the bridge scene despawns in Blender, selection works again). Esc also
-    // leaves. Intercepted in PreviewKeyDown because WPF refuses KeyGesture(Key.Tab) (unmodified
-    // non-function keys throw NotSupportedException) and Tab would otherwise run focus traversal.
-    // Falls through untouched while typing in a text field or with a modifier held.
+    /// <summary>
+    /// Every key this window acts on, in one place and in priority order: the viewport first (a running modal
+    /// transform owns the keyboard, which is what "modal" means), then the Blender edit-mode toggle, then the
+    /// menu commands. Which key means what is read from <see cref="HotkeyMap"/> — no key is named here.
+    /// <para>
+    /// All of it goes through the tunnelling PreviewKeyDown rather than through KeyGesture bindings, because
+    /// half of what this window binds cannot be a gesture at all: WPF refuses an unmodified non-function key
+    /// (NotSupportedException), which rules out G/R/S, Tab and Space — and Tab would otherwise run focus
+    /// traversal before anything saw it. Since the user may now put ANY key on any action, one route that
+    /// accepts all of them is the only one that cannot half-work.
+    /// </para>
+    /// </summary>
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        // The viewport's own keys, intercepted here for the same reason Tab is: the gizmo overlay is not
-        // focusable and a bare letter cannot be a KeyGesture.
-        if (!IsTextFieldFocused() && HandleViewportKey(e.Key, Keyboard.Modifiers, e.IsRepeat))
+        // With Alt held, WPF puts Key.System in Key and the real key in SystemKey.
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        ModifierKeys modifiers = Keyboard.Modifiers;
+        bool typing = IsTextFieldFocused();
+
+        if ((!typing && (HandleViewportKey(key, modifiers, e.IsRepeat) || HandleBridgeKey(key, modifiers)))
+            || HandleCommandKey(key, modifiers))
         {
             e.Handled = true;
             return;
         }
 
-        if (Keyboard.Modifiers == ModifierKeys.None && !IsTextFieldFocused())
-        {
-            if (e.Key == Key.Tab)
-            {
-                if (Viewport.BridgeEditedCount > 0)
-                {
-                    Viewport.EndBridgeEditSession();
-                    e.Handled = true;
-                    return;
-                }
-                if (Viewport.SelectedNodes.Count > 0)
-                {
-                    Viewport.OpenInBlender();
-                    e.Handled = true;
-                    return;
-                }
-            }
-            if (e.Key == Key.Escape && Viewport.BridgeEditedCount > 0)
-            {
-                Viewport.EndBridgeEditSession();
-                e.Handled = true;
-                return;
-            }
-        }
         base.OnPreviewKeyDown(e);
+    }
+
+    // Blender edit mode, mirroring Blender's own Tab: no session + selection → open the selection there
+    // (everything else ghosts and becomes unselectable); session active → leave it (all objects un-ghost, the
+    // bridge scene despawns in Blender, selection works again). The "leave" key does only the second half.
+    private bool HandleBridgeKey(Key key, ModifierKeys modifiers)
+    {
+        HotkeyMap map = HotkeyMap.Current;
+        if (map.Matches(HotkeyId.BridgeToggle, key, modifiers))
+        {
+            if (Viewport.BridgeEditedCount > 0) { Viewport.EndBridgeEditSession(); return true; }
+            if (Viewport.SelectedNodes.Count > 0) { Viewport.OpenInBlender(); return true; }
+            return false;   // nothing selected and no session: Tab still means focus traversal
+        }
+        if (map.Matches(HotkeyId.BridgeLeave, key, modifiers) && Viewport.BridgeEditedCount > 0)
+        {
+            Viewport.EndBridgeEditSession();
+            return true;
+        }
+        return false;
+    }
+
+    // A menu command reached by its key. Asking CanExecute first is what keeps text fields working: Delete and
+    // Undo report "unavailable" while one has focus, so the key is left alone and reaches the field — the same
+    // gate the Edit menu greys itself out with, rather than a second set of rules that could disagree with it.
+    private bool HandleCommandKey(Key key, ModifierKeys modifiers)
+    {
+        foreach ((HotkeyId id, RoutedUICommand command) in CommandHotkeys)
+        {
+            if (!HotkeyMap.Current.Matches(id, key, modifiers)) continue;
+            if (!command.CanExecute(null, this)) return false;
+            command.Execute(null, this);
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -247,13 +292,15 @@ public partial class MainWindow : Window
     private bool HandleViewportKey(Key key, ModifierKeys modifiers, bool isRepeat)
     {
         if (_transformGizmo == null) return false;
+        HotkeyMap map = HotkeyMap.Current;
 
-        // In walk mode Ctrl is the camera's "creep" modifier, so Ctrl+W/A/S/D is flying — not Save and not
+        // In walk mode a speed modifier held together with a movement key is flying — not Save and not
         // Duplicate. Creeping backwards must not write files, and creeping right must not clone the selection.
-        // Checked before the auto-repeat gate below: a HELD Ctrl+S would otherwise fire Save on every repeat.
-        // The camera still sees these keys — it listens for handled ones too, precisely for this.
-        if (Viewport.WalkMode && (modifiers & ModifierKeys.Control) != 0
-            && key is Key.W or Key.A or Key.S or Key.D)
+        // Checked before the auto-repeat gate below: a HELD combination would otherwise fire its command on
+        // every repeat. The camera still sees these keys — it listens for handled ones too, precisely for this.
+        CameraKeyMap camera = Viewport.CameraKeys;
+        ModifierKeys speed = camera.Fast | camera.Slow;
+        if (Viewport.WalkMode && speed != ModifierKeys.None && (modifiers & speed) != 0 && camera.IsMoveKey(key))
         {
             return true;
         }
@@ -262,30 +309,68 @@ public partial class MainWindow : Window
         if (isRepeat) return false;
         if (_transformGizmo.HandleModalKey(key, modifiers)) return true;
         if (_transformGizmo.HandleAxisKey(key, modifiers)) return true;
-        if (modifiers != ModifierKeys.None) return false;
 
-        // Space goes through the shelf button rather than straight to the viewport, so the button, the hotkey
-        // and the camera can never disagree about which mode is on.
-        if (key == Key.Space)
+        // Walk mode goes through the shelf button rather than straight to the viewport, so the button, the
+        // hotkey and the camera can never disagree about which mode is on.
+        if (map.Matches(HotkeyId.ToggleWalk, key, modifiers))
         {
             ToolWalk.IsChecked = ToolWalk.IsChecked != true;
             return true;
         }
 
-        // '/' flies to whatever is selected — main row or numpad. Nothing selected: not ours, let it pass.
-        if (key is Key.OemQuestion or Key.Divide) return Viewport.FrameSelection();
+        // Flies to whatever is selected. Two keys do it, because the numeric keypad's '/' is a different key
+        // from the main row's. Nothing selected: not ours, let it pass.
+        if (map.Matches(HotkeyId.FrameSelection, key, modifiers)
+            || map.Matches(HotkeyId.FrameSelectionAlt, key, modifiers))
+        {
+            return Viewport.FrameSelection();
+        }
 
         // The modal transforms only exist where the letter keys are free; walk mode spends them on flying.
         if (Viewport.WalkMode) return false;
-        GizmoMode mode = key switch
-        {
-            Key.G => GizmoMode.Move,
-            Key.R => GizmoMode.Rotate,
-            Key.S => GizmoMode.Scale,
-            _ => GizmoMode.None,
-        };
+        GizmoMode mode = map.Matches(HotkeyId.GizmoMove, key, modifiers) ? GizmoMode.Move
+            : map.Matches(HotkeyId.GizmoRotate, key, modifiers) ? GizmoMode.Rotate
+            : map.Matches(HotkeyId.GizmoScale, key, modifiers) ? GizmoMode.Scale
+            : GizmoMode.None;
         return mode != GizmoMode.None && _transformGizmo.BeginModal(mode, Mouse.GetPosition(_transformGizmo));
     }
+
+    /// <summary>
+    /// Pushes the keymap into the places that cache a key rather than reading one: the menus' gesture text
+    /// (display only), the camera's movement keys and the gizmo's modal/axis keys. Called once at startup and
+    /// again whenever the settings window changes a binding, so a rebinding lands without a restart.
+    /// </summary>
+    private void ApplyHotkeys()
+    {
+        HotkeyMap map = HotkeyMap.Current;
+
+        SaveMenuItem.InputGestureText = map[HotkeyId.Save].ToString();
+        ImportMenuItem.InputGestureText = map[HotkeyId.Import].ToString();
+        SettingsMenuItem.InputGestureText = map[HotkeyId.OpenSettings].ToString();
+        UndoMenuItem.InputGestureText = map[HotkeyId.Undo].ToString();
+        RedoMenuItem.InputGestureText = map[HotkeyId.Redo].ToString();
+        TreeDuplicateItem.InputGestureText = map[HotkeyId.Duplicate].ToString();
+        TreeDeleteItem.InputGestureText = map[HotkeyId.Delete].ToString();
+
+        Viewport.CameraKeys = new CameraKeyMap(
+            map[HotkeyId.CameraForward].Key, map[HotkeyId.CameraBack].Key,
+            map[HotkeyId.CameraLeft].Key, map[HotkeyId.CameraRight].Key,
+            map[HotkeyId.CameraFast].Modifiers, map[HotkeyId.CameraSlow].Modifiers);
+
+        if (_transformGizmo != null)
+        {
+            _transformGizmo.Keys = new GizmoKeyMap(
+                map[HotkeyId.GizmoMove].Key, map[HotkeyId.GizmoRotate].Key, map[HotkeyId.GizmoScale].Key,
+                map[HotkeyId.AxisX].Key, map[HotkeyId.AxisY].Key, map[HotkeyId.AxisZ].Key,
+                map[HotkeyId.ModalCommit].Key, map[HotkeyId.ModalCommitAlt].Key, map[HotkeyId.ModalCancel].Key);
+        }
+    }
+
+    // Modal on purpose: it owns the game path and the keymap, both of which this window reads while it works.
+    private void ShowSettings() => new SettingsWindow { Owner = this }.ShowDialog();
+
+    /// <summary>The transform-gizmo overlay. Exposed for the probes, which check that the keymap reaches it.</summary>
+    internal TransformGizmo? TransformGizmoOverlay => _transformGizmo;
 
     private void SetGizmoMode(GizmoMode mode)
     {
@@ -630,7 +715,7 @@ public partial class MainWindow : Window
     private void ShowBuildResult(D3DImageHost.BuildReport report)
     {
         bool anyFailed = report.Failed.Count > 0;
-        if (!anyFailed && UserSettings.Load().SuppressBuildNotice) return; // user silenced successful-build notices
+        if (!anyFailed && UserSettings.Current.SuppressBuildNotice) return; // user silenced successful-build notices
 
         var msg = new StringBuilder();
         // On a partial build the heading states the failure, so spell out what DID build in the body.
@@ -682,9 +767,7 @@ public partial class MainWindow : Window
 
         if (!anyFailed && outcome.Checked)
         {
-            UserSettings settings = UserSettings.Load();
-            settings.SuppressBuildNotice = true;
-            settings.Save();
+            UserSettings.Update(s => s.SuppressBuildNotice = true);
         }
     }
 

@@ -7,6 +7,7 @@ using System.Windows.Input;
 using Illusion.Assets.Textures;
 using Illusion.Domain.Materials;
 using Illusion.Scene;
+using Illusion.Settings;
 using Illusion.Viewport;
 
 namespace Illusion.Views;
@@ -19,7 +20,8 @@ namespace Illusion.Views;
 /// commit on Enter / focus loss). Committing the name field renames the material: the FNV64 hash
 /// re-derives from the name and the hash field follows. Texture names resolve against the WHOLE resources
 /// mirror (<see cref="TextureSearchIndex"/>), not only loaded districts. All mutations go through the
-/// viewport facade, so they are undoable (Ctrl+Z here too) and persist via the common Save flow (Ctrl+S).
+/// viewport facade, so they are undoable from here too and persist via the common Save flow — both on the
+/// same keys as the editor window, taken from the shared <see cref="HotkeyMap"/>.
 /// Refreshes itself on <see cref="D3DImageHost.MaterialsChanged"/>.
 /// </summary>
 public partial class MaterialEditorWindow : Window
@@ -36,6 +38,15 @@ public partial class MaterialEditorWindow : Window
     private static readonly RoutedCommand UndoCmd = new();
     private static readonly RoutedCommand RedoCmd = new();
     private static readonly RoutedCommand SaveCmd = new();
+
+    // Same rebindable actions as the editor window: undo is undo wherever it is pressed. Declared after the
+    // commands it names — static initializers run in declaration order.
+    private static readonly (HotkeyId Id, RoutedCommand Command)[] CommandHotkeys =
+    {
+        (HotkeyId.Undo, UndoCmd),
+        (HotkeyId.Redo, RedoCmd),
+        (HotkeyId.Save, SaveCmd),
+    };
 
     public MaterialEditorWindow(D3DImageHost viewport)
     {
@@ -56,16 +67,40 @@ public partial class MaterialEditorWindow : Window
             _texThumbs.Dispose();
         };
 
-        // The shared history works from this window too — a material edit undoes where it was made.
-        CommandBindings.Add(new CommandBinding(UndoCmd, (_, _) => _viewport.Undo()));
-        CommandBindings.Add(new CommandBinding(RedoCmd, (_, _) => _viewport.Redo()));
+        // The shared history works from this window too — a material edit undoes where it was made. Undo/Redo
+        // step aside while a text field has focus, so they still undo typing there; Save does not, because it
+        // commits the focused field on its way out (CopyableTextField commits on focus loss) and a save from a
+        // half-typed edit has to do exactly that.
+        CommandBindings.Add(new CommandBinding(UndoCmd, (_, _) => _viewport.Undo(),
+            (_, e) => e.CanExecute = !IsTextFieldFocused()));
+        CommandBindings.Add(new CommandBinding(RedoCmd, (_, _) => _viewport.Redo(),
+            (_, e) => e.CanExecute = !IsTextFieldFocused()));
         CommandBindings.Add(new CommandBinding(SaveCmd, (_, _) => CommitAndSave()));
-        InputBindings.Add(new KeyBinding(UndoCmd, new KeyGesture(Key.Z, ModifierKeys.Control)));
-        InputBindings.Add(new KeyBinding(RedoCmd, new KeyGesture(Key.Z, ModifierKeys.Control | ModifierKeys.Shift)));
-        InputBindings.Add(new KeyBinding(SaveCmd, new KeyGesture(Key.S, ModifierKeys.Control)));
 
         LibraryCombo.SelectedItem = viewport.MaterialCatalog.Libraries.FirstOrDefault(); // fires Library_Changed → list
     }
+
+    /// <summary>
+    /// The window's shortcuts, read from the keymap rather than fixed here — see <see cref="MainWindow"/> for
+    /// why the whole application takes keys this way instead of through KeyGesture bindings. Nothing is
+    /// cached, so a rebinding applies to an already-open window.
+    /// </summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        foreach ((HotkeyId id, RoutedCommand command) in CommandHotkeys)
+        {
+            if (!HotkeyMap.Current.Matches(id, key, Keyboard.Modifiers)) continue;
+            if (!command.CanExecute(null, this)) break;   // unavailable: leave the key to the focused control
+            command.Execute(null, this);
+            e.Handled = true;
+            return;
+        }
+        base.OnPreviewKeyDown(e);
+    }
+
+    private static bool IsTextFieldFocused() =>
+        Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase;
 
     /// <summary>Focuses the editor on one material. <paramref name="contextNode"/>/<paramref name="slotIndex"/>
     /// carry the mesh slot the editor was opened from (null = plain browsing, no assign overlay).</summary>

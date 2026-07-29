@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using Illusion.Diagnostics;
 using Illusion.Mcp;
+using Illusion.Settings;
 using Illusion.Views;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +14,7 @@ public partial class App : Application
     /// The MCP server, shared by every window. It belongs to the application rather than to a window
     /// because there is no single main window: the launcher and the editor replace one another as the
     /// user moves between them, and the server has to outlive both. Null only in probe runs, which
-    /// never reach the UI. Reached statically, in the same spirit as <see cref="UserSettings.Load"/> —
+    /// never reach the UI. Reached statically, in the same spirit as <see cref="UserSettings.Current"/> —
     /// this codebase has no DI container to hang it from.
     /// </summary>
     public static McpServerHost? McpServer { get; private set; }
@@ -63,7 +64,7 @@ public partial class App : Application
     /// </summary>
     private void StartMcpServer()
     {
-        var settings = UserSettings.Load();
+        UserSettings settings = UserSettings.Current;
         McpServer = new McpServerHost(new McpHostOptions
         {
             // settings.json is hand-edited, so the value has to be treated as untrusted. Zero would

@@ -6,6 +6,7 @@ using System.Windows.Threading;
 using Illusion.Assets;
 using Illusion.Assets.Sds;
 using Illusion.Mcp;
+using Illusion.Settings;
 using Microsoft.Win32;
 
 namespace Illusion.Views;
@@ -47,11 +48,12 @@ public partial class LauncherWindow : Window
             _copiedTimer?.Stop();
         };
 
+        PathBox.LostFocus += (_, _) => CommitGamePath();
+
         Loaded += (_, _) =>
         {
-            // Prefill with the last saved path (remembered after the game is opened successfully).
-            string? saved = UserSettings.Load().GamePath;
-            if (!string.IsNullOrEmpty(saved) && string.IsNullOrEmpty(PathBox.Text)) PathBox.Text = saved;
+            // Prefill with the saved path — the same setting the settings window edits.
+            PathBox.Text = UserSettings.Current.GamePath ?? "";
             RefreshState();
         };
     }
@@ -171,7 +173,9 @@ public partial class LauncherWindow : Window
             WarnPanel.Visibility = Visibility.Visible;
             WarnText.Text = validPath
                 ? "The game is not unpacked. Click the unpack button before opening the editors."
-                : "Enter a valid Mafia II install path (the pc folder or the game root).";
+                : string.IsNullOrWhiteSpace(PathBox.Text)
+                    ? "No game folder chosen yet — pick it with the folder button, or type the path."
+                    : "Enter a valid Mafia II install path (the pc folder or the game root).";
         }
     }
 
@@ -200,32 +204,40 @@ public partial class LauncherWindow : Window
         if (dlg.ShowDialog(this) == true)
         {
             PathBox.Text = dlg.FolderName; // TextChanged → RefreshState
+            CommitGamePath();
         }
     }
 
-    // Initializes the environment with the chosen path (idempotent) and persists it — the next
-    // launch and the headless probes reuse it. Needed before unpack and Map Editor.
-    private bool EnsureEnv(out string? error)
+    // The gear: everything else that is configurable. It can change the game folder too, so the box is
+    // re-read on the way back — and so is the state, since the folder may have been unpacked meanwhile.
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        CommitGamePath();   // a path typed here and not yet committed must not be overwritten by the old one
+
+        var settings = new SettingsWindow { Owner = this };
+        settings.SelectSection(SettingsSection.General);
+        settings.ShowDialog();
+
+        PathBox.Text = UserSettings.Current.GamePath ?? "";
+        RefreshState();
+    }
+
+    // Both this window and the settings window write the same setting; whoever changed it last wins, and the
+    // other re-reads it when it is next looked at. Committed on focus loss rather than per keystroke, so a
+    // path halfway through being typed is never the one the probes are handed.
+    private void CommitGamePath()
     {
         string path = PathBox.Text.Trim();
-        if (!MafiaEnvironment.TryInitialize(path, out error)) return false;
+        if (UserSettings.Current.GamePath == path) return;
+        UserSettings.Update(s => s.GamePath = path);
+    }
 
-        // The environment is initialized once per session: if it is already bound to a DIFFERENT path,
-        // the entered path is effectively unused — don't save it, otherwise the next launch
-        // and the headless probes would get a path this session never opened.
-        string? enteredRoot = MafiaEnvironment.ResolveGameRoot(path);
-        if (!string.Equals(enteredRoot, MafiaEnvironment.GameRoot, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        UserSettings settings = UserSettings.Load();
-        if (settings.GamePath != path)
-        {
-            settings.GamePath = path;
-            settings.Save();
-        }
-        return true;
+    // Initializes the environment with the chosen path (idempotent). Needed before unpack and Map Editor,
+    // and the last chance to persist a path that was typed and acted on without ever losing focus.
+    private bool EnsureEnv(out string? error)
+    {
+        CommitGamePath();
+        return MafiaEnvironment.TryInitialize(PathBox.Text.Trim(), out error);
     }
 
     // Shows the dedicated UnpackPanel (progress + status) for the duration of the run; RefreshState()
@@ -241,7 +253,9 @@ public partial class LauncherWindow : Window
 
         _busy = true;
         UnpackBtn.IsEnabled = false;
+        // Changing the game folder mid-unpack would leave the run writing into the old one.
         BrowseBtn.IsEnabled = false;
+        SettingsBtn.IsEnabled = false;
         PathBox.IsEnabled = false;
 
         // Reveal the live-unpack panel exclusively.
@@ -272,7 +286,7 @@ public partial class LauncherWindow : Window
         finally
         {
             _busy = false;
-            BrowseBtn.IsEnabled = true;
+            SettingsBtn.IsEnabled = true;
             PathBox.IsEnabled = true;
             RefreshState(); // hides UnpackPanel, shows the ready banner on success
 

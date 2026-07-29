@@ -11,6 +11,7 @@ using Illusion.Bridge.Protocol;
 using Illusion.Domain;
 using Illusion.Formats.Collisions;
 using Illusion.Scene;
+using Illusion.Settings;
 using Illusion.Viewport;
 
 namespace Illusion.Bridge;
@@ -276,7 +277,7 @@ internal sealed class BridgeSessionController : IDisposable
                 {
                     File = file,
                     SceneName = Path.GetFileNameWithoutExtension(requests[0].Document.SourceArchive.Name),
-                    AutoPush = UserSettings.Load().BridgeAutoPush,
+                    AutoPush = UserSettings.Current.BridgeAutoPush,
                 },
                 m => m is SceneReadyMessage or ErrorMessage,
                 SceneReadyTimeout);
@@ -357,10 +358,9 @@ internal sealed class BridgeSessionController : IDisposable
         }
 
         SetState(BridgeState.Launching);
-        UserSettings settings = UserSettings.Load();
-        string exe = BlenderLocator.Locate(settings.BlenderPath)
+        string exe = BlenderLocator.Locate(UserSettings.Current.BlenderPath)
             ?? throw new InvalidOperationException(
-                "Blender was not found. Install Blender 4.2+ or set \"BlenderPath\" in settings.json.");
+                "Blender was not found. Install Blender 4.2+, or point Settings → Blender bridge at it.");
         _blender = BridgeLauncher.Launch(exe);
 
         DateTime deadline = DateTime.UtcNow + LaunchTimeout;

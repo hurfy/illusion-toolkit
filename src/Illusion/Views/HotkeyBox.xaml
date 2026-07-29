@@ -1,0 +1,14 @@
+<UserControl x:Class="Illusion.Views.HotkeyBox"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- One key-combination field. Clicking it starts recording; the next keypress becomes the value.
+         Deliberately a ToggleButton rather than a TextBox: there is nothing to type here, and a text
+         caret would invite it. -->
+    <Grid>
+        <ToggleButton x:Name="Btn" Style="{StaticResource KeyCaptureButton}"
+                      Checked="Btn_Checked" Unchecked="Btn_Unchecked"
+                      PreviewKeyDown="Btn_PreviewKeyDown"
+                      LostKeyboardFocus="Btn_LostKeyboardFocus" />
+    </Grid>
+</UserControl>

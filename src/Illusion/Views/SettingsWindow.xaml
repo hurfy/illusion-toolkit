@@ -1,0 +1,207 @@
+<Window x:Class="Illusion.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings"
+        Width="840" Height="620" MinWidth="660" MinHeight="440"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- The application's one settings surface: a section rail on the left, the section on the right, and no
+         OK/Cancel — every edit is applied and saved the moment it is made (the footer says so). A draft layer
+         would have to be reconciled with the live keymap the editor is already reading, and would buy nothing:
+         there is a Reset for the keys and nothing else here is destructive.
+         Background is left unset so the Fluent dark chrome paints it like every other window. -->
+
+    <Window.Resources>
+        <!-- Section rail: a recessed left column of text rows beside a chromeless content host. Fully replaces
+             the default Fluent tab chrome, which draws a horizontal strip.
+             The rail is DARKER than the page, not a white tint over it: a translucent tint reads as "lighter
+             than everything else" against the Fluent dark chrome, and it is also at the mercy of whatever is
+             behind it. #1C1C20 is the palette's recessed surface (EditorStyles gives every input field the
+             same fill), so the rail and the footer sink while the page floats between them. -->
+        <Style x:Key="SectionTabControl" TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="TabStripPlacement" Value="Left" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="184" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Background="#1C1C20"
+                                    BorderBrush="#1AFFFFFF" BorderThickness="0,0,1,0">
+                                <StackPanel IsItemsHost="True" Margin="8,12,8,8" />
+                            </Border>
+                            <ContentPresenter Grid.Column="1" ContentSource="SelectedContent" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SectionTab" TargetType="TabItem">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#B0FFFFFF" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="4"
+                                Padding="10,7" Margin="0,1">
+                            <ContentPresenter ContentSource="Header" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#12FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#382D7DD2" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Explanatory line under a field: dim, wraps, never competes with the control above it. -->
+        <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource DimLabel}">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="1,6,0,0" />
+        </Style>
+
+        <Style x:Key="SectionRule" TargetType="Border">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Background" Value="#1AFFFFFF" />
+            <Setter Property="Margin" Value="0,22,0,16" />
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Background="#1C1C20" BorderBrush="#1AFFFFFF"
+                BorderThickness="0,1,0,0" Padding="18,10">
+            <Grid>
+                <TextBlock Style="{StaticResource DimLabel}" VerticalAlignment="Center"
+                           Text="Changes are saved as you make them." />
+                <Button Content="Close" Style="{StaticResource AccentButton}"
+                        HorizontalAlignment="Right" Click="Close_Click" />
+            </Grid>
+        </Border>
+
+        <TabControl x:Name="Sections" Style="{StaticResource SectionTabControl}">
+
+            <!-- ═══ General ═══ -->
+            <TabItem Header="General" Style="{StaticResource SectionTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="22,18,22,22">
+                        <TextBlock Text="GAME FOLDER" Style="{StaticResource Caption}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="GamePathBox" Grid.Column="0" Style="{StaticResource DarkBox}"
+                                     Height="28" FontFamily="Consolas"
+                                     TextChanged="GamePath_TextChanged" />
+                            <Button Grid.Column="1" Content="Browse…" Style="{StaticResource NeutralButton}"
+                                    Height="28" Margin="8,0,0,0" Click="BrowseGame_Click" />
+                        </Grid>
+                        <TextBlock x:Name="GamePathStatus" Style="{StaticResource Hint}" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="The Mafia II install — its pc folder or the game root. Everything the toolkit opens is found from here, the headless probes included." />
+
+                        <Border Style="{StaticResource SectionRule}" />
+
+                        <TextBlock Text="BUILD" Style="{StaticResource Caption}" />
+                        <CheckBox x:Name="BuildNoticeCheck" Foreground="White"
+                                  Content="Show a notice after a successful build"
+                                  Checked="BuildNotice_Changed" Unchecked="BuildNotice_Changed" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Failures are always reported, whatever this is set to." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ═══ Keymap ═══ -->
+            <TabItem Header="Keymap" Style="{StaticResource SectionTab}">
+                <DockPanel Margin="22,18,22,16">
+                    <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="KeymapSearch" Grid.Column="0" Style="{StaticResource DarkBox}"
+                                 Height="26" ToolTip="Filter by action or by key"
+                                 TextChanged="KeymapSearch_TextChanged" />
+                        <Button x:Name="ResetAllKeysBtn" Grid.Column="1" Content="Restore defaults"
+                                Style="{StaticResource NeutralButton}" Margin="8,0,0,0"
+                                Click="ResetAllKeys_Click" />
+                    </Grid>
+
+                    <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="1,10,0,0"
+                               Text="Click a key to record a new one, then press it — click anywhere else to leave it alone. × unbinds the action, ↺ puts back the key it shipped with. Keys may repeat across groups: the editor's Scale and the camera's Back are both S because the two are never listening at the same time." />
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="KeymapList" Margin="0,0,10,0" />
+                    </ScrollViewer>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ═══ Blender bridge ═══ -->
+            <TabItem Header="Blender bridge" Style="{StaticResource SectionTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="22,18,22,22">
+                        <TextBlock Text="BLENDER" Style="{StaticResource Caption}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="BlenderPathBox" Grid.Column="0" Style="{StaticResource DarkBox}"
+                                     Height="28" FontFamily="Consolas"
+                                     TextChanged="BlenderPath_TextChanged" />
+                            <Button Grid.Column="1" Content="Browse…" Style="{StaticResource NeutralButton}"
+                                    Height="28" Margin="8,0,0,0" Click="BrowseBlender_Click" />
+                        </Grid>
+                        <TextBlock x:Name="BlenderPathStatus" Style="{StaticResource Hint}" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Leave it empty to let the bridge find Blender itself: the .blend file association, then Program Files, then Steam, then PATH. Blender 4.2 or newer." />
+
+                        <Border Style="{StaticResource SectionRule}" />
+
+                        <TextBlock Text="EDIT MODE" Style="{StaticResource Caption}" />
+                        <CheckBox x:Name="AutoPushCheck" Foreground="White"
+                                  Content="Push edits back automatically when leaving Edit Mode"
+                                  Checked="AutoPush_Changed" Unchecked="AutoPush_Changed" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="The addon's own N-panel toggle mirrors this. Its push button always works, whether this is on or not." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ═══ MCP server ═══ -->
+            <TabItem Header="MCP server" Style="{StaticResource SectionTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="22,18,22,22">
+                        <TextBlock Text="PORT" Style="{StaticResource Caption}" />
+                        <TextBox x:Name="McpPortBox" Style="{StaticResource DarkBox}" Height="28" Width="120"
+                                 HorizontalAlignment="Left" FontFamily="Consolas"
+                                 TextChanged="McpPort_TextChanged" />
+                        <TextBlock x:Name="McpPortStatus" Style="{StaticResource Hint}" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="The loopback port the embedded MCP server listens on. Worth changing only if something else on this machine already owns the default. The server binds at startup, so a new port is taken up the next time the toolkit runs." />
+
+                        <Border Style="{StaticResource SectionRule}" />
+
+                        <TextBlock Text="RIGHT NOW" Style="{StaticResource Caption}" />
+                        <TextBlock x:Name="McpLiveState" Foreground="White" FontFamily="Consolas"
+                                   FontSize="11.5" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

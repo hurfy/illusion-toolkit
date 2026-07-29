@@ -13,6 +13,7 @@ using Illusion.Bridge.Payload;
 using Illusion.Bridge.Protocol;
 using Illusion.Domain;
 using Illusion.Formats.Collisions;
+using Illusion.Settings;
 
 namespace Illusion.Diagnostics.Probes;
 
@@ -322,7 +323,7 @@ internal static class BridgeProbes
                           $"droppedDegenerate={hull.DroppedDegenerateFaces} droppedDuplicate={hull.DroppedDuplicateFaces}"
                           + (pickedFiltered ? " (a filtered hull — the hard case)" : " (no filtered hull in this district)"));
 
-            string? exe = Bridge.BlenderLocator.Locate(UserSettings.Load().BlenderPath);
+            string? exe = Bridge.BlenderLocator.Locate(UserSettings.Current.BlenderPath);
             if (exe == null) { sb.AppendLine("[SKIP] Blender not found"); return; }
 
             BridgeEndpoint? endpoint = BridgeDiscovery.TryRead();
@@ -691,7 +692,7 @@ internal static class BridgeProbes
 
         try
         {
-            string? exe = Bridge.BlenderLocator.Locate(UserSettings.Load().BlenderPath);
+            string? exe = Bridge.BlenderLocator.Locate(UserSettings.Current.BlenderPath);
             if (exe == null)
             {
                 sb.AppendLine("[SKIP] Blender not found (settings override, .blend association, Program Files, Steam, PATH)");
@@ -1592,7 +1593,7 @@ internal static class BridgeProbes
         string ilx = Path.Combine(Path.GetTempPath(), "illusion_bridge_e2e.ilx");
         try
         {
-            string? exe = Bridge.BlenderLocator.Locate(UserSettings.Load().BlenderPath);
+            string? exe = Bridge.BlenderLocator.Locate(UserSettings.Current.BlenderPath);
             if (exe == null)
             {
                 sb.AppendLine("[SKIP] Blender not found — e2e loop not exercised");

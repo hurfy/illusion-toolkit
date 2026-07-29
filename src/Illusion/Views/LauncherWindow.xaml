@@ -10,6 +10,43 @@
          button outline, system accent on hover/focus, Segoe MDL2 glyphs, Consolas for paths, gray-alpha
          surfaces over the dark window. SizeToContent="Height" fits the height to the content — no empty
          gaps. -->
+
+    <Window.Resources>
+        <!-- The one control here that is NOT a native Fluent button: the settings gear in the corner. A
+             Fluent button draws a filled surface, which beside the title reads as a second, competing
+             element — and this is chrome, not one of the window's actions. So: no surface until the
+             pointer is on it. -->
+        <Style x:Key="CornerIconButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Foreground" Value="#A8FFFFFF" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#18FFFFFF" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#28FFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <DockPanel>
         <!-- The MCP server the whole application shares: its state on the left, its address on the
              right (click to copy). It runs from launch to exit, so this bar is the one place that
@@ -42,13 +79,31 @@
                 <RowDefinition Height="Auto" />   <!-- editor tiles -->
             </Grid.RowDefinitions>
 
-            <!-- Title -->
-            <StackPanel Grid.Row="0" Margin="0,0,0,18">
-                <TextBlock Text="Illusion Toolkit" FontSize="22" FontWeight="SemiBold" />
-                <TextBlock Text="Mafia II Toolkit" FontSize="12" Opacity="0.6" Margin="0,1,0,0" />
-            </StackPanel>
+            <!-- Title, with the settings gear pinned to the opposite corner: it belongs to the window rather
+                 than to any row in it, and the top right is where a window's own controls are looked for. -->
+            <!-- Two columns rather than one cell with an aligned overlay: the title takes what it needs and
+                 the gear takes the corner, so no wording of the title can ever run underneath it. -->
+            <Grid Grid.Row="0" Margin="0,0,0,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel x:Name="TitleBlock" Grid.Column="0" HorizontalAlignment="Left">
+                    <TextBlock Text="Illusion Toolkit" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Text="Mafia II Toolkit" FontSize="12" Opacity="0.6" Margin="0,1,0,0" />
+                </StackPanel>
+                <!-- The negative right margin pulls it past the content inset, so it reads as sitting in the
+                     window's corner rather than in the text column. -->
+                <Button x:Name="SettingsBtn" Grid.Column="1" Style="{StaticResource CornerIconButton}"
+                        VerticalAlignment="Top" Margin="12,-2,-4,0"
+                        Content="&#xE713;"
+                        ToolTip="Settings — game folder, keymap, Blender bridge, MCP server"
+                        Click="Settings_Click" />
+            </Grid>
 
-            <!-- Game folder selection -->
+            <!-- Game folder: the first thing anyone has to set, so it is picked right here rather than one
+                 window away. The value is the same setting the settings window edits (Settings → General) —
+                 both write UserSettings.GamePath, and each re-reads it when the other has been in. -->
             <StackPanel Grid.Row="1" Margin="0,0,0,14">
                 <TextBlock Text="Game folder" FontSize="12" Opacity="0.7" Margin="2,0,0,5" />
                 <Grid>

@@ -1,5 +1,6 @@
 using System.Numerics;
 using Illusion.Assets;
+using Illusion.Settings;
 
 namespace Illusion.Diagnostics.Probes;
 
@@ -9,7 +10,7 @@ internal static class ProbeAssert
     /// <summary>Initializes the game environment from the launcher-saved settings path — probes are headless
     /// and cannot ask for the path interactively.</summary>
     internal static bool InitEnv(out string? error) =>
-        MafiaEnvironment.TryInitialize(UserSettings.Load().GamePath, out error);
+        MafiaEnvironment.TryInitialize(UserSettings.Current.GamePath, out error);
 
     internal static bool Approx(Vector3 a, Vector3 b, float eps = 1e-3f) => (a - b).Length() <= eps;
     internal static bool QApprox(Quaternion a, Quaternion b, float eps = 1e-3f) => MathF.Abs(Quaternion.Dot(a, b)) > 1f - eps;

@@ -587,29 +587,37 @@ public sealed class TransformGizmo : FrameworkElement
     }
 
     /// <summary>
-    /// The keys a running modal transform owns: Enter/Space accept it, Esc abandons it, <c>G</c>/<c>R</c>/<c>S</c>
-    /// switch which transform it is, and anything else falls through to the axis lock. True when the key was
-    /// consumed — while one is running that is nearly everything, which is what "modal" means.
+    /// Which keys a running transform answers to. Defaults to Blender's (G/R/S, X/Y/Z, Enter/Space/Esc); an
+    /// application that lets the user rebind them assigns a different map.
+    /// </summary>
+    public GizmoKeyMap Keys { get; set; } = GizmoKeyMap.Default;
+
+    /// <summary>
+    /// The keys a running modal transform owns: the commit keys accept it, the cancel key abandons it, the
+    /// move/rotate/scale keys switch which transform it is, and anything else falls through to the axis lock.
+    /// True when the key was consumed — while one is running that is nearly everything, which is what "modal"
+    /// means. Which key is which comes from <see cref="Keys"/>.
     /// </summary>
     public bool HandleModalKey(Key key, ModifierKeys modifiers)
     {
         if (!_modal) return false;
         if ((modifiers & ~ModifierKeys.Shift) != 0) return false;   // Ctrl/Alt shortcuts still belong to the app
-        switch (key)
-        {
-            case Key.Enter or Key.Space: EndModal(commit: true); return true;
-            case Key.Escape: EndModal(commit: false); return true;
-            case Key.G: return BeginModal(GizmoMode.Move, _lastDragMouse);
-            case Key.R: return BeginModal(GizmoMode.Rotate, _lastDragMouse);
-            case Key.S: return BeginModal(GizmoMode.Scale, _lastDragMouse);
-            default: return HandleAxisKey(key, modifiers);
-        }
+
+        GizmoKeyMap keys = Keys;
+        if (key == Key.None) return false;
+        if (key == keys.Commit || key == keys.CommitAlt) { EndModal(commit: true); return true; }
+        if (key == keys.Cancel) { EndModal(commit: false); return true; }
+        if (key == keys.Move) return BeginModal(GizmoMode.Move, _lastDragMouse);
+        if (key == keys.Rotate) return BeginModal(GizmoMode.Rotate, _lastDragMouse);
+        if (key == keys.Scale) return BeginModal(GizmoMode.Scale, _lastDragMouse);
+        return HandleAxisKey(key, modifiers);
     }
 
     /// <summary>
-    /// Blender's axis-lock keys, offered to the gizmo by the window while a drag is in progress: <c>X</c>/<c>Y</c>/
-    /// <c>Z</c> pin the drag to that world axis, <c>Shift</c>+<c>X</c>/<c>Y</c>/<c>Z</c> pin it to the plane across
-    /// that axis (excluding it), and the same combination again releases the lock. The drag re-solves at once, so
+    /// Blender's axis-lock keys, offered to the gizmo by the window while a drag is in progress (which key is
+    /// which comes from <see cref="Keys"/>; by default <c>X</c>/<c>Y</c>/<c>Z</c>): a key pins the drag to that
+    /// world axis, <c>Shift</c>+the key pins it to the plane across that axis (excluding it), and the same
+    /// combination again releases the lock. The drag re-solves at once, so
     /// the object jumps onto the axis without waiting for the pointer to move. Returns true when the key was
     /// consumed — false leaves it to whatever else the window does with it.
     /// </summary>
@@ -617,7 +625,7 @@ public sealed class TransformGizmo : FrameworkElement
     {
         if (_host == null || !_active.IsSome) return false;         // only meaningful inside a drag
         if ((modifiers & ~ModifierKeys.Shift) != 0) return false;   // Ctrl/Alt combinations belong to the app
-        int axis = key switch { Key.X => 0, Key.Y => 1, Key.Z => 2, _ => -1 };
+        int axis = Keys.AxisOf(key);
         if (axis < 0) return false;
 
         // A rotation happens about ONE axis, so there is no such thing as a plane-locked rotate: swallow the key

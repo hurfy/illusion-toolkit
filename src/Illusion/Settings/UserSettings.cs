@@ -1,12 +1,19 @@
 using System.IO;
 using System.Text.Json;
 
-namespace Illusion;
+namespace Illusion.Settings;
 
 /// <summary>
-/// Application user settings (JSON in <c>%LOCALAPPDATA%\Illusion</c>).
-/// Stores the game path chosen in the launcher; the same value is used by headless probes,
-/// which have no way to ask for the path interactively.
+/// Application user settings (JSON in <c>%LOCALAPPDATA%\Illusion</c>) — the one place anything
+/// configurable is kept: the game path, the Blender bridge and MCP options, and the rebound keys
+/// (<see cref="Hotkeys"/>). The settings window edits this object and nothing else.
+/// <para>
+/// Read through <see cref="Current"/> and write through <see cref="Update"/>. The instance is shared, so an
+/// edit is visible everywhere the moment it is made — a file re-read per call site could not do that. Whoever
+/// has to ACT on a change (re-bind keys, re-read the game path) follows the thing that changed rather than
+/// this object: see <see cref="HotkeyMap.Changed"/>. <see cref="Load"/> stays public for the headless probes,
+/// which run in their own process and only ever read.
+/// </para>
 /// </summary>
 public sealed class UserSettings
 {
@@ -28,11 +35,39 @@ public sealed class UserSettings
     /// Only worth changing if something else on the machine already owns the default.</summary>
     public int McpPort { get; set; } = Mcp.McpHostOptions.DefaultPort;
 
+    private Dictionary<string, string>? _hotkeys;
+
+    /// <summary>
+    /// Rebound keys: <see cref="HotkeyId"/> name → gesture text (<c>"Ctrl+Shift+Z"</c>, <c>"Num /"</c>,
+    /// <c>""</c> for unbound). Only the actions that DIFFER from the built-in default are stored, which is
+    /// what lets a new action ship with a working default instead of inheriting an empty binding from an
+    /// older settings.json. Unknown names and unparseable gestures are ignored on load, so a file written
+    /// by a newer build still opens. See <see cref="HotkeyMap"/>.
+    /// </summary>
+    public Dictionary<string, string> Hotkeys
+    {
+        // Never null, whoever wrote the file: "Hotkeys": null is as legal in JSON as a missing key.
+        get => _hotkeys ??= new Dictionary<string, string>(StringComparer.Ordinal);
+        set => _hotkeys = value;
+    }
+
     private static string SettingsFile => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Illusion", "settings.json");
 
-    /// <summary>Reads settings; a corrupt/missing file yields clean settings rather than a crash.</summary>
+    /// <summary>The live settings every window and the bridge read. Loaded once, on first touch.</summary>
+    public static UserSettings Current { get; } = Load();
+
+    /// <summary>Applies a change to <see cref="Current"/> and writes it out. The two belong together: the
+    /// single write path is what keeps a setting from being changed in memory and lost on exit.</summary>
+    public static void Update(Action<UserSettings> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        change(Current);
+        Current.Save();
+    }
+
+    /// <summary>Reads settings from disk; a corrupt/missing file yields clean settings rather than a crash.</summary>
     public static UserSettings Load()
     {
         try

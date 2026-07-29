@@ -116,6 +116,12 @@ internal static class ProbeRunner
             case "--probe-layout":
                 LayoutProbes.RunLayoutProbe();
                 return true;
+            // Settings and the keymap: the gesture text format, default/override and conflict-scope rules,
+            // the settings window built headless, and a rebinding reaching an open editor window. Writes to
+            // the real settings.json and puts the user's keymap back afterwards.
+            case "--probe-settings":
+                SettingsProbes.RunSettingsProbe();
+                return true;
             // Save + pack chain: edit a frame's transform → SdsWriter.SaveFrameResource → reload & verify the edit
             // persisted (extracted folder restored after), then repack the folder to a TEMP .sds and re-open it.
             case "--probe-save":

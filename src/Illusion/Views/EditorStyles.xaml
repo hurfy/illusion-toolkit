@@ -210,6 +210,47 @@
         </Setter>
     </Style>
 
+    <!-- Key capture field (HotkeyBox): the DarkBox shape with its value centred in a fixed-width font, so a
+         column of them lines up and "Ctrl+Shift+Z" cannot be misread. Checked = recording, and it says so
+         in accent blue — the one state where a keypress is going somewhere unusual. -->
+    <Style x:Key="KeyCaptureButton" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="FontFamily" Value="Consolas" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
+                            BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Margin="6,0" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
+                            <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                            <Setter Property="Foreground" Value="#7FB6EE" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Square glyph button for a row's trailing actions (unbind / reset). Same skin as NeutralButton,
+         sized for a single character. -->
+    <Style x:Key="RowIconButton" TargetType="Button" BasedOn="{StaticResource NeutralButton}">
+        <Setter Property="Width" Value="24" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
     <!-- Dark ListView column headers (Import's preview table). -->
     <Style x:Key="DarkColumnHeader" TargetType="GridViewColumnHeader">
         <Setter Property="Foreground" Value="#8AFFFFFF" />

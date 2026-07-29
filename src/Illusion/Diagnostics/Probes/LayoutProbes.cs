@@ -9,11 +9,12 @@ using Illusion.Views;
 namespace Illusion.Diagnostics.Probes;
 
 /// <summary>
-/// Editor window layout across screen sizes. The real <see cref="MainWindow"/> is built headless and laid out
-/// at every screen we support, from the 1280x720 floor up; each pass asserts that the three toolbar groups
-/// stay apart and inside the row, that no tool button is pushed into the ToolBar's overflow menu, and that the
-/// chrome leaves the viewport its share of the window. Needs no game data and no GPU (the window is never
-/// shown, so the D3D surface is never created). Output: %TEMP%\illusion_layout.txt + illusion_layout.png
+/// Window layout. The real <see cref="MainWindow"/> is built headless and laid out at every screen we support,
+/// from the 1280x720 floor up; each pass asserts that the three toolbar groups stay apart and inside the row,
+/// that no tool button is pushed into the ToolBar's overflow menu, and that the chrome leaves the viewport its
+/// share of the window. The <see cref="LauncherWindow"/> follows, at its one fixed width. Needs no game data
+/// and no GPU (no window is ever shown, so the D3D surface is never created).
+/// Output: %TEMP%\illusion_layout.txt + illusion_layout.png + illusion_layout_launcher.png
 /// </summary>
 internal static class LayoutProbes
 {
@@ -131,6 +132,8 @@ internal static class LayoutProbes
                 }
             }
 
+            CheckLauncher(Check, sb);
+
             // A look at the floor size, where everything is tightest. The chrome comes out in Fluent's default
             // (light) colours — a window that is never shown is never themed, and the probe path runs before
             // App pins the dark one — but light and dark share their metrics, so the geometry is the shipped
@@ -160,11 +163,61 @@ internal static class LayoutProbes
         finally { File.WriteAllText(outTxt, sb.ToString()); }
     }
 
-    /// <summary>A child's rendered rectangle in its parent panel's coordinates (margins excluded, as drawn).</summary>
-    private static Rect Bounds(Panel parent, int index)
+    /// <summary>
+    /// The launcher, whose width is fixed and whose height follows its content. Nothing here changes with the
+    /// screen, so it is laid out once — what matters is that the settings gear stays in its corner: it shares
+    /// a cell with the title, so a longer title or a larger glyph is what would push them into each other.
+    /// A picture of it goes out beside the editor's.
+    /// </summary>
+    private static void CheckLauncher(Action<string, bool, string> check, StringBuilder sb)
     {
-        var child = (UIElement)parent.Children[index];
-        Point origin = child.TransformToAncestor(parent).Transform(new Point(0, 0));
+        var launcher = new LauncherWindow();
+        var body = (FrameworkElement)launcher.Content;
+        const double width = 600;
+        body.Measure(new Size(width, double.PositiveInfinity));
+        double height = body.DesiredSize.Height;
+        body.Arrange(new Rect(0, 0, width, height));
+        body.UpdateLayout();
+
+        Rect gear = BoundsIn(launcher.SettingsBtn, body);
+        Rect title = BoundsIn(launcher.TitleBlock, body);
+        sb.AppendLine($"— launcher ({width}x{height:F0}): gear {Fmt(gear)}, title {Fmt(title)}, " +
+                      $"path box w={launcher.PathBox.ActualWidth:F0}");
+
+        check("launcher: the gear is in the top-right corner",
+            gear.Right <= width + 0.5 && gear.Top >= -0.5 && gear.Left > width / 2,
+            $"gear {Fmt(gear)} in {width:F0}");
+        check("launcher: the gear clears the title", gear.Left >= title.Right - 0.5,
+            $"title ends at {title.Right:F0}, gear starts at {gear.Left:F0}");
+        check("launcher: the gear sits level with the title", gear.Top < title.Bottom,
+            $"gear top {gear.Top:F0}, title bottom {title.Bottom:F0}");
+        check("launcher: both game-folder buttons are laid out",
+            launcher.BrowseBtn.ActualWidth > 0 && launcher.UnpackBtn.ActualWidth > 0,
+            $"browse={launcher.BrowseBtn.ActualWidth:F0}, unpack={launcher.UnpackBtn.ActualWidth:F0}");
+        check("launcher: the path box keeps the rest of the row",
+            launcher.PathBox.ActualWidth > width / 2, $"{launcher.PathBox.ActualWidth:F0} of {width:F0}");
+
+        try
+        {
+            if (body is Panel root) root.Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
+            var rtb = new RenderTargetBitmap((int)width, (int)height, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(body);
+            var enc = new PngBitmapEncoder();
+            enc.Frames.Add(BitmapFrame.Create(rtb));
+            string path = Path.Combine(Path.GetTempPath(), "illusion_layout_launcher.png");
+            using FileStream fs = File.Create(path);
+            enc.Save(fs);
+            sb.AppendLine($"rendered launcher -> {path}");
+        }
+        catch (Exception ex) { sb.AppendLine("launcher render skipped — " + ex.Message); }
+    }
+
+    /// <summary>A child's rendered rectangle in its parent panel's coordinates (margins excluded, as drawn).</summary>
+    private static Rect Bounds(Panel parent, int index) => BoundsIn((UIElement)parent.Children[index], parent);
+
+    private static Rect BoundsIn(UIElement child, Visual ancestor)
+    {
+        Point origin = child.TransformToAncestor(ancestor).Transform(new Point(0, 0));
         return new Rect(origin, child.RenderSize);
     }
 

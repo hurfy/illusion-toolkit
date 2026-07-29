@@ -35,6 +35,7 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     protected SceneRenderer? Renderer { get; private set; }
 
     private readonly HashSet<Key> _keys = new();
+    private CameraKeyMap _cameraKeys = CameraKeyMap.Default;
     private bool _navigating;   // a middle-button drag is under way (look, orbit or pan)
     private Point _lastMouse;
     private bool _walkMode;
@@ -75,6 +76,18 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         // Keys held as the mode flips would otherwise stay "down" (no KeyUp reaches a mode that ignores them)
         // and fly the camera by themselves the next time walk mode comes back.
         set { if (_walkMode != value) { _walkMode = value; _keys.Clear(); } }
+    }
+
+    /// <summary>
+    /// Which keys fly the camera in <see cref="WalkMode"/>. Defaults to WASD; an application that lets the
+    /// user rebind them assigns a different map (and assigns it again when the user changes it — the value is
+    /// read per frame, so a swap takes effect at once). Held keys are cleared on the way in, so a key that was
+    /// down under the old map cannot go on moving the camera under the new one.
+    /// </summary>
+    public CameraKeyMap CameraKeys
+    {
+        get => _cameraKeys;
+        set { _cameraKeys = value; _keys.Clear(); }
     }
 
     // ── Navigation gizmo support (Blender-style axis widget) ──
@@ -301,18 +314,20 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     {
         if (!_walkMode) return;   // navigation mode is mouse-only — the letter keys belong to the editor there
 
-        // WASD only: forward/back along the look direction, strafe left/right. No dedicated vertical keys —
-        // altitude is gained by looking up/down and moving forward. Base speed is Camera.MoveSpeed (the status
-        // bar's field); held Shift covers ground, held Ctrl creeps. Read from the live modifier state rather
-        // than the held-key set, so a modifier released while the window was in the background cannot stick.
+        // Four movement keys only: forward/back along the look direction, strafe left/right. No dedicated
+        // vertical keys — altitude is gained by looking up/down and moving forward. Base speed is
+        // Camera.MoveSpeed (the status bar's field); the map's Fast modifier covers ground, Slow creeps. The
+        // modifiers are read from the live state rather than the held-key set, so one released while the
+        // window was in the background cannot stick.
+        CameraKeyMap keys = CameraKeys;
         ModifierKeys mods = Keyboard.Modifiers;
         float speed = Renderer!.Camera.MoveSpeed * dt * CameraNavigator.SpeedMultiplier(
-            (mods & ModifierKeys.Shift) != 0, (mods & ModifierKeys.Control) != 0);
+            (mods & keys.Fast) != 0, (mods & keys.Slow) != 0);
         float fwd = 0, right = 0;
-        if (_keys.Contains(Key.W)) fwd += 1;
-        if (_keys.Contains(Key.S)) fwd -= 1;
-        if (_keys.Contains(Key.D)) right += 1;
-        if (_keys.Contains(Key.A)) right -= 1;
+        if (_keys.Contains(keys.Forward)) fwd += 1;
+        if (_keys.Contains(keys.Back)) fwd -= 1;
+        if (_keys.Contains(keys.Right)) right += 1;
+        if (_keys.Contains(keys.Left)) right -= 1;
 
         if (fwd != 0 || right != 0)
         {
@@ -320,12 +335,13 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         }
     }
 
-    // The fly-camera movement keys (WASD): pressing any of them cancels an in-progress preset-view animation.
-    private static readonly Key[] MoveKeys = { Key.W, Key.S, Key.A, Key.D };
-
+    // Pressing any movement key cancels an in-progress preset-view animation.
     private bool AnyMoveKey()
     {
-        foreach (Key k in MoveKeys) if (_keys.Contains(k)) return true;
+        foreach (Key k in _keys)
+        {
+            if (CameraKeys.IsMoveKey(k)) return true;
+        }
         return false;
     }
 
