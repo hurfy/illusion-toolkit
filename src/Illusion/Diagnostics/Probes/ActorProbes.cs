@@ -641,19 +641,31 @@ internal static class ActorProbes
     private static void CheckPlacingDuplicate(SceneDocumentAdapter document, ActorPlacements placements,
         StringBuilder sb, Action<string, bool, string> check)
     {
-        ActorEntry? placing = null;
+        ActorEntry? placing = null, physical = null;
         foreach (ActorEntry a in placements.All)
         {
-            if (placements.TargetOf(a) is { Children.Count: > 0 } && placements.PackOf(a) is { } p
-                && p.SceneReferences.Any(r => r.FrameHash == a.FrameHash))
-            {
-                placing = a;
-                break;
-            }
+            if (placements.TargetOf(a) is not { Children.Count: > 0 } target) continue;
+            if (placements.PackOf(a) is not { } p || !p.SceneReferences.Any(r => r.FrameHash == a.FrameHash)) continue;
+
+            if (ActorPrototypeCloner.CanClone(target)) placing ??= a;
+            else physical ??= a;
+            if (placing != null && physical != null) break;
         }
+
+        // An object built on collision is refused rather than half-copied — see ActorPrototypeCloner.
+        if (physical != null && placements.TargetOf(physical) is { } physicalTarget)
+        {
+            ActorPrototypeCloner.ClonedPrototype? refused =
+                ActorPrototypeCloner.TryClone(document, physicalTarget, out string? refusal);
+            check("an object built on collision is refused, with a reason",
+                refused == null && !string.IsNullOrEmpty(refusal),
+                $"{physical.EntityName}: {refusal ?? "(no reason given)"}");
+            refused?.Detach();
+        }
+
         if (placing == null || placements.PackOf(placing) is not { } pack)
         {
-            sb.AppendLine("(no actor placing an object in this district — copy-with-object checks skipped)");
+            sb.AppendLine("(no copyable actor placing an object in this district — copy-with-object checks skipped)");
             return;
         }
 
@@ -849,6 +861,25 @@ internal static class ActorProbes
 
             sb.AppendLine($"actors placing a frame: {withTarget}; of those, carrying a collision child: " +
                           $"{withHullChild}; those children found in the .col: {hullInCol}");
+
+            // Which actors place an object that carries collision, by type — the shape a copy has not been
+            // tried on in the game yet, and the shape most of the world's props have.
+            var byType = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (ActorEntry actor in placements.All)
+            {
+                if (placements.TargetOf(actor) is not { } target) continue;
+                var hulls = new List<FrameObjectCollision>();
+                CollectCollisions(target, hulls, new HashSet<FrameObjectBase>());
+                if (hulls.Count == 0) continue;
+
+                string type = actor.TypeName.Length > 0 ? actor.TypeName : actor.Type.ToString();
+                if (!byType.TryGetValue(type, out List<string>? names)) byType[type] = names = new List<string>();
+                if (names.Count < 4) names.Add($"{actor.EntityName} ({hulls.Count} hull(s))");
+            }
+            foreach (KeyValuePair<string, List<string>> pair in byType.OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                sb.AppendLine($"    {pair.Key,-20} {string.Join(", ", pair.Value)}");
+            }
             sb.AppendLine($"paired with a hull: {paired}");
             sb.AppendLine($"    the actor's quaternion as stored fits the game's hull : {asIs}");
             sb.AppendLine($"    only its INVERSE fits                                 : {inverted}");

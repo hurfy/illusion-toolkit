@@ -78,8 +78,60 @@ public static class ActorPrototypeCloner
         public IReadOnlyDictionary<FrameObjectBase, FrameObjectBase> Pairs => Clones;
     }
 
-    /// <summary>Whether this prototype is one the cloner can copy.</summary>
-    public static bool CanClone(FrameObjectBase root) => root is FrameObjectFrame or FrameObjectSingleMesh;
+    /// <summary>Whether this prototype is one the cloner can copy, with the reason when it is not. Asked
+    /// before anything is created, so a refusal costs nothing and never leaves a half-copy behind.</summary>
+    public static bool CanClone(FrameObjectBase root) => CanClone(root, out _);
+
+    /// <inheritdoc cref="CanClone(FrameObjectBase)"/>
+    public static bool CanClone(FrameObjectBase root, out string? reason)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        reason = null;
+
+        // An object built on collision is refused. Its hulls are what the game's physics is made of, and
+        // copying the frames that name them is not the same as copying the object: a copy of a destructible
+        // gate with three hulls is the one copy that made the game refuse a district on load. In the shipped
+        // data this shape is exactly the physics-driven types — C_CrashObject, C_Door, C_Lift, C_Boat, and
+        // nothing else — while every object that is a plain mesh or an empty holder copies and works, verified
+        // in the game on a pinup and on a blocker. Refusing by shape rather than by type name keeps it honest:
+        // whatever a district holds, the rule is "we can copy what we can reproduce".
+        var hulls = new List<FrameObjectCollision>();
+        CollectCollisions(root, hulls, new HashSet<FrameObjectBase>());
+        if (hulls.Count > 0)
+        {
+            reason = $"its object is built on collision ({hulls.Count} hull(s)) — copying that needs its own " +
+                     "physics, which crashed the game the one time it was tried";
+            return false;
+        }
+        return AllCopyable(root, new HashSet<FrameObjectBase>(), ref reason);
+    }
+
+    // Every node of the subtree has to be a type the cloner reproduces — a skinned model brings a skeleton and
+    // blend blocks that a mesh copy does not, so it is named rather than silently dropped.
+    private static bool AllCopyable(FrameObjectBase frame, HashSet<FrameObjectBase> seen, ref string? reason)
+    {
+        if (!seen.Add(frame)) return true;
+        bool copyable = frame.GetType() == typeof(FrameObjectSingleMesh)
+            || frame is FrameObjectFrame or FrameObjectDummy or FrameObjectArea or FrameObjectPoint;
+        if (!copyable)
+        {
+            reason = $"'{frame.Name}' is a {frame.GetType().Name}, which cannot be copied yet";
+            return false;
+        }
+        foreach (FrameObjectBase child in frame.Children)
+        {
+            if (!AllCopyable(child, seen, ref reason)) return false;
+        }
+        return true;
+    }
+
+    private static void CollectCollisions(FrameObjectBase frame, List<FrameObjectCollision> into,
+        HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        if (frame is FrameObjectCollision hull) into.Add(hull);
+        foreach (FrameObjectBase child in frame.Children) CollectCollisions(child, into, seen);
+    }
 
     /// <summary>
     /// Clones the subtree rooted at <paramref name="root"/>. Null with a reason when some part of it cannot be
@@ -95,6 +147,8 @@ public static class ActorPrototypeCloner
             skipReason = "the object does not belong to a loaded scene";
             return null;
         }
+
+        if (!CanClone(root, out skipReason)) return null;
 
         var clone = new ClonedPrototype { Resource = adapter.Frame };
         var renderables = new List<(FrameObjectSingleMesh, MeshData)>();
