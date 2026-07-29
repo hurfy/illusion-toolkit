@@ -189,7 +189,7 @@ internal sealed class ActorEditController
         var rows = new List<PrototypeRow>(clone.Renderables.Count);
         // Beside the original's own rows, so a copied bottle appears where its bottle lives in the tree.
         SceneNode parent = (FirstMeshOf(document, source) is { } sourceMesh
-            ? _host.Streamer.MeshRowOf(sourceMesh)?.Parent
+            ? _host.Streamer.Actors.MeshRowOf(sourceMesh)?.Parent
             : null) ?? fallbackParent;
 
         foreach ((FrameObjectSingleMesh frame, MeshData data) in clone.Renderables)
@@ -202,7 +202,7 @@ internal sealed class ActorEditController
             _host.Rnd.AttachMesh(mesh);
             leaf.Mesh = mesh;
             _host.Tree.MeshCount++;
-            _host.Streamer.RegisterMeshRow(document.Placements, frame, leaf);
+            _host.Streamer.Actors.AddMeshRow(document.Placements, frame, leaf);
             rows.Add(new PrototypeRow(leaf, parent, mesh));
         }
 
@@ -286,13 +286,13 @@ internal sealed class ActorEditController
 
                 if (item.FrameRow != null) _owner._host.Persistence.MarkFrameModified(item.FrameRow);
                 item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack, item.Clone?.Root);
-                _owner._host.Streamer.AddActorNode(item.Document.Placements, item.Copy, item.Node);
+                _owner._host.Streamer.Actors.AddActorRow(item.Document.Placements, item.Copy, item.Node);
 
                 // The cloned meshes were uploaded with the PROTOTYPE's own world transform, which for an
                 // actor's object is the origin — the placement only exists once AddCopy has registered it.
                 // Without this the copy's geometry is drawn at (0,0,0) and there is nothing where the copy
                 // was made.
-                _owner._host.Streamer.SyncActorMeshes(item.Node);
+                _owner._host.Streamer.Actors.SyncMeshes(item.Node);
                 if (item.Parent != null)
                 {
                     // InsertChild, not Children.Insert: the list alone leaves the row without a parent, and a
@@ -422,7 +422,7 @@ internal sealed class ActorEditController
     // only the actor decides whether the game ever spawns them.
     private void SetSubtreeVisible(FrameObjectBase? frame, bool visible)
     {
-        if (frame != null) _host.Streamer.SetPlacedSubtreeVisible(frame, visible);
+        if (frame != null) _host.Streamer.Actors.SetPlacedVisible(frame, visible);
     }
 
     // Common tail of both directions: the glyph buffers, the selection and the panels are all stale now.
@@ -430,7 +430,7 @@ internal sealed class ActorEditController
 
     private void AfterChange(IReadOnlyList<SceneNode> selection)
     {
-        _host.Streamer.RefreshActorMarkers();
+        _host.Streamer.Actors.MarkAllDirty();
         _host.Selection.SetSelection(selection, selection.Count > 0 ? selection[^1] : null);
         _host.RaiseSceneChanged();
     }

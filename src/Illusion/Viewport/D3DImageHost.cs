@@ -615,7 +615,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         SceneNode? crash = Streamer.PickCrash(origin, dir, out float crashT);
         // Actor glyphs draw over everything and have no geometry of their own, so they are tested separately
         // and win outright: clicking a marker you can see selects that actor, whatever stands in front of it.
-        SceneNode? actor = Streamer.PickActor(origin, dir, out _);
+        SceneNode? actor = Streamer.Actors.Pick(origin, dir, out _);
         if (actor != null) return actor;
 
         if (col != null && (gm == null || colT <= meshT) && (crash == null || colT <= crashT)) return col;
@@ -626,7 +626,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         // frame itself is still reachable through the FrameResource branch of the tree.
         if (gm?.Owner is SceneNode meshNode)
         {
-            if (meshNode.Source is FrameNodeAdapter fna && Streamer.ActorNodeFor(fna.Frame) is { } owner) return owner;
+            if (meshNode.Source is FrameNodeAdapter fna && Streamer.Actors.ActorRowFor(fna.Frame) is { } owner) return owner;
             return meshNode;
         }
         return null;

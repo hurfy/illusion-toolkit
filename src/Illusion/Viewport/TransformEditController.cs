@@ -217,7 +217,7 @@ internal sealed class TransformEditController
 
         // An actor's geometry does not hang under its tree node — it lives in the FrameResource branch, placed
         // by the actor's matrix. Moving the actor has to push those meshes' new worlds too.
-        if (node.Source is ActorNodeAdapter) _host.Streamer.SyncActorMeshes(node);
+        if (node.Source is ActorNodeAdapter) _host.Streamer.Actors.SyncMeshes(node);
     }
 
     /// <summary>Resyncs a node's GPU meshes to its current world, then refreshes the outline/pivot and the

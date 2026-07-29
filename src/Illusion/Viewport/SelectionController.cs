@@ -80,7 +80,7 @@ internal sealed class SelectionController
             if (n.Mesh is { Instanced: false } m) meshes.Add(m);
         // A selected actor carries no mesh of its own — outline the geometry of the subtree it places, which is
         // exactly what was clicked in the viewport.
-        meshes.AddRange(_host.Streamer.ActorSelectionOutlines(_selected));
+        meshes.AddRange(_host.Streamer.Actors.SelectionOutlines(_selected));
         _host.Rnd.SetSelectionMeshes(meshes);
 
         // Instanced collision hulls have no per-node mesh, so they highlight through a dedicated renderer path.

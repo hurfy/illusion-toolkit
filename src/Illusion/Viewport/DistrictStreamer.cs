@@ -30,7 +30,11 @@ internal sealed class DistrictStreamer
 {
     private readonly D3DImageHost _host;
 
-    public DistrictStreamer(D3DImageHost host) => _host = host;
+    public DistrictStreamer(D3DImageHost host)
+    {
+        _host = host;
+        Actors = new ActorLayer(host);
+    }
 
     // Tracking key of the city_crash layer in _loadedDistricts: reuses the district machinery
     // (placeholder dedup, BeginBuild registration, UnloadDistrict teardown) for additive load/unload.
@@ -126,254 +130,12 @@ internal sealed class DistrictStreamer
         public Dictionary<FrameObjectBase, SceneNode>? MeshNodeByFrame;   // frame → its mesh leaf (outline lookup)
     }
 
-    // Glyph → its tree node, per resident district (keyed by the SDS node, as the renderer keys its buffers).
-    // A glyph has no geometry, so the mesh pick cannot see it; this is what a viewport click tests against.
-    private readonly Dictionary<SceneNode, List<(SceneNode Node, Vector3 Position)>> _actorPickables = new();
-
-    // Per resident district: which actor governs which frame (the placements know), and each actor's tree node.
-    // Together these make a click on a placed mesh select the ACTOR that puts it there — the mesh is only its
-    // prototype. _meshNodeByFrame is the way back, so the actor's geometry can still be outlined.
-    private readonly Dictionary<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> _actorScenes = new();
-    private readonly Dictionary<SceneNode, Dictionary<FrameObjectBase, SceneNode>> _meshNodeByFrame = new();
-
-    // Districts whose glyphs and pick entries no longer match their actor list: an eye was toggled, an actor
-    // moved, or one was deleted, copied or restored. Rebuilding is a full buffer upload, so it is coalesced to
-    // once per frame rather than done per node of a cascade.
-    private readonly HashSet<SceneNode> _actorMarkersDirty = new();
-
-    // An actor node owns nothing the eye's usual cascade can reach: a glyph is not a GpuMesh, and the geometry an
-    // actor places hangs under the FrameResource branch, not under the actor. So each actor node is watched, and
-    // hiding it either drops its glyph from the district buffer or hides the meshes of the subtree it places.
-    private void WatchActorVisibility(SceneNode sdsNode, IEnumerable<SceneNode> actorNodes)
-    {
-        foreach (SceneNode node in actorNodes) WatchActorNode(sdsNode, node);
-    }
-
-    private void WatchActorNode(SceneNode sdsNode, SceneNode node)
-    {
-        node.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName != nameof(SceneNode.IsVisible)) return;
-            if (node.Source is not ActorNodeAdapter actor) return;
-
-            if (actor.HasGlyph) _actorMarkersDirty.Add(sdsNode);
-            else if (actor.Target is { } target) SetPlacedSubtreeVisible(target, node.IsVisible);
-        };
-    }
-
-    /// <summary>Marks every resident district's glyphs and pick entries for rebuild — after an actor was
-    /// deleted, copied or restored, neither matches the actor list any more.</summary>
-    public void RefreshActorMarkers()
-    {
-        foreach (SceneNode sdsNode in _actorScenes.Keys) _actorMarkersDirty.Add(sdsNode);
-    }
-
     /// <summary>
-    /// Registers an actor the editor just created (a copy) with the district that owns
-    /// <paramref name="placements"/>, so its glyph is drawn and its marker can be clicked. The row is kept even
-    /// when the copy is undone: identity is what everything keys on, the actor list is what decides what is
-    /// drawn, and re-adding it on redo would otherwise wire a second visibility handler onto the same node.
+    /// The actors of every resident district: their glyphs, what a click is tested against, and the way from an
+    /// actor to the geometry it places. Its own class because none of the streamer's mesh machinery reaches an
+    /// actor — a glyph is not a GpuMesh, and an actor's geometry hangs in the FrameResource branch, not under it.
     /// </summary>
-    public void AddActorNode(ActorPlacements placements, ActorEntry actor, SceneNode node)
-    {
-        if (FindActorDistrict(placements) is not { } sdsNode) return;
-        if (_actorScenes[sdsNode].Nodes.TryAdd(actor, node)) WatchActorNode(sdsNode, node);
-        _actorMarkersDirty.Add(sdsNode);
-    }
-
-    /// <summary>Marks the district owning these placements stale — an actor of it moved or changed.</summary>
-    public void MarkActorMarkersDirty(ActorPlacements placements)
-    {
-        if (FindActorDistrict(placements) is { } sdsNode) _actorMarkersDirty.Add(sdsNode);
-    }
-
-    /// <summary>The tree row a frame object's geometry hangs on, when its district is resident.</summary>
-    public SceneNode? MeshRowOf(FrameObjectBase frame)
-    {
-        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
-        {
-            if (map.TryGetValue(frame, out SceneNode? leaf)) return leaf;
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Records a mesh row the editor just created (a cloned actor prototype), so everything that reaches an
-    /// actor's geometry through its frames — the transform sync, the eye, the selection outline — finds the
-    /// new object too. Kept across an undo: the row keeps its identity, and what decides whether anything is
-    /// drawn is the placements, not this map.
-    /// </summary>
-    public void RegisterMeshRow(ActorPlacements placements, FrameObjectBase frame, SceneNode leaf)
-    {
-        if (FindActorDistrict(placements) is not { } sdsNode) return;
-        if (!_meshNodeByFrame.TryGetValue(sdsNode, out Dictionary<FrameObjectBase, SceneNode>? map))
-        {
-            _meshNodeByFrame[sdsNode] = map = new Dictionary<FrameObjectBase, SceneNode>();
-        }
-        map[frame] = leaf;
-    }
-
-    private SceneNode? FindActorDistrict(ActorPlacements placements)
-    {
-        foreach (KeyValuePair<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> pair
-                 in _actorScenes)
-        {
-            if (ReferenceEquals(pair.Value.Placements, placements)) return pair.Key;
-        }
-        return null;
-    }
-
-    // Rebuilds the glyphs AND the pick entries of every district that went stale, both out of one walk over the
-    // LIVE actor list. Deriving them together is what keeps a picked index pointing at the glyph it was aimed
-    // at; deriving them from the list rather than from a load-time snapshot is what makes a deleted actor stop
-    // being clickable, a copy start being clickable, and a moved one take its marker with it.
-    private void RebuildDirtyActorMarkers()
-    {
-        if (_actorMarkersDirty.Count == 0 || _host.Rnd == null) return;
-
-        foreach (SceneNode sdsNode in _actorMarkersDirty)
-        {
-            if (!_actorScenes.TryGetValue(sdsNode,
-                    out (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes) scene)) continue;
-
-            int capacity = scene.Placements.Invisible.Count;
-            var visible = new List<ActorEntry>(capacity);
-            var pickables = new List<(SceneNode Node, Vector3 Position)>(capacity);
-            ActorGlyphSet.Collect(scene.Placements, scene.Nodes, visible, pickables);
-
-            if (pickables.Count > 0) _actorPickables[sdsNode] = pickables;
-            else _actorPickables.Remove(sdsNode);
-            _host.Rnd.SetActorDistrict(sdsNode, visible.Count > 0 ? ActorMarkerBuilder.Build(visible) : null);
-        }
-        _actorMarkersDirty.Clear();
-    }
-
-    /// <summary>
-    /// Shows or hides the geometry of the subtree an actor places — through the tree nodes, not their GPU
-    /// meshes. A mesh still queued for upload has no GpuMesh yet, and what the upload applies when it lands is
-    /// the NODE's flag; setting the mesh alone leaves such a mesh to attach visible moments later, which is how
-    /// a deleted actor's geometry could stay on screen.
-    /// </summary>
-    public void SetPlacedSubtreeVisible(FrameObjectBase frame, bool visible) =>
-        SetSubtreeNodesVisible(frame, visible, new HashSet<FrameObjectBase>());
-
-    private void SetSubtreeNodesVisible(FrameObjectBase frame, bool visible, HashSet<FrameObjectBase> seen)
-    {
-        if (!seen.Add(frame)) return;
-        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
-        {
-            if (!map.TryGetValue(frame, out SceneNode? leaf)) continue;
-
-            // An instanced prototype is left alone: in city_crash the .tra table copies it across the whole map
-            // and one actor is not what puts those copies there, so hiding it would blank a whole row of props.
-            // Pending meshes are asked before they exist, which is the point — the node's flag is what the
-            // upload applies when it lands.
-            bool instanced = leaf.Mesh?.Instanced ?? leaf.Pending?.Instances is { Length: > 0 };
-            if (!instanced) leaf.IsVisible = visible;
-        }
-        foreach (FrameObjectBase child in frame.Children) SetSubtreeNodesVisible(child, visible, seen);
-    }
-
-    /// <summary>The actor node governing a frame object, or null when no actor places it.</summary>
-    public SceneNode? ActorNodeFor(FrameObjectBase frame)
-    {
-        foreach ((ActorPlacements placements, Dictionary<ActorEntry, SceneNode> nodes) in _actorScenes.Values)
-        {
-            if (placements.ActorCovering(frame) is { } actor && nodes.TryGetValue(actor, out SceneNode? node))
-            {
-                return node;
-            }
-        }
-        return null;
-    }
-
-    /// <summary>Re-uploads the world matrices of the geometry an actor places, after that actor moved. The
-    /// placement was already refreshed by the adapter, so each frame's node reports its new world. An actor
-    /// with no geometry moves its glyph instead, which is a district rebuild — hence the dirty mark either
-    /// way, since the marker is also what the click test uses.</summary>
-    public void SyncActorMeshes(SceneNode actorNode)
-    {
-        if (actorNode.Source is not ActorNodeAdapter actor) return;
-        MarkActorMarkersDirty(actor.Placements);
-        if (actor.Target is not { } target) return;
-        SyncSubtreeMeshes(target, new HashSet<FrameObjectBase>());
-    }
-
-    private void SyncSubtreeMeshes(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
-    {
-        if (!seen.Add(frame)) return;
-        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
-        {
-            if (map.TryGetValue(frame, out SceneNode? leaf) && leaf.Mesh is { Instanced: false } mesh
-                && leaf.Source is IFrameNode fn)
-            {
-                mesh.SetWorld(fn.WorldTransform);
-            }
-        }
-        foreach (FrameObjectBase child in frame.Children) SyncSubtreeMeshes(child, seen);
-    }
-
-    /// <summary>GPU meshes to outline for the selected actors — an actor with geometry has no mesh of its own,
-    /// so the highlight is the meshes of the subtree it places.</summary>
-    public IReadOnlyList<GpuMesh> ActorSelectionOutlines(IReadOnlyList<SceneNode> selected)
-    {
-        var meshes = new List<GpuMesh>();
-        foreach (SceneNode n in selected)
-        {
-            if (n.Source is not ActorNodeAdapter actor || actor.Target is not { } target) continue;
-            CollectSubtreeMeshes(target, meshes, new HashSet<FrameObjectBase>());
-        }
-        return meshes;
-    }
-
-    // Mesh leaves keyed by their frame object, so an actor's subtree can find the geometry to outline.
-    private static Dictionary<FrameObjectBase, SceneNode>? BuildMeshNodeMap(List<SceneNode> meshLeaves)
-    {
-        if (meshLeaves.Count == 0) return null;
-        var map = new Dictionary<FrameObjectBase, SceneNode>(meshLeaves.Count);
-        foreach (SceneNode leaf in meshLeaves)
-        {
-            if (leaf.Source is FrameNodeAdapter fna) map[fna.Frame] = leaf;
-        }
-        return map.Count > 0 ? map : null;
-    }
-
-    private void CollectSubtreeMeshes(FrameObjectBase frame, List<GpuMesh> into, HashSet<FrameObjectBase> seen)
-    {
-        if (!seen.Add(frame)) return;
-        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
-        {
-            if (map.TryGetValue(frame, out SceneNode? leaf) && leaf.Mesh is { Instanced: false } m) into.Add(m);
-        }
-        foreach (FrameObjectBase child in frame.Children) CollectSubtreeMeshes(child, into, seen);
-    }
-
-    /// <summary>Nearest actor glyph under the ray, or null. Glyphs draw over everything, so they win a pick
-    /// outright — clicking the marker you can see selects that actor, wall in between or not.</summary>
-    public SceneNode? PickActor(Vector3 origin, Vector3 dir, out float bestT)
-    {
-        // A click must never be tested against entries the last edit already invalidated: an actor pick wins
-        // outright over the geometry behind it, so one stale marker would swallow every click near it. The
-        // rebuild is normally the render loop's, this only pulls it forward when an edit landed in between.
-        RebuildDirtyActorMarkers();
-
-        bestT = float.PositiveInfinity;
-        SceneNode? hit = null;
-        foreach (List<(SceneNode Node, Vector3 Position)> list in _actorPickables.Values)
-        {
-            var positions = new Vector3[list.Count];
-            for (int i = 0; i < list.Count; i++) positions[i] = list[i].Position;
-
-            int index = ActorPicking.Pick(positions, origin, dir, ActorMarkerBuilder.Radius, out float t);
-            if (index >= 0 && t < bestT)
-            {
-                bestT = t;
-                hit = list[index].Node;
-            }
-        }
-        if (hit == null) bestT = float.PositiveInfinity;
-        return hit;
-    }
+    public ActorLayer Actors { get; }
 
     private Task<PreparedLoad?>? _loadTask;
     private (string label, string? district, string folder, int gen) _loadCtx;
@@ -393,8 +155,8 @@ internal sealed class DistrictStreamer
         if (!_building && _loadTask != null && _loadTask.IsCompleted) BeginBuild();
         if (_building) AttachStep();
 
-        // Glyphs hidden through the tree's eye: one coalesced rebuild per frame (see WatchActorVisibility).
-        RebuildDirtyActorMarkers();
+        // Glyphs hidden through the tree's eye: one coalesced rebuild per frame (see ActorLayer).
+        Actors.RebuildDirty();
 
         // The queue (single area / city_univers when streaming) has priority over streaming.
         if (!_building && _loadTask == null && _loadQueue.Count > 0)
@@ -1237,7 +999,7 @@ internal sealed class DistrictStreamer
                 ActorPickables = actorPickables,
                 ActorPlacements = actorPlacements,
                 ActorNodes = actorNodes.Count > 0 ? actorNodes : null,
-                MeshNodeByFrame = BuildMeshNodeMap(meshLeaves),
+                MeshNodeByFrame = ActorLayer.BuildMeshRows(meshLeaves),
             };
         }
         catch (Exception ex)
@@ -1327,16 +1089,10 @@ internal sealed class DistrictStreamer
         if (load.NavMeshLines != null) _host.Rnd!.SetNavMeshDistrict(load.Sds, load.NavMeshLines);
         // .nav path objects (cover / vault-over markers): separate toggle (ShowNavWorld), same keying.
         if (load.NavWorldLines != null) _host.Rnd!.SetNavWorldDistrict(load.Sds, load.NavWorldLines);
-        // Actor glyphs (sounds, lights, triggers…): own toggle (ShowActors), same per-district keying.
-        if (load.ActorMarkers != null) _host.Rnd!.SetActorDistrict(load.Sds, load.ActorMarkers);
-        if (load.ActorPickables is { Count: > 0 }) _actorPickables[load.Sds] = load.ActorPickables;
-        if (load.MeshNodeByFrame != null) _meshNodeByFrame[load.Sds] = load.MeshNodeByFrame;
-        if (load.ActorPlacements != null && load.ActorNodes != null)
-        {
-            _actorScenes[load.Sds] = (load.ActorPlacements, load.ActorNodes);
-            // After the mesh map is in place: hiding an actor has to find the geometry it places.
-            WatchActorVisibility(load.Sds, load.ActorNodes.Values);
-        }
+        // Actor glyphs (sounds, lights, triggers…): own toggle (ShowActors), same per-district keying. The mesh
+        // map goes in with them, since hiding an actor has to find the geometry it places.
+        Actors.Install(load.Sds, load.ActorMarkers, load.ActorPickables, load.ActorPlacements, load.ActorNodes,
+            load.MeshNodeByFrame);
 
         if (load.Meshes.Count == 0) { _building = false; _host.RaiseSceneChanged(); }
     }
@@ -1445,10 +1201,7 @@ internal sealed class DistrictStreamer
             _host.Rnd!.RemoveNavMeshDistrict(node);   // and its .nov AI-mesh overlay
             _host.Rnd!.RemoveNavWorldDistrict(node);  // and its .nav path-object overlay
             _host.Rnd!.RemoveActorDistrict(node);     // and its actor glyphs
-            _actorPickables.Remove(node);             // and their pick entries
-            _actorMarkersDirty.Remove(node);          // and any pending glyph rebuild
-            _actorScenes.Remove(node);                // and the actor ↔ node maps
-            _meshNodeByFrame.Remove(node);            // and the frame → mesh-leaf map
+            Actors.Remove(node);                      // and their pick entries, rows and mesh map
             _collisionSources.RemoveAll(s => ReferenceEquals(s.Sds, node)); // its "Collisions" tree node leaves with the SDS subtree
             _crashSources.RemoveAll(s => ReferenceEquals(s.Sds, node));     // …and its "Crash objects" layer
         }
@@ -1481,10 +1234,7 @@ internal sealed class DistrictStreamer
         _host.Rnd?.ClearNov();
         _host.Rnd?.ClearNavWorld();
         _host.Rnd?.ClearActors();
-        _actorPickables.Clear();
-        _actorMarkersDirty.Clear();
-        _actorScenes.Clear();
-        _meshNodeByFrame.Clear();
+        Actors.Clear();
         _collisionSources.Clear();
         _crashSources.Clear();
         _host.Tree.Clear();
