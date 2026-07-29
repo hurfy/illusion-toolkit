@@ -99,9 +99,10 @@ jobs:
           $junk = Get-ChildItem $root -Recurse -File -Include *.pdb, *.xml, *.md, *.txt
           if ($junk) { throw "Not release payload: $(($junk.Name | Sort-Object -Unique) -join ', ')" }
 
-      # The checksum is published as its own asset, not only quoted in the notes: the in-app updater downloads
-      # it beside the archive and refuses to install anything that does not match (see UpdateDownloader). The
-      # sha256sum layout — "<hash>  <file>" — is what it reads, and what `sha256sum -c` reads too.
+      # The checksum is published as its own asset rather than quoted in the notes: the in-app updater
+      # downloads it beside the archive and refuses to install anything that does not match (see
+      # UpdateDownloader). The sha256sum layout — "<hash>  <file>" — is what it reads, and what
+      # `sha256sum -c` reads too.
       - name: Archive
         id: archive
         shell: pwsh
@@ -119,7 +120,6 @@ jobs:
             (Join-Path $PWD $sums), "$hash  $zip`n", [Text.UTF8Encoding]::new($false))
           "zip=$zip" >> $env:GITHUB_OUTPUT
           "sums=$sums" >> $env:GITHUB_OUTPUT
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
           "size=$size" >> $env:GITHUB_OUTPUT
 
       # Draft, so the notes can be read (and edited) before anyone can download it. Publish from the
@@ -131,7 +131,6 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           ZIP: ${{ steps.archive.outputs.zip }}
           SUMS: ${{ steps.archive.outputs.sums }}
-          SHA256: ${{ steps.archive.outputs.sha256 }}
           SIZE: ${{ steps.archive.outputs.size }}
         run: |
           # A literal here-string: the markdown below is full of backticks, which a PowerShell
@@ -148,12 +147,8 @@ jobs:
           Needs the **[.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)**
           and the **[Visual C++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)**.
           Windows offers to fetch the first one if it is missing.
-
-          ```
-          SHA256  {SHA256}
-          ```
           '@
-          $notes = $notes.Replace('{ZIP}', $env:ZIP).Replace('{SIZE}', $env:SIZE).Replace('{SHA256}', $env:SHA256)
+          $notes = $notes.Replace('{ZIP}', $env:ZIP).Replace('{SIZE}', $env:SIZE)
           Set-Content notes.md -Value $notes -Encoding utf8
           # --generate-notes appends the commit/PR log under the notes above.
           gh release create "v$env:VERSION" $env:ZIP $env:SUMS `

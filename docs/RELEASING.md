@@ -86,8 +86,8 @@ private test binary sitting next to it stays where it is.
    git push origin v0.3.0
    ```
 
-6. **Check the draft** on the releases page — the generated commit log, the archive size, the
-   SHA256 — then hit Publish.
+6. **Check the draft** on the releases page — the generated commit log, the archive size, both
+   assets attached — then hit Publish.
 
 A dry run is available without tagging: run the workflow manually (`Actions → Release → Run
 workflow`) and give it a version. It produces the same draft, which can be deleted afterwards.
