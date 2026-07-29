@@ -910,22 +910,22 @@
                         </Border.Effect>
                     </Border>
 
-                    <!-- Editable transform overlay (bottom-left): just the X/Y/Z inputs for the state that was
-                         changed by the 3D gizmo — Position (Move), Rotation (Rotate) or Scale (Scale), one at a
-                         time. It appears in code ONLY after an actual gizmo edit (not on select) and stays for
-                         hand-editing; DataContext = the SelectionViewModel. No object name and no state label. -->
+                    <!-- Transform overlay (bottom-left): HOW MUCH the 3D gizmo just changed the active object
+                         by — a distance for a move, degrees for a rotation, a factor for a scale. Not the
+                         resulting absolute values: those are always on screen in the Object tab, and the
+                         question a transform leaves you with is how far it went. The caption names the
+                         transform, so the panel can never quietly report the wrong one.
+                         Editable: typing an amount re-applies it against where the object started, so the
+                         number keeps meaning the same thing however often it is retyped. It appears in code
+                         ONLY after an actual gizmo edit (not on select); DataContext = the SelectionViewModel. -->
                     <Border x:Name="GizmoPanel" HorizontalAlignment="Left" VerticalAlignment="Bottom"
                             Margin="12" Padding="10,8" Background="#B0000000" CornerRadius="6"
                             Visibility="Collapsed">
                         <StackPanel Width="330">
-                            <v:Vector3Box x:Name="PanelPos" Compact="True" ShowActions="False" Decimals="3"
-                                          X="{Binding PosX}" Y="{Binding PosY}" Z="{Binding PosZ}" />
-                            <v:Vector3Box x:Name="PanelRot" Compact="True" ShowActions="False" Decimals="2"
-                                          Visibility="Collapsed"
-                                          X="{Binding RotX}" Y="{Binding RotY}" Z="{Binding RotZ}" />
-                            <v:Vector3Box x:Name="PanelScale" Compact="True" ShowActions="False" Decimals="3"
-                                          Visibility="Collapsed"
-                                          X="{Binding ScaleX}" Y="{Binding ScaleY}" Z="{Binding ScaleZ}" />
+                            <TextBlock x:Name="PanelCaption" Foreground="#A8FFFFFF" FontSize="10.5"
+                                       FontWeight="SemiBold" Margin="2,0,0,5" />
+                            <v:Vector3Box x:Name="PanelDelta" Compact="True" ShowActions="False" Decimals="3"
+                                          X="{Binding DeltaX}" Y="{Binding DeltaY}" Z="{Binding DeltaZ}" />
                         </StackPanel>
                     </Border>
 

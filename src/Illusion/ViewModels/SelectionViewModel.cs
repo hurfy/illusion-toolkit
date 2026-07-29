@@ -329,6 +329,80 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         Raise(nameof(PosX)); Raise(nameof(PosY)); Raise(nameof(PosZ));
         Raise(nameof(RotX)); Raise(nameof(RotY)); Raise(nameof(RotZ));
         Raise(nameof(ScaleX)); Raise(nameof(ScaleY)); Raise(nameof(ScaleZ));
+        Raise(nameof(DeltaX)); Raise(nameof(DeltaY)); Raise(nameof(DeltaZ));
+    }
+
+    // ── The change the last gizmo transform made (the viewport overlay) ──
+
+    // The overlay answers "how much did that just change it by", which only a fixed starting point can
+    // answer — the object's own current values cannot, and reading them back is what made the overlay show
+    // an absolute position after a resize.
+    private GizmoMode _deltaMode = GizmoMode.None;
+    private Vector3 _basePos, _baseRotDeg, _baseScale = Vector3.One;
+
+    /// <summary>Which transform the overlay is reporting; <see cref="GizmoMode.None"/> when it has nothing to say.</summary>
+    public GizmoMode DeltaMode => _deltaMode;
+
+    /// <summary>
+    /// Starts reporting changes against where the object stood before the transform. Called when a gizmo drag
+    /// first moves something, with the pre-drag state — never with the live one, or the change would measure
+    /// itself and always read as nothing.
+    /// </summary>
+    public void BeginDelta(GizmoMode mode, Vector3 position, Vector3 rotationDeg, Vector3 scale)
+    {
+        _deltaMode = mode;
+        _basePos = position;
+        _baseRotDeg = rotationDeg;
+        _baseScale = scale;
+        RaiseTransformFields();
+    }
+
+    /// <summary>Stops reporting (a different object is a different story).</summary>
+    public void ClearDelta()
+    {
+        if (_deltaMode == GizmoMode.None) return;
+        _deltaMode = GizmoMode.None;
+        RaiseTransformFields();
+    }
+
+    /// <summary>
+    /// How much the last transform changed each axis by — see <see cref="TransformDelta"/> for what that means
+    /// per transform. Assigning re-applies against the same starting point, so typing 2 into a scale always
+    /// means "twice the original", however many times it is typed.
+    /// </summary>
+    public float DeltaX { get => Delta(0); set => SetDelta(0, value); }
+    public float DeltaY { get => Delta(1); set => SetDelta(1, value); }
+    public float DeltaZ { get => Delta(2); set => SetDelta(2, value); }
+
+    private static float Axis(Vector3 v, int axis) => axis == 0 ? v.X : axis == 1 ? v.Y : v.Z;
+
+    // Which pair of vectors the change is measured between — the live one and the one captured before the drag.
+    private (Vector3 Base, Vector3 Current) DeltaPair => _deltaMode switch
+    {
+        GizmoMode.Move => (_basePos, _pos),
+        GizmoMode.Rotate => (_baseRotDeg, _rotDeg),
+        GizmoMode.Scale => (_baseScale, _scale),
+        _ => (Vector3.Zero, Vector3.Zero),
+    };
+
+    private float Delta(int axis)
+    {
+        (Vector3 baseline, Vector3 current) = DeltaPair;
+        return TransformDelta.Measure(_deltaMode, Axis(baseline, axis), Axis(current, axis));
+    }
+
+    private void SetDelta(int axis, float value)
+    {
+        if (_deltaMode == GizmoMode.None) return;
+        (Vector3 baseline, _) = DeltaPair;
+        float applied = TransformDelta.Apply(_deltaMode, Axis(baseline, axis), value);
+        switch (_deltaMode)
+        {
+            case GizmoMode.Move: _pos = With(_pos, axis, applied); break;
+            case GizmoMode.Rotate: _rotDeg = With(_rotDeg, axis, applied); break;
+            default: _scale = With(_scale, axis, applied); break;
+        }
+        ApplyTransform();
     }
 
     /// <summary>Re-reads the transform fields from the frame (after a gizmo drag). Ignored while a field edit commits.</summary>

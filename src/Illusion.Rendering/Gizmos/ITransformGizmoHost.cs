@@ -22,7 +22,12 @@ public interface ITransformGizmoHost
     /// <summary>Raised each frame the camera changes so the overlay repaints.</summary>
     event Action? CameraMoved;
 
-    void GizmoBeginDrag();
+    /// <summary>
+    /// A drag is starting. <paramref name="mode"/> is what the grabbed handle actually DOES, which is not the
+    /// same as <see cref="GizmoMode"/>: a modal transform is started from the keyboard and never touches the
+    /// tool shelf, so a keyboard scale while the shelf says Move arrives here as Scale.
+    /// </summary>
+    void GizmoBeginDrag(GizmoMode mode);
     void GizmoApplyWorldDelta(Matrix4x4 totalWorldDelta);
     void GizmoEndDrag();
     /// <summary>Abandons the drag in progress: the objects go back to where they started and nothing is

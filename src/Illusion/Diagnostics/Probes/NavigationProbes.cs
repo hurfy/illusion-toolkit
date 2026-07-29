@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Numerics;
 using System.Text;
@@ -8,6 +9,7 @@ using System.Windows.Media.Imaging;
 using Illusion.Rendering.Controls;
 using Illusion.Rendering.Gizmos;
 using Illusion.Rendering.Scene;
+using Illusion.ViewModels;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
 namespace Illusion.Diagnostics.Probes;
@@ -243,6 +245,39 @@ internal static class NavigationProbes
 
     // What a modal transform promises: it starts, it owns the keyboard while it runs, and it ends in exactly one
     // of two ways — kept or put back. Nothing else may reach the app in between.
+    // What the viewport overlay reports after a transform: the CHANGE, measured from where the object stood
+    // before the drag. The invariant that makes the field editable is that the two directions are inverses —
+    // retyping the number already on screen has to leave the object exactly where it is.
+    private static void CheckOverlayDelta(Action<string, bool, string> check)
+    {
+        foreach ((GizmoMode mode, float baseline, float current, float expected) in new[]
+                 {
+                     (GizmoMode.Move, 10f, 22.5f, 12.5f),        // moved by +12.5 units
+                     (GizmoMode.Move, 10f, 7f, -3f),             // and backwards
+                     (GizmoMode.Rotate, 90f, 105f, 15f),         // turned by 15 degrees
+                     (GizmoMode.Scale, 2f, 2.5f, 1.25f),         // a FACTOR: half again as big
+                     (GizmoMode.Scale, 0.1f, 1f, 10f),           // which a difference could not express
+                 })
+        {
+            float measured = TransformDelta.Measure(mode, baseline, current);
+            check($"{mode} from {baseline} to {current} reads as {expected}",
+                MathF.Abs(measured - expected) < 1e-4f, measured.ToString(CultureInfo.InvariantCulture));
+            check($"{mode}: typing {expected} back lands on {current} again",
+                MathF.Abs(TransformDelta.Apply(mode, baseline, measured) - current) < 1e-4f, "");
+        }
+
+        // A zero starting scale has no factor that reaches anything else; reporting infinity (or NaN) would
+        // put an unusable number in an editable field.
+        float fromZero = TransformDelta.Measure(GizmoMode.Scale, 0f, 5f);
+        check("a zero starting scale reports 'unchanged' rather than infinity",
+            fromZero == TransformDelta.Neutral(GizmoMode.Scale) && float.IsFinite(fromZero),
+            fromZero.ToString(CultureInfo.InvariantCulture));
+
+        check("an unchanged object reports the neutral amount for its transform",
+            TransformDelta.Measure(GizmoMode.Move, 4f, 4f) == TransformDelta.Neutral(GizmoMode.Move)
+            && TransformDelta.Measure(GizmoMode.Scale, 4f, 4f) == TransformDelta.Neutral(GizmoMode.Scale), "");
+    }
+
     private static void CheckModalLifecycle(Action<string, bool, string> check)
     {
         (TransformGizmo gizmo, FakeTransformGizmoHost host) = NewOverlay();
@@ -271,6 +306,26 @@ internal static class NavigationProbes
         gizmo.EndModal(commit: false);
         check("cancelling puts it back instead of recording",
             !gizmo.IsModalActive && string.Join(",", host.Calls) == "begin,cancel", string.Join(",", host.Calls));
+
+        // What the host is TOLD the drag is. The bug this pins: it used to be handed the tool shelf's mode, and
+        // a keyboard-started transform never touches the shelf — so a scale under a shelf set to Move (or to
+        // Select, with no tool at all) reported itself as a move, and the viewport overlay labelled a resize
+        // "Position". The shelf is deliberately left on something else in each case below.
+        foreach ((GizmoMode started, GizmoMode shelf) in new[]
+                 {
+                     (GizmoMode.Scale, GizmoMode.Move),
+                     (GizmoMode.Rotate, GizmoMode.None),
+                     (GizmoMode.Move, GizmoMode.Scale),
+                 })
+        {
+            host.GizmoMode = shelf;
+            gizmo.BeginModal(started, new Point(200, 150));
+            check($"a modal {started} is reported as {started}, not as the shelf's {shelf}",
+                host.LastDragMode == started, host.LastDragMode.ToString());
+            gizmo.EndModal(commit: false);
+        }
+        host.GizmoMode = GizmoMode.Move;
+        CheckOverlayDelta(check);
 
         // Keys: Esc abandons, Enter and Space accept. Space matters — it is the walk-mode hotkey everywhere
         // else, and a running transform has to win it.

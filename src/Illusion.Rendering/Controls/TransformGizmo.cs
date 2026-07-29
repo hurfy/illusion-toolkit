@@ -499,7 +499,7 @@ public sealed class TransformGizmo : FrameworkElement
         _constraint = AxisConstraint.None;   // every drag starts free; the lock is per-drag
         _swallowRelease = false;             // no stale "eat the next button release" from an earlier modal
         _precision.Reset();                  // Ctrl-precision is per-drag too: no offset carried in from the last
-        _host.GizmoBeginDrag();
+        _host.GizmoBeginDrag(ModeOf(h.Kind));
         _dragPivot = _host.GizmoPivot;
         Layout layout = BuildLayout();
         _dragHandleWorld = Math.Max(1e-4, layout.HandleWorld);
@@ -748,7 +748,9 @@ public sealed class TransformGizmo : FrameworkElement
         }
     }
 
-    // Which transform a grabbed handle performs — the axis lock replaces the handle but never the tool.
+    // Which transform a grabbed handle performs — the axis lock replaces the handle but never the tool. This is
+    // also what the host is told a drag is (GizmoBeginDrag): the tool shelf cannot answer for a keyboard-started
+    // transform, which never touches it.
     private static GizmoMode ModeOf(HandleKind kind) => kind switch
     {
         HandleKind.RotateAxis or HandleKind.RotateView => GizmoMode.Rotate,

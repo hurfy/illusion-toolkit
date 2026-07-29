@@ -632,7 +632,13 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     public Vector3 GizmoPivot => Selection.GizmoPivot;
 
     /// <inheritdoc cref="TransformEditController.GizmoBeginDrag"/>
-    public void GizmoBeginDrag() => Editing.GizmoBeginDrag();
+    public void GizmoBeginDrag(GizmoMode mode) => Editing.GizmoBeginDrag(mode);
+
+    /// <inheritdoc cref="TransformEditController.LastGizmoBaseline"/>
+    internal TransformEditController.GizmoBaseline? LastGizmoBaseline => Editing.LastGizmoBaseline;
+
+    /// <inheritdoc cref="TransformEditController.ClearGizmoBaseline"/>
+    internal void ClearGizmoBaseline() => Editing.ClearGizmoBaseline();
 
     /// <inheritdoc cref="TransformEditController.GizmoApplyWorldDelta"/>
     public void GizmoApplyWorldDelta(Matrix4x4 totalWorldDelta) => Editing.GizmoApplyWorldDelta(totalWorldDelta);

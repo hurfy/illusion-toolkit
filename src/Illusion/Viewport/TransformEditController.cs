@@ -32,7 +32,22 @@ internal sealed class TransformEditController
     // accumulated, so a drag never drifts — and the local matrix, so the whole group drag is one undoable edit).
     private readonly List<(SceneNode Node, Matrix4x4 OriginalWorld, Matrix4x4 BeforeLocal)> _dragGroup = new();
 
-    private bool _gizmoMoved; // whether GizmoEdited already fired for the current drag
+    private bool _gizmoMoved;                       // whether GizmoEdited already fired for the current drag
+    private GizmoMode _dragMode = GizmoMode.None;   // what the grabbed handle does, NOT what the tool shelf says
+    private SceneNode? _baselineNode;               // the active object, and where it stood before this drag
+    private Matrix4x4 _baselineLocal;
+
+    /// <summary>Where the active object stood before the last gizmo drag started, decomposed. The viewport
+    /// overlay shows the change against it, and an amount typed into that overlay is applied to it — so the
+    /// number on screen always means "this much of a change", however many times it is retyped.</summary>
+    public sealed record GizmoBaseline(SceneNode Node, Vector3 Position, Vector3 RotationDeg, Vector3 Scale);
+
+    /// <summary>The baseline of the last drag, or null when none has happened for the current selection.</summary>
+    public GizmoBaseline? LastGizmoBaseline { get; private set; }
+
+    /// <summary>Forgets the baseline — the overlay is about one object's one transform, and a different object
+    /// is a different story.</summary>
+    public void ClearGizmoBaseline() => LastGizmoBaseline = null;
 
     // ── Gizmo drag ──
 
@@ -40,10 +55,17 @@ internal sealed class TransformEditController
     /// fixed originals (no drift) and becomes a single undoable edit. Only the TOP-MOST selected frame of each
     /// parent chain is transformed: a frame's SetWorldTransform cascade already moves its selected descendants,
     /// so transforming a descendant too would apply the delta twice and break the group's rigidity.</summary>
-    public void GizmoBeginDrag()
+    public void GizmoBeginDrag(GizmoMode mode)
     {
         _dragGroup.Clear();
         _gizmoMoved = false;
+        _dragMode = mode;
+
+        // Snapshot the ACTIVE object — the one whose numbers the panels show — before anything moves. It is
+        // not always in the drag group: a selected descendant is carried by its ancestor's cascade and its own
+        // local transform never changes, which is exactly the "no change" the overlay should then report.
+        _baselineNode = _host.SelectedNode;
+        _baselineLocal = _baselineNode?.Source is IFrameNode active ? active.LocalTransform : Matrix4x4.Identity;
         var frames = new HashSet<IFrameNode>();
         foreach (SceneNode n in _host.Selection.Selected) if (n.Source is IFrameNode fn) frames.Add(fn);
         foreach (SceneNode n in _host.Selection.Selected)
@@ -74,7 +96,24 @@ internal sealed class TransformEditController
         }
         _host.Selection.UpdateSelectionHighlight();
         _host.RaiseSelectionTransformChanged();
-        if (!_gizmoMoved) { _gizmoMoved = true; _host.RaiseGizmoEdited(_host.GizmoMode); } // first real move → reveal the panel
+        // First real move → publish the baseline and reveal the panel. The mode is the DRAG's, not the tool
+        // shelf's: a keyboard-started scale leaves the shelf on whatever it was, and asking the shelf is what
+        // used to label a resize "Position".
+        if (!_gizmoMoved)
+        {
+            _gizmoMoved = true;
+            CaptureGizmoBaseline();
+            _host.RaiseGizmoEdited(_dragMode);
+        }
+    }
+
+    private void CaptureGizmoBaseline()
+    {
+        LastGizmoBaseline =
+            _baselineNode is { } node
+            && TransformMath.TryDecompose(_baselineLocal, out Vector3 scale, out Quaternion rot, out Vector3 pos)
+                ? new GizmoBaseline(node, pos, TransformOps.QuatToEulerDeg(rot), scale)
+                : null;
     }
 
     /// <summary>Abandons the drag: drops the snapshots without recording anything. The caller has already put

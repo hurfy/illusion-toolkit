@@ -385,14 +385,22 @@ public partial class MainWindow : Window
         _transformGizmo?.InvalidateVisual();
     }
 
-    // A real gizmo edit occurred: reveal the overlay panel showing the vector for the tool that changed it —
-    // Rotate -> Rotation, Scale -> Scale, otherwise Position. Only one Vector3Box shows at a time. Stays visible
+    // A real gizmo edit occurred: reveal the overlay showing HOW MUCH it changed the active object by, measured
+    // from where that object stood before the drag. The mode is the drag's own — a keyboard-started scale never
+    // touches the tool shelf, so the shelf would call it whatever tool happens to be selected. Stays visible
     // (for hand-editing) until the selection changes.
     private void ShowGizmoPanelForMode(GizmoMode mode)
     {
-        PanelRot.Visibility = mode == GizmoMode.Rotate ? Visibility.Visible : Visibility.Collapsed;
-        PanelScale.Visibility = mode == GizmoMode.Scale ? Visibility.Visible : Visibility.Collapsed;
-        PanelPos.Visibility = mode is GizmoMode.Rotate or GizmoMode.Scale ? Visibility.Collapsed : Visibility.Visible;
+        if (Viewport.LastGizmoBaseline is not { } baseline) return;
+
+        _selection.BeginDelta(mode, baseline.Position, baseline.RotationDeg, baseline.Scale);
+        (PanelCaption.Text, PanelDelta.Decimals) = mode switch
+        {
+            // The unit is part of the caption: a bare "1.250" after a resize could be read as the new size.
+            GizmoMode.Rotate => ("ROTATED BY  (degrees)", 2),
+            GizmoMode.Scale => ("SCALED BY  (× original)", 3),
+            _ => ("MOVED BY  (units)", 3),
+        };
         GizmoPanel.Visibility = Visibility.Visible;
     }
 
@@ -406,6 +414,10 @@ public partial class MainWindow : Window
         if (!ReferenceEquals(Viewport.SelectedNode, _panelNode))
         {
             GizmoPanel.Visibility = Visibility.Collapsed;
+            // The overlay reports one object's one transform; another object has no such story yet, and a
+            // stale baseline would measure the new object against where the old one used to stand.
+            _selection.ClearDelta();
+            Viewport.ClearGizmoBaseline();
             _panelNode = Viewport.SelectedNode;
         }
         _selection.SetNode(Viewport.SelectedNode);

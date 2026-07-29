@@ -35,7 +35,16 @@ internal sealed class FakeTransformGizmoHost : ITransformGizmoHost
     /// <summary>The last world delta handed over, so a probe can see what the drag actually asked for.</summary>
     public Matrix4x4 LastDelta { get; private set; } = Matrix4x4.Identity;
 
-    public void GizmoBeginDrag() { Calls.Add("begin"); LastDelta = Matrix4x4.Identity; }
+    /// <summary>What the gizmo said the last drag WAS. Not the same as <see cref="GizmoMode"/>: that is the tool
+    /// shelf, which a keyboard-started transform never touches.</summary>
+    public GizmoMode LastDragMode { get; private set; } = GizmoMode.None;
+
+    public void GizmoBeginDrag(GizmoMode mode)
+    {
+        Calls.Add("begin");
+        LastDragMode = mode;
+        LastDelta = Matrix4x4.Identity;
+    }
     public void GizmoApplyWorldDelta(Matrix4x4 totalWorldDelta) => LastDelta = totalWorldDelta;
     public void GizmoEndDrag() => Calls.Add("end");
     public void GizmoCancelDrag() => Calls.Add("cancel");
