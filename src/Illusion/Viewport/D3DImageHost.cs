@@ -39,6 +39,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly TransformEditController Editing;
     internal readonly CollisionEditController CollisionEditing;
     internal readonly TranslokatorEditController CrashEditing;
+    internal readonly ActorEditController ActorEditing;
     internal readonly PropertyEditController PropertyEditing;
     internal readonly ScenePersistence Persistence;
     internal readonly GeometryEditController GeometryEditing;
@@ -55,6 +56,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         Editing = new TransformEditController(this);
         CollisionEditing = new CollisionEditController(this);
         CrashEditing = new TranslokatorEditController(this);
+        ActorEditing = new ActorEditController(this);
         PropertyEditing = new PropertyEditController(this);
         Persistence = new ScenePersistence(this);
         GeometryEditing = new GeometryEditController(this);
@@ -205,12 +207,14 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     /// <summary>Whether the selection has anything deletable — a frame object or a collision placement.</summary>
     public bool CanDeleteSelection() =>
-        Editing.CanDeleteSelection() || CollisionEditing.HasCollisionSelection() || CrashEditing.HasCrashSelection();
+        Editing.CanDeleteSelection() || CollisionEditing.HasCollisionSelection() || CrashEditing.HasCrashSelection()
+        || ActorEditing.HasActorSelection();
 
     /// <summary>Deletes the selection: collision placements from their .col, frame objects from their
     /// FrameResource — both undoable and both persisted by Save/Build.</summary>
     public void DeleteSelected()
     {
+        ActorEditing.DeleteSelected();     // actors (drops their record from the .act pack)
         CollisionEditing.DeleteSelected(); // collision instances (drops them from the selection)
         CrashEditing.DeleteSelected();     // city_crash placements, in both seasons when linked
         Editing.DeleteSelected();          // frame objects (its DeletableRoots excludes collision)

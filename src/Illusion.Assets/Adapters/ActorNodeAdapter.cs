@@ -62,7 +62,8 @@ public sealed class ActorNodeAdapter : IFrameNode, IPropertySource
     /// <summary>The wrapped actor — the property descriptors read it directly.</summary>
     public ActorEntry Actor { get; }
 
-    internal ActorPlacements Placements { get; }
+    /// <summary>The placements this actor belongs to — the viewport asks them whether it still has a glyph.</summary>
+    public ActorPlacements Placements { get; }
 
     /// <summary>The frame object this actor places, when this scene carries it; null for the ambient sounds and
     /// script hooks that name a frame living elsewhere.</summary>

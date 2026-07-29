@@ -249,7 +249,7 @@ internal sealed class TransformEditController
     /// <summary>Whether the selection has at least one frame object the duplicator can copy.</summary>
     public bool CanDuplicateSelection() =>
         _host.Selection.Selected.Any(n => n.Source is IFrameNode fn
-            && n.Source is not (CollisionInstanceAdapter or TranslokatorInstanceAdapter)
+            && n.Source is not (CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter)
             && FrameDuplicator.CanDuplicate(fn));
 
     /// <summary>Duplicates the selected static meshes (Ctrl+D / context menu) as ONE undoable edit: deep,
@@ -263,7 +263,7 @@ internal sealed class TransformEditController
         foreach (SceneNode n in _host.Selection.Selected.ToList())
         {
             if (n.Source is not IFrameNode fn) continue;
-            if (n.Source is CollisionInstanceAdapter or TranslokatorInstanceAdapter) continue;
+            if (n.Source is CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter) continue;
             if (n.Parent is null || n.OwningDocumentNode()?.Source is not ISceneDocument doc) continue;
             FrameDuplicator.DuplicatedObject? dup = FrameDuplicator.TryDuplicate(doc, fn, out string? reason);
             if (dup == null)
@@ -429,8 +429,11 @@ internal sealed class TransformEditController
         var roots = new List<SceneNode>();
         foreach (SceneNode n in _host.Selection.Selected)
             // Collision placements and crash props are IFrameNode too, but they delete through their own
-            // controllers (the .col and .tra paths), not this one.
-            if (n.Source is IFrameNode and not (CollisionInstanceAdapter or TranslokatorInstanceAdapter)
+            // controllers (the .col and .tra paths), not this one. An actor is an IFrameNode as well and has
+            // no frame object at all — this path would drop its tree row while its geometry stayed in the
+            // scene, and undo would then try to re-insert the row where nothing removed one.
+            if (n.Source is IFrameNode
+                    and not (CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter)
                 && !HasSelectedAncestorNode(n, sel))
                 roots.Add(n);
         return roots;

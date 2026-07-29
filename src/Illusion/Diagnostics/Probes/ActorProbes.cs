@@ -367,6 +367,61 @@ internal static class ActorProbes
             Check("the packs it would write are on disk",
                 placements.Packs.Count > 0 && placements.Packs.All(p => File.Exists(p.Path)),
                 string.Join(", ", placements.Packs.Select(p => Path.GetFileName(p.Path))));
+
+            // ── Deleting an actor: the record leaves the pack, the file re-reads with one actor fewer, and
+            //    undo restores it byte for byte. This is what proves the recomputed offset table: the removal
+            //    shifts every item after it, so a stale table would corrupt the file immediately.
+            if (placements.Packs.Count > 0)
+            {
+                (ActorsFile pack3, _) = placements.Packs[0];
+                if (pack3.Actors.Count >= 2)
+                {
+                    byte[] original = pack3.ToBytes();
+                    int countBefore = pack3.Actors.Count;
+                    int refsBefore = pack3.SceneReferences.Count;
+
+                    // Prefer an actor that actually owns a scene reference — that is the case where removal has
+                    // to clean up more than the item — but never the last row, so the offset shift is exercised.
+                    int victimRow = countBefore / 2;
+                    for (int i = 0; i < countBefore - 1; i++)
+                    {
+                        if (pack3.SceneReferences.Any(r => r.FrameHash == pack3.Actors[i].FrameHash)) { victimRow = i; break; }
+                    }
+                    ActorEntry victim = pack3.Actors[victimRow];
+                    string victimName = victim.EntityName;
+                    ulong victimHash = victim.FrameHash;
+                    bool hadReference = pack3.SceneReferences.Any(r => r.FrameHash == victimHash);
+                    ActorEntry after = pack3.Actors[victimRow + 1];
+
+                    ActorRemoval removal = pack3.Remove(victim);
+                    byte[] shortened = pack3.ToBytes();
+
+                    Check("removing an actor drops exactly one row",
+                        pack3.Actors.Count == countBefore - 1, $"{countBefore} → {pack3.Actors.Count}");
+                    Check("the pack shrinks", shortened.Length < original.Length,
+                        $"{original.Length} → {shortened.Length} bytes");
+                    Check("its scene reference goes with it",
+                        pack3.SceneReferences.Count == refsBefore - (hadReference ? 1 : 0),
+                        $"{refsBefore} → {pack3.SceneReferences.Count} (had one: {hadReference})");
+                    Check("the rows after it renumber",
+                        after.Index == victimRow, $"{after.EntityName} is row {after.Index}");
+
+                    // The shortened pack must be readable, and read back one actor fewer with the rest intact.
+                    using var shortStream = new MemoryStream(shortened, writable: false);
+                    ActorsFile reloaded = ActorsFile.Read(shortStream);
+                    Check("the shortened pack re-reads",
+                        reloaded.Actors.Count == countBefore - 1
+                        && reloaded.Actors.All(a => a.IsTyped)
+                        && reloaded.Actors.All(a => a.EntityName != victimName),
+                        $"{reloaded.Actors.Count} actors, all typed");
+                    Check("the shortened pack is a fixpoint",
+                        reloaded.ToBytes().AsSpan().SequenceEqual(shortened));
+
+                    pack3.Restore(removal);
+                    Check("undo restores the pack byte for byte",
+                        pack3.ToBytes().AsSpan().SequenceEqual(original), $"{pack3.Actors.Count} actors");
+                }
+            }
         }
         catch (Exception ex)
         {

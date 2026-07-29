@@ -98,6 +98,68 @@ public sealed class ActorsFile
     }
 
 
+    /// <summary>
+    /// Removes an actor from the pack: its item, its slot in the offset table and — when nothing else points at
+    /// the same frame — its scene reference. The offsets are recomputed on write, so the remaining actors are
+    /// unaffected; the entity-init property table is left alone, since <see cref="ActorEntry.InitPropId"/>
+    /// indexes into it and rows may be shared. Returns a token <see cref="Restore"/> puts back, for undo.
+    /// </summary>
+    public ActorRemoval Remove(ActorEntry actor)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        int index = ActorList.IndexOf(actor);
+        if (index < 0 || index >= Binary.Items.Count)
+        {
+            throw new InvalidOperationException($"actor '{actor.EntityName}' does not belong to this pack");
+        }
+
+        Native.Model.ActorItemW item = Binary.Items[index];
+        Binary.Items.RemoveAt(index);
+        if (index < Binary.ItemOffsets.Count) Binary.ItemOffsets.RemoveAt(index);
+        ActorList.RemoveAt(index);
+
+        // The scene reference is per frame, and the shipped game never has two actors on one frame — but a
+        // reference that outlives its actor would point the engine at a prototype nothing places.
+        ActorSceneReference? reference = null;
+        int referenceIndex = -1;
+        if (actor.FrameHash != 0 && !ActorList.Any(a => a.FrameHash == actor.FrameHash))
+        {
+            referenceIndex = SceneReferences.FindIndex(r => r.FrameHash == actor.FrameHash);
+            if (referenceIndex >= 0)
+            {
+                reference = SceneReferences[referenceIndex];
+                SceneReferences.RemoveAt(referenceIndex);
+            }
+        }
+
+        Reindex();
+        return new ActorRemoval(actor, item, index, reference, referenceIndex);
+    }
+
+    /// <summary>Puts a removed actor back exactly where it was (undo).</summary>
+    public void Restore(ActorRemoval removal)
+    {
+        ArgumentNullException.ThrowIfNull(removal);
+        int index = Math.Clamp(removal.Index, 0, ActorList.Count);
+
+        ActorList.Insert(index, removal.Actor);
+        Binary.Items.Insert(Math.Min(index, Binary.Items.Count), removal.Item);
+        // The offset value itself is recomputed on write; the slot only has to exist.
+        Binary.ItemOffsets.Insert(Math.Min(index, Binary.ItemOffsets.Count), 0);
+        if (removal.Reference != null)
+        {
+            SceneReferences.Insert(Math.Clamp(removal.ReferenceIndex, 0, SceneReferences.Count), removal.Reference);
+        }
+        Reindex();
+    }
+
+    // Item rows are positional: after an add or a remove, every actor's row has to match its slot again, since
+    // the write-back of an edited transform keys on it.
+    private void Reindex()
+    {
+        for (int i = 0; i < ActorList.Count; i++) ActorList[i].Index = i;
+    }
+
     public byte[] ToBytes()
     {
         using var stream = new MemoryStream();
@@ -121,7 +183,7 @@ public sealed class ActorsFile
 public sealed class ActorEntry
 {
     /// <summary>Row in the pack's item table.</summary>
-    public required int Index { get; init; }
+    public int Index { get; internal set; }
 
     /// <summary>False for an item the core could not type exactly (unknown field shape) — it rides raw
     /// and its fields below are unset. Such an actor cannot be placed or edited.</summary>
@@ -160,6 +222,30 @@ public sealed class ActorEntry
 
     /// <summary>The spawn transform in the same rotation·scale convention frame matrices use.</summary>
     public Matrix4x4 Transform => MatrixExtensions.SetMatrix(Rotation, Scale, Position);
+}
+
+/// <summary>
+/// What <see cref="ActorsFile.Remove"/> took out, and what <see cref="ActorsFile.Restore"/> needs to put it
+/// back: the actor, its wire item, the row both sat in, and the scene reference that went with it (null when
+/// the actor had none, or when another actor still points at the same frame).
+/// </summary>
+public sealed class ActorRemoval
+{
+    internal ActorRemoval(ActorEntry actor, Native.Model.ActorItemW item, int index,
+        ActorSceneReference? reference, int referenceIndex)
+    {
+        Actor = actor;
+        Item = item;
+        Index = index;
+        Reference = reference;
+        ReferenceIndex = referenceIndex;
+    }
+
+    public ActorEntry Actor { get; }
+    internal Native.Model.ActorItemW Item { get; }
+    public int Index { get; }
+    internal ActorSceneReference? Reference { get; }
+    internal int ReferenceIndex { get; }
 }
 
 /// <summary>Links an actor to a frame object: the frame's name hash, the name's position in the string

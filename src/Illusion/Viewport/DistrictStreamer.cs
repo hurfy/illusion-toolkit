@@ -164,6 +164,17 @@ internal sealed class DistrictStreamer
         }
     }
 
+    /// <summary>Marks every resident district's glyph buffer for rebuild — after an actor was deleted or
+    /// restored, the buffers no longer match the actor list.</summary>
+    public void RefreshActorMarkers()
+    {
+        foreach (SceneNode sdsNode in _actorPickables.Keys) _actorMarkersDirty.Add(sdsNode);
+    }
+
+    /// <summary>The GPU meshes of the subtree an actor places (its prototype's geometry).</summary>
+    public void CollectPlacedMeshes(FrameObjectBase frame, List<GpuMesh> into) =>
+        CollectSubtreeMeshes(frame, into, new HashSet<FrameObjectBase>());
+
     // Re-uploads the glyph buffers of districts whose visibility changed this frame.
     private void RebuildDirtyActorMarkers()
     {
@@ -173,10 +184,15 @@ internal sealed class DistrictStreamer
         {
             if (!_actorPickables.TryGetValue(sdsNode, out List<(SceneNode Node, Vector3 Position)>? pickables)) continue;
 
+            // A deleted actor is gone from the placements but its row object is still in this list, so the
+            // check is "still placed AND visible" rather than visibility alone.
             var visible = new List<ActorEntry>(pickables.Count);
             foreach ((SceneNode node, _) in pickables)
             {
-                if (node.IsVisible && node.Source is ActorNodeAdapter a) visible.Add(a.Actor);
+                if (node.IsVisible && node.Source is ActorNodeAdapter a && a.Placements.HasGlyph(a.Actor))
+                {
+                    visible.Add(a.Actor);
+                }
             }
             _host.Rnd.SetActorDistrict(sdsNode, visible.Count > 0 ? ActorMarkerBuilder.Build(visible) : null);
         }

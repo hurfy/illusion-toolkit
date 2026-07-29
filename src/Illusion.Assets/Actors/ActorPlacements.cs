@@ -42,11 +42,15 @@ public sealed class ActorPlacements
     public int UnresolvedCount { get; private init; }
 
     /// <summary>Every actor the scene's packs declare, in pack order.</summary>
-    public IReadOnlyList<ActorEntry> All { get; private init; } = [];
+    public IReadOnlyList<ActorEntry> All => _allList;
+
+    private List<ActorEntry> _allList = new();
 
     /// <summary>The actors nothing draws: either their frame is not in this scene, or it is but its subtree
     /// carries no mesh. These are what the viewport marks with a glyph — see <see cref="ActorMarkerBuilder"/>.</summary>
-    public IReadOnlyList<ActorEntry> Invisible { get; private init; } = [];
+    public IReadOnlyList<ActorEntry> Invisible => _invisibleList;
+
+    private List<ActorEntry> _invisibleList = new();
 
     /// <summary>Whether this actor is one of the <see cref="Invisible"/> ones, i.e. whether it is represented by
     /// a glyph rather than by geometry.</summary>
@@ -100,6 +104,46 @@ public sealed class ActorPlacements
     {
         if (TargetOf(actor) is not { } target) return;
         Respread(target, actor.Transform, _byFrame, new HashSet<FrameObjectBase>());
+    }
+
+    /// <summary>
+    /// Drops an actor from the resolved set: it no longer places anything, so the frames it covered fall back to
+    /// their own transforms (which is the origin — they are prototypes). The frame objects themselves stay in the
+    /// FrameResource; without an actor the game never spawns them, exactly as it never spawns an unreferenced
+    /// prototype. Returns the frame it used to place, so the caller can hide that geometry.
+    /// </summary>
+    public FrameObjectBase? Detach(ActorEntry actor)
+    {
+        _allList.Remove(actor);
+        _invisibleList.Remove(actor);
+        _invisibleSet.Remove(actor);
+        _packByActor.Remove(actor);
+
+        if (!_targetByActor.Remove(actor, out FrameObjectBase? target)) return null;
+        _actorByTarget.Remove(target);
+        Unclaim(target, new HashSet<FrameObjectBase>());
+        return target;
+    }
+
+    /// <summary>Re-attaches an actor dropped by <see cref="Detach"/> (undo), restoring its placement.</summary>
+    public void Attach(ActorEntry actor, FrameObjectBase? target, int index, bool hadGlyph)
+    {
+        _allList.Insert(Math.Clamp(index, 0, _allList.Count), actor);
+        if (hadGlyph && _invisibleSet.Add(actor)) _invisibleList.Add(actor);
+
+        if (target == null) return;
+        _targetByActor[actor] = target;
+        _actorByTarget[target] = actor;
+        Claim(target, actor, _actorByCoveredFrame);
+        Respread(target, actor.Transform, _byFrame, new HashSet<FrameObjectBase>());
+    }
+
+    private void Unclaim(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        _byFrame.Remove(frame);
+        _actorByCoveredFrame.Remove(frame);
+        foreach (FrameObjectBase child in frame.Children) Unclaim(child, seen);
     }
 
     /// <summary>
@@ -186,8 +230,8 @@ public sealed class ActorPlacements
         return new ActorPlacements(byFrame, actorByTarget)
         {
             UnresolvedCount = unresolved,
-            All = all,
-            Invisible = invisible,
+            _allList = all,
+            _invisibleList = invisible,
             _invisibleSet = new HashSet<ActorEntry>(invisible),
             _packByActor = packByActor,
             Packs = files ?? [],
