@@ -4,7 +4,7 @@
 
 <div align="center">
     <img src="https://img.shields.io/github/issues/hurfy/illusion-toolkit?style=for-the-badge" alt="open issues" />
-    <img src="https://img.shields.io/badge/version-0.3.1-blue?style=for-the-badge" alt="version" /></a>
+    <img src="https://img.shields.io/badge/version-0.4.0-blue?style=for-the-badge" alt="version" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/hurfy/illusion-toolkit?style=for-the-badge" alt="license" /></a>
 </div>
 
