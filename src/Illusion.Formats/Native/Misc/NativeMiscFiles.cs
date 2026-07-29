@@ -47,13 +47,21 @@ internal static class NativeMiscFiles
                 EntityHash = item.EntityHash,
                 FrameHash = item.FrameHash,
                 Position = item.Position,
-                // Straight through, no convention change. A conjugate here was tried and reverted: it is
-                // byte-neutral for an untouched pack (conjugating twice restores the bits), so no round-trip
-                // check can see it, but it silently turns every vanilla placement in the viewport — which is
-                // how it was caught. The evidence for it was a comparison against collision hulls, and those
-                // carry their own REFLECTED convention (TransformMath.CollisionEulerToQuaternion), so the
-                // partial "conjugate matches" correlation it produced said nothing about this format.
-                Rotation = new Quaternion(item.RotationX, item.RotationY, item.RotationZ, item.RotationW),
+                // The pack stores the INVERSE of the orientation the engine spawns the actor with, so the
+                // toolkit turns it back here and turns it forward again on write.
+                //
+                // Settled by looking, not by inference: an UNTOUCHED gate (PO_brana_GAME00 in uppertown) faces
+                // one way in the game and the mirrored way in the viewport, with nothing edited in between. An
+                // earlier round of this same change argued from .col hulls standing at actors' positions —
+                // --probe-actor-orient has since shown those hulls belong to the static world nearby and never
+                // to the actor's own object (0 pairs across 8 districts, though 392 of distillery's 720
+                // prototypes do carry a collision child), so that argument proved nothing either way and the
+                // change was reverted for a day on the strength of it.
+                //
+                // Nothing else can see this: conjugating on both sides restores the exact bits, so the corpus
+                // fixpoint and every round trip stay green whichever way it goes. What sees it is the pinned
+                // orientations in ActorProbes and a pair of eyes on the game.
+                Rotation = Quaternion.Conjugate(new Quaternion(item.RotationX, item.RotationY, item.RotationZ, item.RotationW)),
                 Scale = item.Scale,
                 Flags = item.Flags,
                 InitPropId = item.InitPropId,
@@ -74,10 +82,13 @@ internal static class NativeMiscFiles
             }
             Model.ActorItemW item = file.Binary.Items[actor.Index];
             item.Position = actor.Position;
-            item.RotationX = actor.Rotation.X;
-            item.RotationY = actor.Rotation.Y;
-            item.RotationZ = actor.Rotation.Z;
-            item.RotationW = actor.Rotation.W;
+            // Back into the pack's inverted convention (see ReadActors) — an untouched actor still re-saves
+            // byte for byte, since conjugating twice restores the bits.
+            Quaternion stored = Quaternion.Conjugate(actor.Rotation);
+            item.RotationX = stored.X;
+            item.RotationY = stored.Y;
+            item.RotationZ = stored.Z;
+            item.RotationW = stored.W;
             item.Scale = actor.Scale;
         }
 

@@ -22,7 +22,7 @@ internal static class ActorProbes
 {
     /// <summary>
     /// Actor placement for one district: reads the pack, resolves it against the frame resource and checks
-    /// that every placed prototype now stands where its actor says — and that nothing else moved. Also
+    /// that every placed prototype now stands where its actor says вЂ” and that nothing else moved. Also
     /// re-saves the pack and requires the bytes back unchanged, since reading now types every actor.
     /// Output: %TEMP%\illusion_actors.txt
     /// </summary>
@@ -35,7 +35,7 @@ internal static class ActorProbes
         void Check(string name, bool ok, string detail = "")
         {
             if (ok) pass++; else fail++;
-            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " вЂ” " + detail)}");
         }
 
         try
@@ -50,11 +50,11 @@ internal static class ActorProbes
             if (fr?.FrameObjects == null) { sb.AppendLine("district carries no frame objects"); return; }
 
             string[] packFiles = scene.Manifest.GetFiles("Actors").ToArray();
-            sb.AppendLine($"ACTOR PLACEMENT PROBE — district={district}, packs={packFiles.Length}");
+            sb.AppendLine($"ACTOR PLACEMENT PROBE вЂ” district={district}, packs={packFiles.Length}");
             Check("district ships an actor pack", packFiles.Length > 0, string.Join(", ", packFiles.Select(Path.GetFileName)));
             if (packFiles.Length == 0) return;
 
-            // ── The pack itself: typed and byte-exact ──
+            // в”Ђв”Ђ The pack itself: typed and byte-exact в”Ђв”Ђ
             var packs = new List<ActorsFile>();
             int typed = 0, raw = 0, fixpoint = 0;
             foreach (string file in packFiles)
@@ -67,8 +67,8 @@ internal static class ActorProbes
             Check("packs re-save byte-identically", fixpoint == packFiles.Length, $"{fixpoint}/{packFiles.Length}");
             Check("every actor is typed", raw == 0, $"typed={typed}, raw={raw}");
 
-            // ── Resolution, on the very scene the viewport loads (a second FrameResource would be a
-            //    different set of objects, and the placements would not apply to it) ──
+            // в”Ђв”Ђ Resolution, on the very scene the viewport loads (a second FrameResource would be a
+            //    different set of objects, and the placements would not apply to it) в”Ђв”Ђ
             (List<SdsFrameNode> roots, List<MeshData> meshes, ISceneDocument? loaded) =
                 SdsMeshLoader.LoadHierarchy(new FileInfo(sds));
             Check("district loads", loaded is SceneDocumentAdapter, $"{roots.Count} roots, {meshes.Count} meshes");
@@ -87,8 +87,8 @@ internal static class ActorProbes
             }
             foreach (SdsFrameNode r in roots) Walk(r);
 
-            // ── The prototypes an actor places are parked at the origin; with the placement folded in they
-            //    report the actor's own position — which is what the gizmo and the renderer read ──
+            // в”Ђв”Ђ The prototypes an actor places are parked at the origin; with the placement folded in they
+            //    report the actor's own position вЂ” which is what the gizmo and the renderer read в”Ђв”Ђ
             int placedAtOrigin = 0, placedElsewhere = 0, matched = 0, mismatched = 0;
             string firstMismatch = "";
             foreach (FrameNodeAdapter node in nodes)
@@ -104,7 +104,7 @@ internal static class ActorProbes
                 {
                     mismatched++;
                     if (firstMismatch == "")
-                        firstMismatch = $"{node.Frame.Name} → {node.WorldTransform.Translation} vs actor {actor.Position}";
+                        firstMismatch = $"{node.Frame.Name} в†’ {node.WorldTransform.Translation} vs actor {actor.Position}";
                 }
             }
             Check("placed prototypes sit at the origin in the frame resource", placedElsewhere == 0,
@@ -112,7 +112,7 @@ internal static class ActorProbes
             Check("scene nodes report the actor's position", mismatched == 0 && matched > 0,
                 $"matched={matched}, off={mismatched} {firstMismatch}");
 
-            // ── Nothing outside the placed subtrees moved ──
+            // в”Ђв”Ђ Nothing outside the placed subtrees moved в”Ђв”Ђ
             int untouched = 0, moved = 0;
             foreach (FrameNodeAdapter node in nodes)
             {
@@ -122,7 +122,7 @@ internal static class ActorProbes
             }
             Check("frames no actor places keep their own world transform", moved == 0, $"untouched={untouched}");
 
-            // ── The meshes under a placed prototype travel with it: the render matrix must agree with the node ──
+            // в”Ђв”Ђ The meshes under a placed prototype travel with it: the render matrix must agree with the node в”Ђв”Ђ
             int placedMeshes = 0, meshOff = 0;
             string firstMeshOff = "";
             foreach (FrameNodeAdapter node in nodes)
@@ -143,7 +143,7 @@ internal static class ActorProbes
             Check("placed meshes render at their node's placed transform", meshOff == 0 && placedMeshes > 0,
                 $"meshes={placedMeshes}, off={meshOff} {firstMeshOff}");
 
-            // ── A click on placed geometry must resolve to the ACTOR, not to the prototype frame ──
+            // в”Ђв”Ђ A click on placed geometry must resolve to the ACTOR, not to the prototype frame в”Ђв”Ђ
             int governed = 0, ungoverned = 0, wrongOwner = 0;
             string firstWrongOwner = "";
             foreach (FrameNodeAdapter node in nodes)
@@ -160,7 +160,7 @@ internal static class ActorProbes
                         continue;
                     }
                     // The placement folded into this node must be the covering actor's own transform: the node's
-                    // world is the frame's own world followed by that actor's matrix (not a plain offset — the
+                    // world is the frame's own world followed by that actor's matrix (not a plain offset вЂ” the
                     // actor's rotation turns the whole subtree around it).
                     FrameObjectBase? target = placements.TargetOf(covering);
                     System.Numerics.Matrix4x4 expected = node.Frame.WorldTransform * covering.Transform;
@@ -168,7 +168,7 @@ internal static class ActorProbes
                     {
                         wrongOwner++;
                         if (firstWrongOwner == "")
-                            firstWrongOwner = $"{node.Frame.Name} → {covering.EntityName}: " +
+                            firstWrongOwner = $"{node.Frame.Name} в†’ {covering.EntityName}: " +
                                               $"{node.WorldTransform.Translation} vs {expected.Translation}";
                         continue;
                     }
@@ -184,7 +184,7 @@ internal static class ActorProbes
             Check("every placed frame resolves back to its actor", wrongOwner == 0,
                 $"governed={governed}, plain={ungoverned}, wrong={wrongOwner} {firstWrongOwner}");
 
-            // ── The actors nothing draws: census, glyphs, property panel ──
+            // в”Ђв”Ђ The actors nothing draws: census, glyphs, property panel в”Ђв”Ђ
             sb.AppendLine($"invisible actors: {placements.Invisible.Count} of {placements.All.Count}");
             foreach (var g in placements.All.GroupBy(a => ActorCategories.Of(a.Type)).OrderByDescending(g => g.Count()))
             {
@@ -218,7 +218,7 @@ internal static class ActorProbes
             }
             Check("each glyph is centred on its actor", centred, firstOff);
 
-            // ── Ray-picking the glyphs: aim at each one from a few metres away and expect that one back ──
+            // в”Ђв”Ђ Ray-picking the glyphs: aim at each one from a few metres away and expect that one back в”Ђв”Ђ
             if (placements.Invisible.Count > 0)
             {
                 var points = new List<System.Numerics.Vector3>(placements.Invisible.Count);
@@ -253,7 +253,7 @@ internal static class ActorProbes
                     {
                         wrong++;
                         if (firstBad == "")
-                            firstBad = $"{placements.Invisible[i].EntityName} → {placements.Invisible[hit].EntityName} " +
+                            firstBad = $"{placements.Invisible[i].EntityName} в†’ {placements.Invisible[hit].EntityName} " +
                                        $"(t={t:F2}, off-ray by {perp:F2})";
                     }
                 }
@@ -278,7 +278,7 @@ internal static class ActorProbes
                 Check("the property panel has the actor's fields", groups.Count >= 2 && fields >= 12,
                     $"{groups.Count} groups, {fields} fields");
 
-                // The transform is not a catalog field — the adapter is an IFrameNode, so the Object tab and the
+                // The transform is not a catalog field вЂ” the adapter is an IFrameNode, so the Object tab and the
                 // gizmo read it straight off the actor.
                 Check("the actor reports its spawn transform as a frame node",
                     Approx(adapter.LocalTransform.Translation, sample.Position)
@@ -289,7 +289,7 @@ internal static class ActorProbes
                     groups.SelectMany(g => g.Properties).All(p => p.IsReadOnly && p.Set == null));
             }
 
-            // ── Moving an actor: the subtree follows, the pack survives a round trip, nothing else shifts ──
+            // в”Ђв”Ђ Moving an actor: the subtree follows, the pack survives a round trip, nothing else shifts в”Ђв”Ђ
             ActorEntry? movable = null;
             foreach (ActorEntry a in placements.All)
             {
@@ -314,19 +314,19 @@ internal static class ActorProbes
                 mover.LocalTransform = mover.LocalTransform * System.Numerics.Matrix4x4.CreateTranslation(offset);
 
                 Check("moving an actor moves its own position",
-                    Approx(movable.Position, before + offset, 1e-2f), $"{before} → {movable.Position}");
+                    Approx(movable.Position, before + offset, 1e-2f), $"{before} в†’ {movable.Position}");
                 Check("the placed subtree follows the actor",
                     Approx(document.Node(target).WorldTransform.Translation, movable.Position, 1e-2f),
                     $"{target.Name} at {document.Node(target).WorldTransform.Translation}");
                 Check("no other actor moved", Approx(neighbour.Position, neighbourBefore));
 
                 // Write the edited pack out and read it back: the move must survive, and the file must stay the
-                // same size — the transform is fixed-width, so no offset in the pack can have shifted.
+                // same size вЂ” the transform is fixed-width, so no offset in the pack can have shifted.
                 string temp = Path.Combine(Path.GetTempPath(), "illusion_actor_move.act");
                 SdsActorsSaver.Save(pack2, temp);
                 byte[] packAfter = File.ReadAllBytes(temp);
                 Check("an edited pack keeps its size", packAfter.Length == packBefore.Length,
-                    $"{packBefore.Length} → {packAfter.Length}");
+                    $"{packBefore.Length} в†’ {packAfter.Length}");
 
                 ActorsFile reread = ActorsFile.Load(temp);
                 ActorEntry roundTripped = reread.Actors[movable.Index];
@@ -349,10 +349,10 @@ internal static class ActorProbes
             }
             else
             {
-                sb.AppendLine("(no movable actor with a frame in this district — move checks skipped)");
+                sb.AppendLine("(no movable actor with a frame in this district вЂ” move checks skipped)");
             }
 
-            // ── An actor edit must reach persistence: the tree enlists an edit by walking UP to the nearest
+            // в”Ђв”Ђ An actor edit must reach persistence: the tree enlists an edit by walking UP to the nearest
             //    ISceneDocument, and the actors hang beside the FrameResource branch, not under it. Without a
             //    document on the Actors node, moving an actor marked nothing and a build had nothing to pack.
             var actorsDoc = new ActorDocumentAdapter(placements, new FileInfo(sds), document);
@@ -369,7 +369,7 @@ internal static class ActorProbes
                 placements.Packs.Count > 0 && placements.Packs.All(p => File.Exists(p.Path)),
                 string.Join(", ", placements.Packs.Select(p => Path.GetFileName(p.Path))));
 
-            // ── Deleting an actor: the record leaves the pack, the file re-reads with one actor fewer, and
+            // в”Ђв”Ђ Deleting an actor: the record leaves the pack, the file re-reads with one actor fewer, and
             //    undo restores it byte for byte. This is what proves the recomputed offset table: the removal
             //    shifts every item after it, so a stale table would corrupt the file immediately.
             if (placements.Packs.Count > 0)
@@ -381,8 +381,8 @@ internal static class ActorProbes
                     int countBefore = pack3.Actors.Count;
                     int refsBefore = pack3.SceneReferences.Count;
 
-                    // Prefer an actor that actually owns a scene reference — that is the case where removal has
-                    // to clean up more than the item — but never the last row, so the offset shift is exercised.
+                    // Prefer an actor that actually owns a scene reference вЂ” that is the case where removal has
+                    // to clean up more than the item вЂ” but never the last row, so the offset shift is exercised.
                     int victimRow = countBefore / 2;
                     for (int i = 0; i < countBefore - 1; i++)
                     {
@@ -398,12 +398,12 @@ internal static class ActorProbes
                     byte[] shortened = pack3.ToBytes();
 
                     Check("removing an actor drops exactly one row",
-                        pack3.Actors.Count == countBefore - 1, $"{countBefore} → {pack3.Actors.Count}");
+                        pack3.Actors.Count == countBefore - 1, $"{countBefore} в†’ {pack3.Actors.Count}");
                     Check("the pack shrinks", shortened.Length < original.Length,
-                        $"{original.Length} → {shortened.Length} bytes");
+                        $"{original.Length} в†’ {shortened.Length} bytes");
                     Check("its scene reference goes with it",
                         pack3.SceneReferences.Count == refsBefore - (hadReference ? 1 : 0),
-                        $"{refsBefore} → {pack3.SceneReferences.Count} (had one: {hadReference})");
+                        $"{refsBefore} в†’ {pack3.SceneReferences.Count} (had one: {hadReference})");
                     Check("the rows after it renumber",
                         after.Index == victimRow, $"{after.EntityName} is row {after.Index}");
 
@@ -433,7 +433,7 @@ internal static class ActorProbes
                         ActorRemoval firstRemoval = pack3.Remove(firstVictim);
                         ActorRemoval secondRemoval = pack3.Remove(secondVictim);
                         Check("deleting two actors drops exactly two rows",
-                            pack3.Actors.Count == countBefore - 2, $"{countBefore} → {pack3.Actors.Count}");
+                            pack3.Actors.Count == countBefore - 2, $"{countBefore} в†’ {pack3.Actors.Count}");
 
                         pack3.Restore(secondRemoval);
                         pack3.Restore(firstRemoval);
@@ -442,7 +442,7 @@ internal static class ActorProbes
                             $"rows {firstVictim.Index} and {secondVictim.Index}");
                     }
 
-                    // ── Duplicating: a glyph-only actor copies; one that places a scene object is refused,
+                    // в”Ђв”Ђ Duplicating: a glyph-only actor copies; one that places a scene object is refused,
                     //    because that copy would need its own clone of the object.
                     ActorEntry? loose = pack3.Actors.FirstOrDefault(a =>
                         a.IsTyped && !pack3.SceneReferences.Any(r => r.FrameHash == a.FrameHash));
@@ -497,7 +497,7 @@ internal static class ActorProbes
         catch (Exception ex)
         {
             fail++;
-            sb.AppendLine("[FAIL] unexpected exception — " + ex);
+            sb.AppendLine("[FAIL] unexpected exception вЂ” " + ex);
         }
         finally
         {
@@ -507,17 +507,17 @@ internal static class ActorProbes
     }
 
     /// <summary>
-    /// Which way an actor really turns the object it places — measured, not assumed.
+    /// Which way an actor really turns the object it places вЂ” measured, not assumed.
     ///
     /// The oracle is the district's collision file. An actor's prototype often carries a FrameObjectCollision
     /// child, and the .col ships that same hull with its own absolute world placement. The game collides with
     /// the hull, so the hull's placement IS where and how the object stands in the game; if our actor placement
     /// disagreed, you would walk through the visible object and bump into thin air. That makes it independent
-    /// evidence about the .act convention — unlike comparing raw quaternions between the two formats, which
+    /// evidence about the .act convention вЂ” unlike comparing raw quaternions between the two formats, which
     /// only ever showed that they are two formats.
     ///
     /// The comparison is over full world matrices: the collision child's own transform inside the prototype,
-    /// followed by the actor's placement. A wrong rotation then shows up twice — the hull faces the wrong way,
+    /// followed by the actor's placement. A wrong rotation then shows up twice вЂ” the hull faces the wrong way,
     /// and (whenever the child sits off the prototype's origin) it also stands in the wrong place, which no
     /// symmetry can hide.
     /// Output: %TEMP%\illusion_actor_orient.txt
@@ -534,9 +534,9 @@ internal static class ActorProbes
 
             string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
             string? colPath = Directory.GetFiles(extracted, "*.col", SearchOption.AllDirectories).FirstOrDefault();
-            sb.AppendLine($"ACTOR ORIENTATION ORACLE — district={district}" +
+            sb.AppendLine($"ACTOR ORIENTATION ORACLE вЂ” district={district}" +
                           (nameFilter == null ? "" : $", filter='{nameFilter}'"));
-            if (colPath == null) { sb.AppendLine("district ships no .col — nothing to measure against"); return; }
+            if (colPath == null) { sb.AppendLine("district ships no .col вЂ” nothing to measure against"); return; }
 
             Formats.Collisions.CollisionFile collision = Formats.Collisions.CollisionFile.Load(colPath);
             var byHash = new Dictionary<ulong, List<Formats.Collisions.CollisionInstance>>();
@@ -577,7 +577,7 @@ internal static class ActorProbes
                         TransformMath.Compose(System.Numerics.Quaternion.Conjugate(actor.Rotation),
                             actor.Scale, actor.Position);
 
-                    // The nearest hull copy — several identical hulls can share one hash across the district.
+                    // The nearest hull copy вЂ” several identical hulls can share one hash across the district.
                     Formats.Collisions.CollisionInstance? best = null;
                     float bestD = float.MaxValue;
                     foreach (Formats.Collisions.CollisionInstance inst in instances)
@@ -597,15 +597,15 @@ internal static class ActorProbes
                     bool storedFits = errStored < 0.05f;
                     bool flippedFits = errFlipped < 0.05f;
 
-                    if (storedFits && flippedFits) either++;        // a half turn or no turn at all — says nothing
+                    if (storedFits && flippedFits) either++;        // a half turn or no turn at all вЂ” says nothing
                     else if (storedFits) asIs++;
                     else if (flippedFits) inverted++;
                     else neither++;
 
                     if (samples.Count < 12 && !(storedFits && flippedFits))
                     {
-                        samples.Add($"    {actor.EntityName} → {hull.Name}: as stored {errStored:F3}, " +
-                                    $"inverted {errFlipped:F3} → {(storedFits ? "AS STORED" : flippedFits ? "INVERTED" : "neither")}");
+                        samples.Add($"    {actor.EntityName} в†’ {hull.Name}: as stored {errStored:F3}, " +
+                                    $"inverted {errFlipped:F3} в†’ {(storedFits ? "AS STORED" : flippedFits ? "INVERTED" : "neither")}");
                     }
                 }
             }
@@ -615,7 +615,7 @@ internal static class ActorProbes
             sb.AppendLine($"paired with a hull: {paired}");
             sb.AppendLine($"    the actor's quaternion as stored fits the game's hull : {asIs}");
             sb.AppendLine($"    only its INVERSE fits                                 : {inverted}");
-            sb.AppendLine($"    both fit (half turn / no turn — no evidence either way): {either}");
+            sb.AppendLine($"    both fit (half turn / no turn вЂ” no evidence either way): {either}");
             sb.AppendLine($"    neither fits (hull is not this object's, or scaled)    : {neither}");
             if (samples.Count > 0)
             {
@@ -625,8 +625,8 @@ internal static class ActorProbes
 
             string verdict = asIs > 0 && inverted == 0 ? "the pack stores the orientation the game uses"
                 : inverted > 0 && asIs == 0 ? "the pack stores the INVERSE of the game's orientation"
-                : asIs == 0 && inverted == 0 ? "no decisive pair — nothing measured"
-                : "MIXED — the pairs disagree with each other, so neither reading is safe";
+                : asIs == 0 && inverted == 0 ? "no decisive pair вЂ” nothing measured"
+                : "MIXED вЂ” the pairs disagree with each other, so neither reading is safe";
             sb.AppendLine($"VERDICT: {verdict}");
         }
         catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
@@ -661,75 +661,76 @@ internal static class ActorProbes
     ///
     /// A rotation convention flip is invisible to every other check in this file: no translation moves, the
     /// pack still re-saves byte for byte (an inversion applied on both read and write is byte-neutral), and the
-    /// round-trip check compares the flipped value against itself. It shows up only as every placed object in
-    /// the game standing turned the wrong way — which is how the last one was found, by eye, after it shipped.
-    /// These lines are the state the viewport was verified against.
+    /// round-trip check compares the flipped value against itself. It shows up only as objects standing turned
+    /// the wrong way in the GAME вЂ” and the convention flipped twice in one day before anyone looked there.
+    /// These lines are that comparison, frozen: they are the state in which an untouched gate in uppertown
+    /// faces the same way in the viewport as it does in the game.
     ///
-    /// Regenerate deliberately — never to turn a red check green. The probe prints "PIN" lines for a district
-    /// it has none for; those are what belongs here, once the viewport has been re-checked against the game.
+    /// Regenerate deliberately вЂ” never to turn a red check green. The probe prints "PIN" lines for a district
+    /// it has none for; those belong here only once the viewport has been compared against the game again.
     /// </summary>
     private static readonly Dictionary<string, string[]> PinnedOrientations = new(StringComparer.OrdinalIgnoreCase)
     {
         ["distillery"] =
         [
-            "DE_lahev33|0.0000,0.0000,0.5792,0.8152|-1564.05,-111.59,2.63",
-            "2D_box38|0.0000,0.0000,-0.1147,0.9934|-1559.38,-114.92,4.98",
-            "2D_zidle14|0.0000,0.0000,-0.5927,0.8054|-1559.25,-109.77,-9.65",
-            "2D_zidle04|0.0000,0.0000,0.8115,0.5844|-1570.18,-88.66,-14.58",
-            "DE_lahev44|0.0000,0.0000,-0.0860,0.9963|-1559.77,-114.96,4.26",
-            "2D_ELECTR_38|0.0000,0.0000,0.7071,0.7071|-1565.03,-98.79,-12.84",
-            "X2D_box71|0.0000,0.0000,-0.7071,0.7071|-1554.59,-118.30,-13.66",
-            "X2D_box69|0.0000,0.0000,0.0872,0.9962|-1554.39,-115.20,-13.66",
-            "DE_bedna01>box_dI|-1562.55,-113.42,-0.17",
-            "DE_bedna10>box_dI|-1558.21,-120.50,-8.38",
-            "DE_bedna12>box_dI|-1562.64,-118.41,-11.58",
-            "DE_bedna16>box_dI|-1568.04,-108.82,-4.28",
+            "DE_lahev33|-0.0000,-0.0000,-0.5792,0.8152|-1560.28,-113.48,2.63",
+            "2D_box38|-0.0000,-0.0000,0.1147,0.9934|-1560.29,-114.47,4.98",
+            "2D_zidle14|-0.0000,-0.0000,0.5927,0.8054|-1563.07,-107.86,-9.65",
+            "2D_zidle04|-0.0000,-0.0000,-0.8115,0.5844|-1566.38,-90.56,-14.58",
+            "DE_lahev44|-0.0000,-0.0000,0.0860,0.9963|-1560.46,-114.61,4.26",
+            "2D_ELECTR_38|-0.0000,-0.0000,-0.7071,0.7071|-1561.03,-100.79,-12.84",
+            "X2D_box71|-0.0000,-0.0000,0.7071,0.7071|-1558.59,-116.30,-13.66",
+            "X2D_box69|-0.0000,-0.0000,-0.0872,0.9962|-1553.70,-115.55,-13.66",
+            "DE_bedna01>box_dI|-1561.82,-113.89,-0.17",
+            "DE_bedna10>box_dI|-1557.92,-120.68,-8.38",
+            "DE_bedna12>box_dI|-1561.91,-118.87,-11.58",
+            "DE_bedna16>box_dI|-1568.29,-108.67,-4.28",
         ],
         ["eastside"] =
         [
-            "AmbiRV_city10_train_whistle100|0.0000,0.0000,-0.7076,0.7066|154.85,143.35,-8.88",
-            "AmbiRV_city10_car_horn05|0.0000,0.0000,-0.6921,0.7218|-470.03,186.99,42.00",
-            "wanted57|0.0000,0.0000,-0.4617,0.8870|-15.63,80.45,-8.89",
-            "wanted58|0.0000,0.0000,-0.7065,0.7077|-47.21,418.02,-9.37",
-            "wanted61|-0.0267,0.0267,-0.7066,0.7066|95.57,261.06,-16.85",
-            "wanted62|0.0204,-0.0204,-0.7068,0.7068|-7.27,146.13,-9.53",
-            "wanted63|0.0000,0.0000,0.7066,0.7077|-120.18,412.67,-9.24",
-            "wanted64|-0.0158,-0.0158,0.7069,0.7069|-343.58,255.23,0.11",
+            "AmbiRV_city10_train_whistle100|-0.0000,-0.0000,0.7076,0.7066|150.85,145.35,-8.88",
+            "AmbiRV_city10_car_horn05|-0.0000,-0.0000,0.6921,0.7218|-474.03,188.99,42.00",
+            "wanted57|-0.0000,-0.0000,0.4617,0.8870|-18.90,82.09,-8.89",
+            "wanted58|-0.0000,-0.0000,0.7065,0.7077|-51.21,420.02,-9.37",
+            "wanted61|0.0267,-0.0267,0.7066,0.7066|91.35,262.83,-16.62",
+            "wanted62|-0.0204,0.0204,0.7068,0.7068|-11.10,148.30,-9.71",
+            "wanted63|-0.0000,-0.0000,-0.7066,0.7077|-116.18,410.67,-9.24",
+            "wanted64|0.0158,0.0158,-0.7069,0.7069|-339.44,253.09,0.16",
         ],
         ["port"] =
         [
-            "jachta01|0.0000,0.0000,0.1634,0.9866|-614.56,-856.14,-24.15",
-            "jachta02|0.0000,0.0000,-0.5884,0.8086|-466.80,-984.76,-24.15",
-            "jachta05|0.0000,0.0000,-0.7136,0.7006|-515.73,-823.65,-24.15",
-            "jachta06|0.0000,0.0000,-0.9872,0.1595|-632.75,-834.45,-24.15",
-            "jachta04|0.0000,0.0000,0.6903,0.7235|-491.03,-785.63,-24.15",
-            "jachta09|0.0000,0.0000,0.1634,0.9866|-656.64,-841.59,-24.15",
-            "boatXXL01|0.0000,0.0000,-0.7012,0.7130|-465.47,-790.49,-24.50",
-            "jachta10|0.0000,0.0000,0.7215,0.6924|-469.47,-916.70,-24.15",
-            "jachta00>teziste|-516.66,-921.70,-26.67",
-            "jachta01>teziste|-614.85,-858.43,-26.67",
-            "jachta04>teziste|-489.01,-786.74,-26.67",
-            "jachta05>teziste|-517.78,-822.60,-26.67",
+            "jachta01|-0.0000,-0.0000,-0.1634,0.9866|-613.27,-856.79,-24.15",
+            "jachta02|-0.0000,-0.0000,0.5884,0.8086|-470.61,-982.85,-24.15",
+            "jachta05|-0.0000,-0.0000,0.7136,0.7006|-519.73,-821.65,-24.15",
+            "jachta06|-0.0000,-0.0000,0.9872,0.1595|-634.01,-833.82,-24.15",
+            "jachta04|-0.0000,-0.0000,-0.6903,0.7235|-487.03,-787.63,-24.15",
+            "jachta09|-0.0000,-0.0000,-0.1634,0.9866|-655.35,-842.23,-24.15",
+            "boatXXL01|-0.0000,-0.0000,0.7012,0.7130|-469.47,-788.49,-24.50",
+            "jachta10|-0.0000,-0.0000,-0.7215,0.6924|-465.47,-918.70,-24.15",
+            "jachta00>teziste|-516.80,-921.68,-26.67",
+            "jachta01>teziste|-614.90,-858.42,-26.67",
+            "jachta04>teziste|-489.15,-786.71,-26.67",
+            "jachta05>teziste|-517.64,-822.63,-26.67",
         ],
         ["prisone"] =
         [
-            "CDi_light__02|0.7071,-0.0000,0.0000,0.7071|63.12,16.21,296.06",
-            "CDi_light__01|0.7071,-0.0000,0.0000,0.7071|63.12,26.65,296.04",
-            "bedna2|0.0000,0.0000,-0.7071,0.7071|-12.70,-42.21,303.02",
-            "basketBall|0.0000,0.0000,0.6635,0.7481|19.70,-0.99,303.11",
-            "bedna1|0.0000,0.0000,-0.7071,0.7071|-12.66,-44.01,303.02",
-            "playBallPickUpPos|0.0000,0.0000,-0.7476,0.6642|7.44,-3.21,303.00",
-            "playBallThrowPos|0.0000,0.0000,-0.7388,0.6739|10.76,-3.26,303.00",
-            "playerBallPickUpPos|0.0000,0.0000,0.6635,0.7481|19.16,-1.03,303.00",
+            "CDi_light__02|-0.7071,0.0000,-0.0000,0.7071|63.12,22.21,292.06",
+            "CDi_light__01|-0.7071,0.0000,-0.0000,0.7071|63.12,32.65,292.04",
+            "bedna2|-0.0000,-0.0000,0.7071,0.7071|-16.70,-40.21,303.02",
+            "basketBall|-0.0000,-0.0000,-0.6635,0.7481|23.67,-2.98,303.11",
+            "bedna1|-0.0000,-0.0000,0.7071,0.7071|-16.66,-42.01,303.02",
+            "playBallPickUpPos|-0.0000,-0.0000,0.7476,0.6642|3.47,-1.22,303.00",
+            "playBallThrowPos|-0.0000,-0.0000,0.7388,0.6739|6.78,-1.27,303.00",
+            "playerBallPickUpPos|-0.0000,-0.0000,-0.6635,0.7481|23.13,-3.01,303.00",
             "bush09>C_bush03_Collision|15.47,-95.21,301.68",
-            "celtis08>celtis01 trunk|41.01,-54.88,306.48",
-            "celtis06>celtis01 trunk|31.11,-179.98,301.37",
-            "celtis03>celtis01 trunk|24.15,-102.31,307.41",
+            "celtis08>celtis01 trunk|41.60,-55.61,306.48",
+            "celtis06>celtis01 trunk|32.14,-181.27,301.37",
+            "celtis03>celtis01 trunk|25.48,-103.96,307.41",
         ],
     };
 
     // A rotated actor as a comparable line: the quaternion it stores, and where its turn puts a point of the
-    // prototype it places. The point is what makes this catch a composition-order or scale error too — an
+    // prototype it places. The point is what makes this catch a composition-order or scale error too вЂ” an
     // inverted, differently-ordered or unscaled transform lands it somewhere else.
     private static string PinOf(ActorEntry actor)
     {
@@ -740,7 +741,7 @@ internal static class ActorProbes
     }
 
     // A turn a convention flip would actually MOVE something with. Half turns are excluded on purpose: the
-    // conjugate of a 180° rotation is the same rotation negated, which is the same orientation — pinning those
+    // conjugate of a 180В° rotation is the same rotation negated, which is the same orientation вЂ” pinning those
     // would compare a number that changes against geometry that does not, and prove nothing about the viewport.
     private static bool IsSensitiveTurn(ActorEntry actor) =>
         actor.IsTyped && MathF.Abs(actor.Rotation.W) is > 0.05f and < 0.999f;
@@ -780,7 +781,7 @@ internal static class ActorProbes
 
         if (!PinnedOrientations.TryGetValue(district, out string[]? expected))
         {
-            sb.AppendLine($"(no pinned orientations for '{district}' — add these to PinnedOrientations)");
+            sb.AppendLine($"(no pinned orientations for '{district}' вЂ” add these to PinnedOrientations)");
             foreach (string line in lines) sb.AppendLine($"    PIN  \"{line}\",");
             return;
         }
@@ -825,7 +826,7 @@ internal static class ActorProbes
         check("every glyph actor gets a marker and a click target",
             baseline == placements.Invisible.Count && picks.Count == baseline,
             $"{baseline} of {placements.Invisible.Count}, {picks.Count} click targets");
-        if (baseline == 0) { sb.AppendLine("(district has no glyph actors — glyph-set checks skipped)"); return; }
+        if (baseline == 0) { sb.AppendLine("(district has no glyph actors вЂ” glyph-set checks skipped)"); return; }
 
         bool aligned = true;
         for (int i = 0; i < glyphs.Count && aligned; i++) aligned = glyphs[i].Position == picks[i].Position;
@@ -845,14 +846,14 @@ internal static class ActorProbes
         Collect();
         check("undoing the delete brings its marker back", glyphs.Contains(victim), $"{glyphs.Count} markers");
 
-        // …and brings back everything a LATER edit of it needs. The editor skips an actor whose pack it cannot
-        // find, silently — so an actor restored without one looks fine and can never be deleted again.
+        // вЂ¦and brings back everything a LATER edit of it needs. The editor skips an actor whose pack it cannot
+        // find, silently вЂ” so an actor restored without one looks fine and can never be deleted again.
         check("an actor restored by undo can still be edited",
             ReferenceEquals(placements.PackOf(victim), victimPack) && victimPack != null,
             placements.PackOf(victim) == null ? "PackOf is null after undo" : "pack intact");
 
         // Moving: the marker and the click target travel with the actor, rather than staying where it loaded.
-        // Deliberately not the actor the delete test used — its state has already been through a round trip.
+        // Deliberately not the actor the delete test used вЂ” its state has already been through a round trip.
         ActorEntry mover = placements.Invisible.FirstOrDefault(a => !ReferenceEquals(a, victim)) ?? victim;
         System.Numerics.Vector3 was = mover.Position;
         mover.Position = was + new System.Numerics.Vector3(12f, -7f, 3f);
@@ -860,7 +861,7 @@ internal static class ActorProbes
         int moverAt = glyphs.IndexOf(mover);
         check("a moved actor takes its marker and its click target with it",
             moverAt >= 0 && picks[moverAt].Position == mover.Position,
-            moverAt >= 0 ? $"{was} → {picks[moverAt].Position}" : "(not listed)");
+            moverAt >= 0 ? $"{was} в†’ {picks[moverAt].Position}" : "(not listed)");
         mover.Position = was;
 
         // Copying: a new actor is drawn and clickable as soon as it has a row.
@@ -881,7 +882,7 @@ internal static class ActorProbes
             rows.Remove(copy);
         }
 
-        // Hiding a row takes its glyph with it — the eye has nothing else to act on for a glyph actor.
+        // Hiding a row takes its glyph with it вЂ” the eye has nothing else to act on for a glyph actor.
         rows[mover].IsVisible = false;
         Collect();
         check("hiding an actor's row hides its glyph", !glyphs.Contains(mover), $"{glyphs.Count} markers");
