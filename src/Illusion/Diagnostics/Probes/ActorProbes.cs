@@ -508,6 +508,50 @@ internal static class ActorProbes
         }
     }
 
+    // A copied object has to have the SAME SHAPE as the one it was copied from: the same parent slots filled,
+    // with links that pointed inside the subtree redirected at the copy and links that pointed outside left
+    // alone. The one that bites is the anchored-mesh flag — a mesh whose flag says it hangs off a second
+    // parent, with that slot cleared, writes an anchor index of -1 into the file and the game follows it on
+    // load. Nothing in the toolkit notices; the district just stops opening.
+    private static void CheckCloneShape(ActorPlacements placements, ActorPrototypeCloner.ClonedPrototype clone,
+        StringBuilder sb, Action<string, bool, string> check)
+    {
+        int compared = 0, shapeOff = 0, danglingAnchor = 0;
+        string firstOff = "";
+        foreach (KeyValuePair<FrameObjectBase, FrameObjectBase> pair in clone.Pairs)
+        {
+            compared++;
+            bool sourceP1 = pair.Key.Refs.ContainsKey(FrameEntryRefTypes.Parent1);
+            bool sourceP2 = pair.Key.Refs.ContainsKey(FrameEntryRefTypes.Parent2);
+            bool cloneP1 = pair.Value.Refs.ContainsKey(FrameEntryRefTypes.Parent1);
+            bool cloneP2 = pair.Value.Refs.ContainsKey(FrameEntryRefTypes.Parent2);
+            if (sourceP1 != cloneP1 || sourceP2 != cloneP2)
+            {
+                shapeOff++;
+                if (firstOff.Length == 0)
+                {
+                    firstOff = $"{pair.Key.Name}: source has ({sourceP1},{sourceP2}), copy has ({cloneP1},{cloneP2})";
+                }
+            }
+
+            if (pair.Value is FrameObjectSingleMesh mesh
+                && mesh.SingleMeshFlags.HasFlag(SingleMeshFlags.ParentIndex2_Flag) && !cloneP2)
+            {
+                danglingAnchor++;
+            }
+        }
+        check("the copy has the same parent shape as the object it came from", shapeOff == 0 && compared > 0,
+            $"{compared} frames compared, {shapeOff} off {firstOff}");
+        check("no copied mesh claims an anchor it does not have", danglingAnchor == 0,
+            danglingAnchor == 0 ? "" : $"{danglingAnchor} mesh(es) flagged as anchored with an empty slot");
+        int withP1 = clone.Pairs.Keys.Count(f => f.Refs.ContainsKey(FrameEntryRefTypes.Parent1));
+        int withP2 = clone.Pairs.Keys.Count(f => f.Refs.ContainsKey(FrameEntryRefTypes.Parent2));
+        int anchored = clone.Pairs.Keys.OfType<FrameObjectSingleMesh>()
+            .Count(m => m.SingleMeshFlags.HasFlag(SingleMeshFlags.ParentIndex2_Flag));
+        sb.AppendLine($"    clone: {compared} frames, on the name table: {clone.IsOnNameTable}; " +
+                      $"sources with parent1: {withP1}, with parent2: {withP2}, flagged as anchored: {anchored}");
+    }
+
     // Copying an actor that PLACES an object: it gets its own clone of that object and its own scene
     // reference, and the whole thing has to survive a trip through the writer — the copy's link is a hash of
     // a name that did not exist a moment ago, pointing at a row that did not exist either.
@@ -543,6 +587,8 @@ internal static class ActorProbes
             !ReferenceEquals(clone.Root, source) && clone.Root.Name.String != source.Name.String
             && clone.FrameIndex != uint.MaxValue,
             $"{source.Name} → {clone.Root.Name} at row {clone.FrameIndex}");
+
+        CheckCloneShape(placements, clone, sb, check);
 
         var placed = new ActorPlacedFrame(clone.Root.Name.String, clone.FrameIndex);
         ActorEntry? copy = pack.Duplicate(placing, placed, out string? why);

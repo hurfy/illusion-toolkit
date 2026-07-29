@@ -185,6 +185,10 @@ internal sealed class ActorEditController
             _host.Streamer.RegisterMeshRow(document.Placements, frame, leaf);
             rows.Add(new PrototypeRow(leaf, parent, mesh));
         }
+
+        // The frame name table is the game's spawn list and is rebuilt from the resource — a copy that
+        // inherited membership has to be in the rewritten one, or it is an object the table never mentions.
+        if (clone.IsOnNameTable && rows.Count > 0) _host.Persistence.MarkNameTableDirty(rows[0].Node);
         return rows;
     }
 

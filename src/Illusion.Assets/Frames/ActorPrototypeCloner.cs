@@ -2,6 +2,7 @@ using Illusion.Assets.Adapters;
 using Illusion.Domain;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.Frames.Resources;
 
 namespace Illusion.Assets.Frames;
 
@@ -40,6 +41,11 @@ public static class ActorPrototypeCloner
         /// <summary>Whether the clone is currently part of the scene (false once <see cref="Detach"/> ran).</summary>
         public bool IsAttached => Resource.FrameObjects.ContainsKey(Root.RefID);
 
+        /// <summary>Whether any cloned frame inherited frame-name-table membership. The table is the game's
+        /// spawn list and is rebuilt from the resource, so the caller must mark it dirty or the copy is an
+        /// object the table never mentions.</summary>
+        public bool IsOnNameTable { get; internal set; }
+
         /// <summary>Takes the clone back out of the frame resource (undo).</summary>
         public void Detach()
         {
@@ -48,6 +54,7 @@ public static class ActorPrototypeCloner
             {
                 holder.SetParent(ParentInfo.ParentType.ParentIndex1, null);
                 holder.SetParent(ParentInfo.ParentType.ParentIndex2, null);
+                foreach (FrameHeaderScene scene in Resource.FrameScenes.Values) scene.Children.Remove(holder);
                 Resource.FrameObjects.Remove(holder.RefID);
             }
         }
@@ -60,14 +67,15 @@ public static class ActorPrototypeCloner
                 if (!Resource.FrameObjects.ContainsKey(holder.RefID)) Resource.FrameObjects.Add(holder.RefID, holder);
             }
             foreach (FrameDuplicator.DuplicatedObject mesh in Meshes) mesh.Reattach();
-            foreach (KeyValuePair<FrameObjectBase, FrameObjectBase> pair in _parentOf)
-            {
-                pair.Key.SetParent(ParentInfo.ParentType.ParentIndex1, pair.Value);
-            }
+            LinkLikeSources(Resource, Clones);
             Root.SetWorldTransform();
         }
 
-        internal readonly Dictionary<FrameObjectBase, FrameObjectBase> _parentOf = new();
+        /// <summary>Source frame → its clone, for every node of the subtree.</summary>
+        internal readonly Dictionary<FrameObjectBase, FrameObjectBase> Clones = new();
+
+        /// <summary>The same pairs, for a caller checking that the copy kept its original's shape.</summary>
+        public IReadOnlyDictionary<FrameObjectBase, FrameObjectBase> Pairs => Clones;
     }
 
     /// <summary>Whether this prototype is one the cloner can copy.</summary>
@@ -91,7 +99,7 @@ public static class ActorPrototypeCloner
         var clone = new ClonedPrototype { Resource = adapter.Frame };
         var renderables = new List<(FrameObjectSingleMesh, MeshData)>();
 
-        FrameObjectBase? cloneRoot = CloneSubtree(document, adapter, root, parent: null, clone, renderables,
+        FrameObjectBase? cloneRoot = CloneSubtree(document, adapter, root, clone, renderables,
             new HashSet<FrameObjectBase>(), ref skipReason);
         if (cloneRoot == null)
         {
@@ -102,15 +110,56 @@ public static class ActorPrototypeCloner
 
         clone.Root = cloneRoot;
         clone.Renderables = renderables;
+        clone.IsOnNameTable = clone.Clones.Values.Any(f => f.IsOnFrameTable);
+        LinkLikeSources(adapter.Frame, clone.Clones);
         cloneRoot.SetWorldTransform();
         return clone;
     }
 
+    /// <summary>
+    /// Gives every clone the parents its source has, with links that pointed INSIDE the subtree redirected at
+    /// the corresponding clone and links that pointed outside left exactly as they were.
+    ///
+    /// Reproducing the shape rather than inventing one matters more than it looks. A mesh carries a flag
+    /// saying it is anchored through its second parent slot; clearing the slot while the flag stays set writes
+    /// an anchor index of -1 into the file, and the game follows it on load. The shipped prototypes use
+    /// several legal shapes, and the only safe rule is that a copy has the same one as its original.
+    /// </summary>
+    private static void LinkLikeSources(FrameResource resource,
+        Dictionary<FrameObjectBase, FrameObjectBase> clones)
+    {
+        foreach (KeyValuePair<FrameObjectBase, FrameObjectBase> pair in clones)
+        {
+            FrameEntry? parent1 = Mapped(ResolveRef(resource, pair.Key, FrameEntryRefTypes.Parent1), clones);
+            FrameEntry? parent2 = Mapped(ResolveRef(resource, pair.Key, FrameEntryRefTypes.Parent2), clones);
+
+            pair.Value.SetParent(ParentInfo.ParentType.ParentIndex1, parent1);
+            pair.Value.SetParent(ParentInfo.ParentType.ParentIndex2, parent2);
+
+            // A scene folder holds its members in a list of its own that SetParent does not touch — the same
+            // rule the loader and the mesh duplicator follow.
+            if (parent2 is FrameHeaderScene scene && pair.Value.Parent == null && !scene.Children.Contains(pair.Value))
+            {
+                scene.Children.Add(pair.Value);
+            }
+        }
+    }
+
+    private static FrameEntry? Mapped(FrameEntry? entry, Dictionary<FrameObjectBase, FrameObjectBase> clones) =>
+        entry is FrameObjectBase frame && clones.TryGetValue(frame, out FrameObjectBase? clone) ? clone : entry;
+
+    private static FrameEntry? ResolveRef(FrameResource resource, FrameObjectBase source, FrameEntryRefTypes slot)
+    {
+        if (!source.Refs.TryGetValue(slot, out int id)) return null;
+        if (resource.FrameScenes.TryGetValue(id, out FrameHeaderScene? scene)) return scene;
+        return resource.FrameObjects.TryGetValue(id, out object? obj) ? obj as FrameEntry : null;
+    }
+
     // One node and everything under it. A mesh goes through the frame duplicator (which registers its own
-    // blocks); every other type is copy-constructed and registered here. Either way the copy is re-parented
-    // under the cloned parent rather than the source's — that is the whole difference from a plain duplicate.
+    // blocks); every other type is copy-constructed and registered here. Parenting is deliberately NOT done
+    // here — it needs every clone to exist first, so LinkLikeSources runs once at the end.
     private static FrameObjectBase? CloneSubtree(ISceneDocument document, SceneDocumentAdapter adapter,
-        FrameObjectBase source, FrameObjectBase? parent, ClonedPrototype into,
+        FrameObjectBase source, ClonedPrototype into,
         List<(FrameObjectSingleMesh, MeshData)> renderables, HashSet<FrameObjectBase> seen, ref string? skipReason)
     {
         if (!seen.Add(source)) return null; // a malformed hierarchy can loop
@@ -136,16 +185,11 @@ public static class ActorPrototypeCloner
             }
             into.Holders.Add(copy);
         }
-
-        // The clone hangs under the cloned parent; the root keeps the shape its source had — parked at the
-        // origin and unanchored, because what spawns it is the actor, not a parent in the frame graph.
-        copy.SetParent(ParentInfo.ParentType.ParentIndex1, parent);
-        copy.SetParent(ParentInfo.ParentType.ParentIndex2, null);
-        if (parent != null) into._parentOf[copy] = parent;
+        into.Clones[source] = copy;
 
         foreach (FrameObjectBase child in source.Children.ToList())
         {
-            if (CloneSubtree(document, adapter, child, copy, into, renderables, seen, ref skipReason) == null)
+            if (CloneSubtree(document, adapter, child, into, renderables, seen, ref skipReason) == null)
             {
                 return null;
             }
