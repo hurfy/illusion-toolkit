@@ -194,8 +194,16 @@ public static class ActorPrototypeCloner
             FrameEntry? parent1 = Mapped(ResolveRef(resource, pair.Key, FrameEntryRefTypes.Parent1), clones);
             FrameEntry? parent2 = Mapped(ResolveRef(resource, pair.Key, FrameEntryRefTypes.Parent2), clones);
 
-            pair.Value.SetParent(ParentInfo.ParentType.ParentIndex1, parent1);
+            // The ANCHOR slot goes first and the hierarchy slot second, and the order is the whole point.
+            // Filling a slot detaches the link that slot owns, and the anchor only claims the node as a child
+            // when nothing else parents it — so with the hierarchy slot written first, writing the anchor
+            // afterwards REMOVES the node from that parent's child list and declines to put it back, for every
+            // node whose two slots name the same parent (an animated platform's anim node does). The list is
+            // what everything walks to find the geometry, so the copy became an object with nothing under it.
+            // Writing the hierarchy slot last makes the pass idempotent, which it has to be: the copy is
+            // re-linked once when it is made and again when it is re-applied.
             pair.Value.SetParent(ParentInfo.ParentType.ParentIndex2, parent2);
+            pair.Value.SetParent(ParentInfo.ParentType.ParentIndex1, parent1);
 
             // A scene folder holds its members in a list of its own that SetParent does not touch — the same
             // rule the loader and the mesh duplicator follow.

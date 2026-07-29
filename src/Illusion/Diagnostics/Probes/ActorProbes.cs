@@ -628,6 +628,18 @@ internal static class ActorProbes
                       $"sources with parent1: {withP1}, with parent2: {withP2}, flagged as anchored: {anchored}");
     }
 
+    // Meshes reachable from a holder through the child links — the same walk the placements use to decide
+    // whether an actor has geometry or is drawn as a glyph.
+    private static int MeshCountUnder(FrameObjectBase frame) => MeshCountUnder(frame, new HashSet<FrameObjectBase>());
+
+    private static int MeshCountUnder(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return 0;
+        int count = frame is FrameObjectSingleMesh { Geometry: not null } ? 1 : 0;
+        foreach (FrameObjectBase child in frame.Children) count += MeshCountUnder(child, seen);
+        return count;
+    }
+
     // Prefers the object whose mesh sits DEEPEST under it. A mesh hanging straight off the holder and one two
     // levels down (an animated platform puts its mesh under an anim node) are different cases for everything
     // that walks the subtree, and the deep one is the one that has gone wrong in practice.
@@ -684,6 +696,22 @@ internal static class ActorProbes
                     ? $"{physical.EntityName}: {physicalReason}"
                     : $"{physical.EntityName}: {ActorPrototypeCloner.HullsOf(physicalClone.Root)} hull(s)");
 
+            // The editor re-applies a copy after making it (and again on every redo), which runs the re-linking
+            // a second time. A HOLDER between the object's root and its mesh — an animated platform puts its
+            // mesh under an anim node — used to fall out of the root's child list on that second pass, and
+            // since that list is what finds the geometry, the copy turned into an actor with nothing under it,
+            // drawn as a glyph. The meshes themselves never showed it: their own re-link puts them back.
+            if (physicalClone != null)
+            {
+                int deepBefore = MeshCountUnder(physicalClone.Root);
+                physicalClone.Reattach();
+                physicalClone.Reattach();
+                check("re-applying a copy leaves a deep object intact",
+                    MeshCountUnder(physicalClone.Root) == deepBefore && deepBefore > 0,
+                    $"{physical.EntityName}: {deepBefore} mesh(es) under {physicalClone.Root.Name}, " +
+                    $"{MeshCountUnder(physicalClone.Root)} after re-applying");
+            }
+
             // A copy whose object has geometry must be drawn as that geometry. Landing in the glyph list means
             // the placements could not see a mesh under the clone — which is what a copy showing up as a
             // diamond looks like from the outside.
@@ -727,6 +755,18 @@ internal static class ActorProbes
             $"{source.Name} → {clone.Root.Name} at row {clone.FrameIndex}");
 
         CheckCloneShape(placements, clone, sb, check);
+
+        // The editor re-applies a copy after making it (and again on every redo), which runs the re-linking a
+        // second time. That pass has to leave the tree alone: a node whose two parent slots name the same
+        // holder used to fall out of its holder's child list on the second pass, and since that list is what
+        // finds the geometry, the copy turned into an actor with nothing under it — drawn as a glyph.
+        int meshesBefore = MeshCountUnder(clone.Root);
+        clone.Reattach();
+        clone.Reattach();
+        // An empty holder legitimately has none — what matters is that the count does not change.
+        check("re-applying a copy leaves its object intact",
+            MeshCountUnder(clone.Root) == meshesBefore,
+            $"{meshesBefore} mesh(es) under {clone.Root.Name}, {MeshCountUnder(clone.Root)} after re-applying");
 
         var placed = new ActorPlacedFrame(clone.Root.Name.String, clone.FrameIndex);
         ActorEntry? copy = pack.Duplicate(placing, placed, out string? why);
