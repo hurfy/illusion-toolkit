@@ -21,6 +21,8 @@ public static class SdsActorsSaver
     {
         ArgumentNullException.ThrowIfNull(placements);
 
+        placements.RefreshFrameIndices();
+
         var written = new List<string>();
         foreach ((ActorsFile pack, string path) in placements.Packs)
         {

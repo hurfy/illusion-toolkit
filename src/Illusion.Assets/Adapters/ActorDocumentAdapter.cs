@@ -28,6 +28,10 @@ public sealed class ActorDocumentAdapter : ISceneDocument
     /// gets the same adapter identity everything else keys on.</summary>
     public ActorNodeAdapter ActorNode(ActorEntry actor) => _scene.ActorNode(actor);
 
+    /// <summary>The archive's frame document. An actor's objects live there, not here — copying an actor has
+    /// to clone one, and the frame resource is what saves it.</summary>
+    public SceneDocumentAdapter Scene => _scene;
+
     public FileInfo SourceArchive { get; }
 
     /// <summary>The placements these packs resolved to — the actor adapters edit them in place.</summary>

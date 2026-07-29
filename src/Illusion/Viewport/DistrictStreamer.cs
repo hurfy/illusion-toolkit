@@ -187,6 +187,32 @@ internal sealed class DistrictStreamer
         if (FindActorDistrict(placements) is { } sdsNode) _actorMarkersDirty.Add(sdsNode);
     }
 
+    /// <summary>The tree row a frame object's geometry hangs on, when its district is resident.</summary>
+    public SceneNode? MeshRowOf(FrameObjectBase frame)
+    {
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
+        {
+            if (map.TryGetValue(frame, out SceneNode? leaf)) return leaf;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Records a mesh row the editor just created (a cloned actor prototype), so everything that reaches an
+    /// actor's geometry through its frames — the transform sync, the eye, the selection outline — finds the
+    /// new object too. Kept across an undo: the row keeps its identity, and what decides whether anything is
+    /// drawn is the placements, not this map.
+    /// </summary>
+    public void RegisterMeshRow(ActorPlacements placements, FrameObjectBase frame, SceneNode leaf)
+    {
+        if (FindActorDistrict(placements) is not { } sdsNode) return;
+        if (!_meshNodeByFrame.TryGetValue(sdsNode, out Dictionary<FrameObjectBase, SceneNode>? map))
+        {
+            _meshNodeByFrame[sdsNode] = map = new Dictionary<FrameObjectBase, SceneNode>();
+        }
+        map[frame] = leaf;
+    }
+
     private SceneNode? FindActorDistrict(ActorPlacements placements)
     {
         foreach (KeyValuePair<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> pair

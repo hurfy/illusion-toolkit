@@ -145,15 +145,69 @@ public sealed class ActorPlacements
         Respread(target, actor.Transform, _byFrame, new HashSet<FrameObjectBase>());
     }
 
-    /// <summary>Registers an actor the editor just created (a copy), right after <paramref name="after"/>. It
-    /// places no frame object of its own — see <see cref="ActorsFile.Duplicate"/> — so it is a glyph.</summary>
-    public void AddCopy(ActorEntry copy, ActorEntry after, ActorsFile pack)
+    /// <summary>
+    /// Registers an actor the editor just created (a copy), right after <paramref name="after"/>.
+    /// <paramref name="target"/> is the clone of the object it places, or null when it places nothing and is
+    /// drawn as a glyph instead. A copy that places an object gets a glyph too when that object turns out to
+    /// carry no mesh — the same rule the initial resolve uses, so a trigger's copy stays reachable.
+    /// </summary>
+    public void AddCopy(ActorEntry copy, ActorEntry after, ActorsFile pack, FrameObjectBase? target = null)
     {
+        ArgumentNullException.ThrowIfNull(copy);
         int index = _allList.IndexOf(after);
         _allList.Insert(index < 0 ? _allList.Count : index + 1, copy);
         _packByActor[copy] = pack;
+
+        if (target != null)
+        {
+            _targetByActor[copy] = target;
+            _actorByTarget[target] = copy;
+            Claim(target, copy, _actorByCoveredFrame);
+            Respread(target, copy.Transform, _byFrame, new HashSet<FrameObjectBase>());
+            if (HasMesh(target, new HashSet<FrameObjectBase>())) return;
+        }
         if (_invisibleSet.Add(copy)) _invisibleList.Add(copy);
     }
+
+    /// <summary>
+    /// Re-points every scene reference at where its frame object actually sits now, just before the packs are
+    /// written. A reference stores a position in the frame resource's object list, and nothing recomputes it:
+    /// a copy adds an object, an undone delete puts one back in a rebuilt order, and a reference captured
+    /// earlier would then name a different object — silently placing the wrong thing. For an untouched
+    /// archive every index is rewritten to the value it already had, so the pack still saves byte for byte.
+    /// </summary>
+    public void RefreshFrameIndices()
+    {
+        if (_resource?.FrameObjects == null) return;
+
+        var indexByFrame = new Dictionary<FrameObjectBase, uint>(_resource.FrameObjects.Count);
+        uint at = 0;
+        foreach (object value in _resource.FrameObjects.Values)
+        {
+            if (value is FrameObjectBase frame) indexByFrame[frame] = at;
+            at++;
+        }
+
+        foreach (KeyValuePair<ActorEntry, FrameObjectBase> pair in _targetByActor)
+        {
+            if (pair.Key.FrameHash == 0) continue;
+            if (!indexByFrame.TryGetValue(pair.Value, out uint index)) continue;
+            if (_packByActor.TryGetValue(pair.Key, out ActorsFile? pack))
+            {
+                foreach (ActorSceneReference reference in pack.SceneReferences)
+                {
+                    if (reference.FrameHash == pair.Key.FrameHash) reference.FrameIndex = index;
+                }
+            }
+        }
+    }
+
+    /// <summary>Resolves packs against the same scene these placements were built from — how a caller checks
+    /// that an edited pack, written and read back, still finds the objects it places.</summary>
+    public ActorPlacements ResolveAgain(IReadOnlyList<ActorsFile> packs) =>
+        _resource == null ? Empty : Build(packs, _resource);
+
+    private FrameResource? _resource;
 
     private void Unclaim(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
     {
@@ -254,6 +308,7 @@ public sealed class ActorPlacements
             Packs = files ?? [],
             _targetByActor = targetByActor,
             _actorByCoveredFrame = actorByCoveredFrame,
+            _resource = resource,
         };
     }
 

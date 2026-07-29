@@ -145,7 +145,17 @@ public sealed class ActorsFile
     /// null with a reason rather than producing a pack the game would read as two actors fighting over one
     /// object.
     /// </summary>
-    public ActorEntry? Duplicate(ActorEntry actor, out string? skipReason)
+    public ActorEntry? Duplicate(ActorEntry actor, out string? skipReason) =>
+        Duplicate(actor, null, out skipReason);
+
+    /// <summary>
+    /// Copies an actor that PLACES a scene object, given a clone of that object. A frame is spawned by exactly
+    /// one actor, so the copy is given its own frame and its own scene reference pointing at it — sharing the
+    /// original's would leave two actors fighting over one object.
+    /// </summary>
+    /// <param name="placed">The cloned frame the copy will place: its name (which the link hashes) and its
+    /// position in the frame resource's object list, which is what the reference stores.</param>
+    public ActorEntry? Duplicate(ActorEntry actor, ActorPlacedFrame? placed, out string? skipReason)
     {
         ArgumentNullException.ThrowIfNull(actor);
         skipReason = null;
@@ -161,7 +171,11 @@ public sealed class ActorsFile
             skipReason = "the actor's record could not be typed, so it cannot be rebuilt";
             return null;
         }
-        if (actor.FrameHash != 0 && SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
+
+        ActorSceneReference? sourceReference = actor.FrameHash == 0
+            ? null
+            : SceneReferences.FirstOrDefault(r => r.FrameHash == actor.FrameHash);
+        if (sourceReference != null && placed == null)
         {
             skipReason = "it places a scene object — a copy needs its own clone of that object first";
             return null;
@@ -169,6 +183,26 @@ public sealed class ActorsFile
 
         string name = UniqueName(actor.EntityName);
         ulong hash = Hashing.Fnv64.Hash(name);
+
+        // The link to the placed object: its own name, hashed the way every resolver looks it up, and a
+        // reference row pointing at where that object sits. The reference's name string is shared verbatim
+        // with the original's — the shipped packs give every reference of an archive the same one (nine
+        // references, nine different frames, one name), so it names nothing and only the hash resolves.
+        string linkedFrame = actor.LinkedFrame;
+        ulong frameHash = actor.FrameHash;
+        if (placed is { } clone)
+        {
+            linkedFrame = clone.Name;
+            frameHash = Hashing.Fnv64.Hash(clone.Name);
+            SceneReferences.Add(new ActorSceneReference
+            {
+                FrameHash = frameHash,
+                Unk0 = sourceReference?.Unk0 ?? 0,
+                NamePos = sourceReference?.NamePos ?? 0,
+                FrameIndex = clone.Index,
+                Name = sourceReference?.Name ?? string.Empty,
+            });
+        }
 
         Native.Model.ActorItemW source = Binary.Items[index];
         var item = new Native.Model.ActorItemW
@@ -180,9 +214,9 @@ public sealed class ActorsFile
             Name1 = source.Name1,
             SceneSector = source.SceneSector,
             LinkedDefinition = source.LinkedDefinition,
-            LinkedFrame = source.LinkedFrame,
+            LinkedFrame = linkedFrame,
             EntityHash = hash,
-            FrameHash = source.FrameHash,
+            FrameHash = frameHash,
             Position = source.Position,
             RotationX = source.RotationX,
             RotationY = source.RotationY,
@@ -204,9 +238,9 @@ public sealed class ActorsFile
             Name1 = actor.Name1,
             SceneSector = actor.SceneSector,
             LinkedDefinition = actor.LinkedDefinition,
-            LinkedFrame = actor.LinkedFrame,
+            LinkedFrame = linkedFrame,
             EntityHash = hash,
-            FrameHash = actor.FrameHash,
+            FrameHash = frameHash,
             Position = actor.Position,
             Rotation = actor.Rotation,
             Scale = actor.Scale,
@@ -221,9 +255,9 @@ public sealed class ActorsFile
         return copy;
     }
 
-    /// <summary>Drops a copy made by <see cref="Duplicate"/> (undo). Returns the same token <see cref="Restore"/>
-    /// takes, so a redo puts back the very row that was undone — calling <see cref="Duplicate"/> again would
-    /// mint a different record under a different name, leaving the tree pointing at one the pack never got.</summary>
+    /// <summary>Drops a copy made by <c>Duplicate</c> (undo). Returns the same token <see cref="Restore"/>
+    /// takes, so a redo puts back the very row that was undone — copying again would mint a different record
+    /// under a different name, leaving the tree pointing at one the pack never got.</summary>
     public ActorRemoval RemoveCopy(ActorEntry copy) => Remove(copy);
 
     // "name" → "name_copy", "name_copy2", … — unique within the pack, which is what the engine keys entities by.
@@ -346,6 +380,15 @@ public sealed class ActorRemoval
     internal ActorSceneReference? Reference { get; }
     internal int ReferenceIndex { get; }
 }
+
+/// <summary>
+/// The cloned frame a duplicated actor will place: its own instance name — which is what the link hashes —
+/// and its position in the frame resource's object list, which is what the scene reference stores.
+/// </summary>
+/// <param name="Name">The clone's frame name, unique within the archive.</param>
+/// <param name="Index">Its ordinal in the frame resource's object list. Recompute this at save time rather
+/// than trusting one captured earlier: the list can be reordered by an undone delete in between.</param>
+public readonly record struct ActorPlacedFrame(string Name, uint Index);
 
 /// <summary>Links an actor to a frame object: the frame's name hash, the name's position in the string
 /// buffer (with the resolved name), and the frame index.</summary>

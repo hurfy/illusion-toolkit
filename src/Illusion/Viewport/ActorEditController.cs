@@ -1,8 +1,12 @@
 using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Frames;
+using Illusion.Domain;
 using Illusion.Formats.Actors;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Rendering.Gpu;
 using Illusion.Scene;
+using ClonedPrototype = Illusion.Assets.Frames.ActorPrototypeCloner.ClonedPrototype;
 
 namespace Illusion.Viewport;
 
@@ -75,11 +79,29 @@ internal sealed class ActorEditController
         {
             if (node.Source is not ActorNodeAdapter adapter) continue;
             if (node.OwningDocumentNode()?.Source is not ActorDocumentAdapter document) continue;
-            if (document.Placements.PackOf(adapter.Actor) is not { } pack) continue;
+            ActorPlacements placements = document.Placements;
+            if (placements.PackOf(adapter.Actor) is not { } pack) continue;
 
-            ActorEntry? copy = pack.Duplicate(adapter.Actor, out string? reason);
+            // An actor that places an object needs a clone of that object first: a frame is spawned by
+            // exactly one actor, so the copy cannot share the original's.
+            ClonedPrototype? clone = null;
+            ActorPlacedFrame? placed = null;
+            if (placements.TargetOf(adapter.Actor) is { } target)
+            {
+                clone = ActorPrototypeCloner.TryClone(document.Scene, target, out string? cloneReason);
+                if (clone == null)
+                {
+                    skipped++;
+                    lastReason = cloneReason;
+                    continue;
+                }
+                placed = new ActorPlacedFrame(clone.Root.Name.String, clone.FrameIndex);
+            }
+
+            ActorEntry? copy = pack.Duplicate(adapter.Actor, placed, out string? reason);
             if (copy == null)
             {
+                clone?.Detach();
                 skipped++;
                 lastReason = reason;
                 continue;
@@ -97,6 +119,10 @@ internal sealed class ActorEditController
                 TreeIndex = (node.Parent?.Children.IndexOf(node) ?? -1) + 1,
                 Document = document,
                 Pack = pack,
+                Clone = clone,
+                Rows = clone == null || node.OwningDocumentNode() is not { } sdsRow
+                    ? []
+                    : BuildPrototypeRows(document, clone, adapter.Actor, sdsRow),
             });
         }
 
@@ -122,8 +148,61 @@ internal sealed class ActorEditController
         public required ActorDocumentAdapter Document;
         public required ActorsFile Pack;
 
+        /// <summary>The clone of the object this actor places — null when it places nothing.</summary>
+        public ClonedPrototype? Clone;
+
+        /// <summary>The cloned geometry's tree rows and GPU meshes, so undo can take them off screen.</summary>
+        public IReadOnlyList<PrototypeRow> Rows = [];
+
         // Set while the copy is undone: the token that puts this exact row back into the pack.
         public ActorRemoval? Removal;
+    }
+
+    // One cloned mesh of a copied prototype: its tree row, where that row hangs, and its GPU mesh.
+    private sealed record PrototypeRow(SceneNode Node, SceneNode Parent, GpuMesh Mesh);
+
+    // Puts a cloned prototype's geometry on screen: a row beside the original's, an uploaded mesh, and an
+    // entry in the streamer's frame→row map, which is what lets the new actor move, hide and outline it.
+    private IReadOnlyList<PrototypeRow> BuildPrototypeRows(ActorDocumentAdapter document, ClonedPrototype clone,
+        ActorEntry source, SceneNode fallbackParent)
+    {
+        var rows = new List<PrototypeRow>(clone.Renderables.Count);
+        // Beside the original's own rows, so a copied bottle appears where its bottle lives in the tree.
+        SceneNode parent = (FirstMeshOf(document, source) is { } sourceMesh
+            ? _host.Streamer.MeshRowOf(sourceMesh)?.Parent
+            : null) ?? fallbackParent;
+
+        foreach ((FrameObjectSingleMesh frame, MeshData data) in clone.Renderables)
+        {
+            var leaf = new SceneNode(data.Name, "Mesh", false) { Source = document.Scene.Node(frame) };
+            parent.AddChild(leaf);
+
+            GpuMesh mesh = _host.Rnd!.CreateMeshGpu(data);
+            mesh.Owner = leaf;
+            _host.Rnd.AttachMesh(mesh);
+            leaf.Mesh = mesh;
+            _host.Tree.MeshCount++;
+            _host.Streamer.RegisterMeshRow(document.Placements, frame, leaf);
+            rows.Add(new PrototypeRow(leaf, parent, mesh));
+        }
+        return rows;
+    }
+
+    // Any mesh of the actor's own prototype — used only to find which branch of the tree its copy belongs in.
+    private static FrameObjectBase? FirstMeshOf(ActorDocumentAdapter document, ActorEntry actor) =>
+        document.Placements.TargetOf(actor) is { } target
+            ? FirstMesh(target, new HashSet<FrameObjectBase>())
+            : null;
+
+    private static FrameObjectBase? FirstMesh(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return null;
+        if (frame is FrameObjectSingleMesh) return frame;
+        foreach (FrameObjectBase child in frame.Children)
+        {
+            if (FirstMesh(child, seen) is { } found) return found;
+        }
+        return null;
     }
 
     private sealed class DuplicateActorsEdit : INodeEdit
@@ -157,7 +236,18 @@ internal sealed class ActorEditController
             var selection = new List<SceneNode>(_items.Count);
             foreach (CopiedActor item in _items)
             {
-                item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack);
+                // The cloned object goes back into the frame resource and onto the screen first, so the
+                // placement below has something to claim.
+                item.Clone?.Reattach();
+                foreach (PrototypeRow row in item.Rows)
+                {
+                    if (!row.Parent.Children.Contains(row.Node)) row.Parent.AddChild(row.Node);
+                    _owner._host.Rnd?.AttachMesh(row.Mesh);
+                    _owner._host.Tree.MeshCount++;
+                    _owner._host.Persistence.MarkFrameModified(row.Node);
+                }
+
+                item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack, item.Clone?.Root);
                 _owner._host.Streamer.AddActorNode(item.Document.Placements, item.Copy, item.Node);
                 if (item.Parent != null)
                 {
@@ -178,6 +268,15 @@ internal sealed class ActorEditController
                 item.Document.Placements.Detach(item.Copy);
                 item.Parent?.Children.Remove(item.Node);
                 if (item.Parent != null) _owner._host.Persistence.MarkFrameModified(item.Parent);
+
+                foreach (PrototypeRow row in item.Rows)
+                {
+                    _owner._host.Rnd?.DetachMeshes(new[] { row.Mesh });
+                    row.Parent.Children.Remove(row.Node);
+                    _owner._host.Tree.MeshCount--;
+                    _owner._host.Persistence.MarkFrameModified(row.Parent);
+                }
+                item.Clone?.Detach();
             }
             _owner.AfterChange(Array.Empty<SceneNode>());
         }
