@@ -195,6 +195,13 @@ internal static class ProbeRunner
             case "--probe-actors":
                 ActorProbes.RunActorPlacementProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Which way an actor turns the thing it places, measured against the district's .col — the game
+            // collides with the hull, so its placement IS the object's real orientation, independent of the
+            // actor pack. Optional second argument filters actors by name. Output: %TEMP%\illusion_actor_orient.txt
+            case "--probe-actor-orient":
+                ActorProbes.RunActorOrientationProbe(args.Length >= 2 ? args[1] : "uppertown",
+                    args.Length >= 3 ? args[2] : null);
+                return true;
             // Reusable AppDialog: construct it from options + render its content to a PNG so the layout can be
             // eyeballed (no game data, no GPU). Output: %TEMP%\illusion_dialog.png / .txt
             case "--probe-dialog":

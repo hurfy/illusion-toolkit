@@ -507,6 +507,156 @@ internal static class ActorProbes
     }
 
     /// <summary>
+    /// Which way an actor really turns the object it places — measured, not assumed.
+    ///
+    /// The oracle is the district's collision file. An actor's prototype often carries a FrameObjectCollision
+    /// child, and the .col ships that same hull with its own absolute world placement. The game collides with
+    /// the hull, so the hull's placement IS where and how the object stands in the game; if our actor placement
+    /// disagreed, you would walk through the visible object and bump into thin air. That makes it independent
+    /// evidence about the .act convention — unlike comparing raw quaternions between the two formats, which
+    /// only ever showed that they are two formats.
+    ///
+    /// The comparison is over full world matrices: the collision child's own transform inside the prototype,
+    /// followed by the actor's placement. A wrong rotation then shows up twice — the hull faces the wrong way,
+    /// and (whenever the child sits off the prototype's origin) it also stands in the wrong place, which no
+    /// symmetry can hide.
+    /// Output: %TEMP%\illusion_actor_orient.txt
+    /// </summary>
+    internal static void RunActorOrientationProbe(string district, string? nameFilter)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_actor_orient.txt");
+        var sb = new StringBuilder();
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            string sds = Path.Combine(MafiaEnvironment.CityFolder, district + ".sds");
+            if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
+
+            string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
+            string? colPath = Directory.GetFiles(extracted, "*.col", SearchOption.AllDirectories).FirstOrDefault();
+            sb.AppendLine($"ACTOR ORIENTATION ORACLE — district={district}" +
+                          (nameFilter == null ? "" : $", filter='{nameFilter}'"));
+            if (colPath == null) { sb.AppendLine("district ships no .col — nothing to measure against"); return; }
+
+            Formats.Collisions.CollisionFile collision = Formats.Collisions.CollisionFile.Load(colPath);
+            var byHash = new Dictionary<ulong, List<Formats.Collisions.CollisionInstance>>();
+            foreach (Formats.Collisions.CollisionInstance inst in collision.Instances)
+            {
+                if (!byHash.TryGetValue(inst.Hash, out List<Formats.Collisions.CollisionInstance>? list))
+                {
+                    byHash[inst.Hash] = list = new List<Formats.Collisions.CollisionInstance>();
+                }
+                list.Add(inst);
+            }
+
+            (_, _, ISceneDocument? loaded) = SdsMeshLoader.LoadHierarchy(new FileInfo(sds));
+            if (loaded is not SceneDocumentAdapter document) { sb.AppendLine("district did not load"); return; }
+            ActorPlacements placements = document.Placements;
+            sb.AppendLine($".col: {collision.Instances.Count} instances, {byHash.Count} hulls; " +
+                          $"actors: {placements.All.Count}, placed: {placements.PlacedCount}");
+
+            int paired = 0, asIs = 0, inverted = 0, either = 0, neither = 0;
+            int withTarget = 0, withHullChild = 0, hullInCol = 0;
+            var samples = new List<string>();
+            foreach (ActorEntry actor in placements.All)
+            {
+                if (nameFilter != null && !actor.EntityName.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)) continue;
+                if (placements.TargetOf(actor) is not { } target) continue;
+                withTarget++;
+
+                var hulls = new List<FrameObjectCollision>();
+                CollectCollisions(target, hulls, new HashSet<FrameObjectBase>());
+                if (hulls.Count > 0) withHullChild++;
+                foreach (FrameObjectCollision hull in hulls)
+                {
+                    if (byHash.ContainsKey(hull.Hash)) hullInCol++;
+                    if (!byHash.TryGetValue(hull.Hash, out List<Formats.Collisions.CollisionInstance>? instances)) continue;
+
+                    System.Numerics.Matrix4x4 asStored = hull.WorldTransform * actor.Transform;
+                    System.Numerics.Matrix4x4 asFlipped = hull.WorldTransform *
+                        TransformMath.Compose(System.Numerics.Quaternion.Conjugate(actor.Rotation),
+                            actor.Scale, actor.Position);
+
+                    // The nearest hull copy — several identical hulls can share one hash across the district.
+                    Formats.Collisions.CollisionInstance? best = null;
+                    float bestD = float.MaxValue;
+                    foreach (Formats.Collisions.CollisionInstance inst in instances)
+                    {
+                        float d = (inst.Position - actor.Position).Length();
+                        if (d < bestD) { bestD = d; best = inst; }
+                    }
+                    if (best == null || bestD > 3f) continue;
+
+                    paired++;
+                    System.Numerics.Matrix4x4 truth = TransformMath.Compose(
+                        TransformMath.CollisionEulerToQuaternion(best.Rotation),
+                        System.Numerics.Vector3.One, best.Position);
+
+                    float errStored = PoseError(asStored, truth);
+                    float errFlipped = PoseError(asFlipped, truth);
+                    bool storedFits = errStored < 0.05f;
+                    bool flippedFits = errFlipped < 0.05f;
+
+                    if (storedFits && flippedFits) either++;        // a half turn or no turn at all — says nothing
+                    else if (storedFits) asIs++;
+                    else if (flippedFits) inverted++;
+                    else neither++;
+
+                    if (samples.Count < 12 && !(storedFits && flippedFits))
+                    {
+                        samples.Add($"    {actor.EntityName} → {hull.Name}: as stored {errStored:F3}, " +
+                                    $"inverted {errFlipped:F3} → {(storedFits ? "AS STORED" : flippedFits ? "INVERTED" : "neither")}");
+                    }
+                }
+            }
+
+            sb.AppendLine($"actors placing a frame: {withTarget}; of those, carrying a collision child: " +
+                          $"{withHullChild}; those children found in the .col: {hullInCol}");
+            sb.AppendLine($"paired with a hull: {paired}");
+            sb.AppendLine($"    the actor's quaternion as stored fits the game's hull : {asIs}");
+            sb.AppendLine($"    only its INVERSE fits                                 : {inverted}");
+            sb.AppendLine($"    both fit (half turn / no turn — no evidence either way): {either}");
+            sb.AppendLine($"    neither fits (hull is not this object's, or scaled)    : {neither}");
+            if (samples.Count > 0)
+            {
+                sb.AppendLine("samples (error in metres, over the hull's own corners):");
+                foreach (string s in samples) sb.AppendLine(s);
+            }
+
+            string verdict = asIs > 0 && inverted == 0 ? "the pack stores the orientation the game uses"
+                : inverted > 0 && asIs == 0 ? "the pack stores the INVERSE of the game's orientation"
+                : asIs == 0 && inverted == 0 ? "no decisive pair — nothing measured"
+                : "MIXED — the pairs disagree with each other, so neither reading is safe";
+            sb.AppendLine($"VERDICT: {verdict}");
+        }
+        catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
+        finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    // How far the two poses put the same body, in metres: the worst corner of a 1 m box carried by each.
+    private static float PoseError(System.Numerics.Matrix4x4 a, System.Numerics.Matrix4x4 b)
+    {
+        float worst = 0f;
+        for (int i = 0; i < 8; i++)
+        {
+            var corner = new System.Numerics.Vector3((i & 1) == 0 ? -1f : 1f, (i & 2) == 0 ? -1f : 1f,
+                (i & 4) == 0 ? -1f : 1f);
+            float d = (TransformMath.TransformCoordinate(corner, a) - TransformMath.TransformCoordinate(corner, b))
+                .Length();
+            if (d > worst) worst = d;
+        }
+        return worst;
+    }
+
+    private static void CollectCollisions(FrameObjectBase frame, List<FrameObjectCollision> into,
+        HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        if (frame is FrameObjectCollision hull) into.Add(hull);
+        foreach (FrameObjectBase child in frame.Children) CollectCollisions(child, into, seen);
+    }
+
+    /// <summary>
     /// Vanilla orientations, pinned.
     ///
     /// A rotation convention flip is invisible to every other check in this file: no translation moves, the
