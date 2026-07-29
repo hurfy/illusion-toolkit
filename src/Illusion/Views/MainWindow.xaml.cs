@@ -288,8 +288,12 @@ public partial class MainWindow : Window
     /// Keys the 3D viewport claims before the rest of the window sees them. The order is the point: a running
     /// modal transform owns the keyboard (that is what modal means), then a handle drag's axis lock, and only
     /// then the keys that START something. Returns true when the key was consumed.
+    /// <para>
+    /// Internal rather than private because the modifiers come in as an argument: that is what lets the probes
+    /// ask what a combination does without a real keyboard behind it.
+    /// </para>
     /// </summary>
-    private bool HandleViewportKey(Key key, ModifierKeys modifiers, bool isRepeat)
+    internal bool HandleViewportKey(Key key, ModifierKeys modifiers, bool isRepeat)
     {
         if (_transformGizmo == null) return false;
         HotkeyMap map = HotkeyMap.Current;
@@ -297,7 +301,9 @@ public partial class MainWindow : Window
         // In walk mode a speed modifier held together with a movement key is flying — not Save and not
         // Duplicate. Creeping backwards must not write files, and creeping right must not clone the selection.
         // Checked before the auto-repeat gate below: a HELD combination would otherwise fire its command on
-        // every repeat. The camera still sees these keys — it listens for handled ones too, precisely for this.
+        // every repeat. The camera still sees these keys: it tracks the TUNNELLING key events, which are
+        // raised whatever this returns — reaching for the bubbling ones is what once left a modifier held
+        // before a movement key unable to start the camera at all.
         CameraKeyMap camera = Viewport.CameraKeys;
         ModifierKeys speed = camera.Fast | camera.Slow;
         if (Viewport.WalkMode && speed != ModifierKeys.None && (modifiers & speed) != 0 && camera.IsMoveKey(key))

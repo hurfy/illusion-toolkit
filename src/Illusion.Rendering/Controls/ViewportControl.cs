@@ -209,22 +209,7 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         Resize();
         OnSceneInitialized();   // subclass hook: environment / content init (the renderer now exists)
 
-        _window = Window.GetWindow(this);
-        if (_window != null)
-        {
-            // Don't control the camera while the user is typing in a text box (search).
-            _onKeyDown = (_, ke) => { if (!(Keyboard.FocusedElement is TextBox)) _keys.Add(ke.Key); };
-            _onKeyUp = (_, ke) => _keys.Remove(ke.Key);
-            // Alt+Tab away (e.g. to the game) delivers the KeyUp to the other app — a held WASD key would
-            // stick and fly the camera unattended for as long as the window stays in the background.
-            _onDeactivated = (_, _) => _keys.Clear();
-            // handledEventsToo: this set is the PHYSICAL state of the movement keys, not a command channel. The
-            // window swallows some of them on purpose (Ctrl+S is Save, but in walk mode it is also "creep
-            // backwards"), and a swallowed key-down with a delivered key-up would leave the set inconsistent.
-            _window.AddHandler(Keyboard.KeyDownEvent, _onKeyDown, handledEventsToo: true);
-            _window.AddHandler(Keyboard.KeyUpEvent, _onKeyUp, handledEventsToo: true);
-            _window.Deactivated += _onDeactivated;
-        }
+        if (Window.GetWindow(this) is { } host) AttachKeyTracking(host);
 
         CompositionTarget.Rendering += OnRendering;
     }
@@ -334,6 +319,38 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
             Renderer.Camera.Move(right * speed, fwd * speed, 0f);
         }
     }
+
+    /// <summary>
+    /// Starts following the keyboard through <paramref name="host"/>. The control is an Image and never takes
+    /// focus, so the keys can only be seen up at the window.
+    /// <para>
+    /// It listens on the TUNNELLING events, and that is the whole point of this method existing by name. The
+    /// set it fills is the PHYSICAL state of the keys, not a command channel, and the host swallows some of
+    /// them on purpose — a speed modifier held with a movement key is flying, so it must not also reach Save
+    /// or Duplicate. WPF does not raise the bubbling KeyDown at all once the preview was handled, and
+    /// handledEventsToo cannot save a handler from an event that never happens: listening down there is what
+    /// once left the camera unable to START moving while a modifier was already held. Both directions, so a
+    /// swallowed key-down with a delivered key-up can never leave a key stuck "down".
+    /// </para>
+    /// </summary>
+    internal void AttachKeyTracking(Window host)
+    {
+        _window = host;
+        // Don't control the camera while the user is typing in a text box (search).
+        _onKeyDown = (_, ke) => { if (Keyboard.FocusedElement is not TextBox) _keys.Add(ke.Key); };
+        _onKeyUp = (_, ke) => _keys.Remove(ke.Key);
+        // Alt+Tab away (e.g. to the game) delivers the KeyUp to the other app — a held movement key would
+        // stick and fly the camera unattended for as long as the window stays in the background.
+        _onDeactivated = (_, _) => _keys.Clear();
+
+        host.AddHandler(Keyboard.PreviewKeyDownEvent, _onKeyDown, handledEventsToo: true);
+        host.AddHandler(Keyboard.PreviewKeyUpEvent, _onKeyUp, handledEventsToo: true);
+        host.Deactivated += _onDeactivated;
+    }
+
+    /// <summary>Is this key currently down as far as the camera is concerned? The probes ask, to check that a
+    /// key the host window swallowed still reached it.</summary>
+    internal bool IsKeyHeld(Key key) => _keys.Contains(key);
 
     // Pressing any movement key cancels an in-progress preset-view animation.
     private bool AnyMoveKey()
@@ -571,8 +588,8 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         CompositionTarget.Rendering -= OnRendering;
         if (_window != null)
         {
-            if (_onKeyDown != null) _window.RemoveHandler(Keyboard.KeyDownEvent, _onKeyDown);
-            if (_onKeyUp != null) _window.RemoveHandler(Keyboard.KeyUpEvent, _onKeyUp);
+            if (_onKeyDown != null) _window.RemoveHandler(Keyboard.PreviewKeyDownEvent, _onKeyDown);
+            if (_onKeyUp != null) _window.RemoveHandler(Keyboard.PreviewKeyUpEvent, _onKeyUp);
             if (_onDeactivated != null) _window.Deactivated -= _onDeactivated;
             _window = null;
         }

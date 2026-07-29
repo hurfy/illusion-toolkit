@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Illusion.Rendering.Controls;
@@ -78,6 +79,7 @@ internal static class SettingsProbes
             CheckDetachedLoad(Check);
             CheckWindow(Check, map);
             CheckLiveApply(Check, map);
+            CheckSwallowedKeysReachCamera(Check);
             sb.AppendLine(RenderSections());
 
             sb.Insert(0, $"SETTINGS PROBE: {pass} passed, {fail} failed\n\n");
@@ -399,6 +401,66 @@ internal static class SettingsProbes
         check("the editor comes back to the shipped keys",
             main.Viewport.CameraKeys.Forward == Key.W && main.SaveMenuItem.InputGestureText == "Ctrl+S");
 
+    }
+
+    /// <summary>
+    /// The one that shipped broken: a key the editor window SWALLOWS must still reach the camera.
+    /// <para>
+    /// In walk mode a speed modifier held with a movement key is flying, so the window swallows that
+    /// combination — otherwise creeping backwards would also Save and creeping right would also Duplicate.
+    /// The camera used to follow the bubbling key events, which WPF never raises once the preview was handled,
+    /// so the swallow also hid the key from the camera: holding the modifier BEFORE pressing the movement key
+    /// left the camera still, and the only way to creep was to start moving fast and then press the modifier.
+    /// </para>
+    /// </summary>
+    private static void CheckSwallowedKeysReachCamera(Assert check)
+    {
+        // A KeyEventArgs needs a real presentation source, and a window that is never shown has none — an
+        // HwndSource gives us one without putting anything on screen.
+        using var source = new HwndSource(new HwndSourceParameters("illusion-probe") { Width = 1, Height = 1 });
+        var host = new Window();
+        var viewport = new ViewportControl();
+
+        var swallowed = new List<Key>();
+        host.AddHandler(Keyboard.PreviewKeyDownEvent, (KeyEventHandler)((_, e) =>
+        {
+            swallowed.Add(e.Key);
+            e.Handled = true;   // stands in for HandleViewportKey claiming the combination
+        }));
+        viewport.AttachKeyTracking(host);
+
+        Press(host, source, Key.W, down: true);
+        check("the window really did swallow the key", swallowed.Contains(Key.W));
+        check("a swallowed key still reaches the camera", viewport.IsKeyHeld(Key.W),
+            "holding a speed modifier before the movement key must still start the camera");
+
+        Press(host, source, Key.W, down: false);
+        check("and its release still reaches the camera", !viewport.IsKeyHeld(Key.W),
+            "a key that goes down but never comes up flies the camera unattended");
+
+        // The swallow itself, asked directly — the modifiers are an argument, so no real keyboard is needed.
+        var main = new MainWindow();
+        main.Viewport.WalkMode = true;
+        ModifierKeys slow = main.Viewport.CameraKeys.Slow;
+        ModifierKeys fast = main.Viewport.CameraKeys.Fast;
+        check("walk mode claims creep + a movement key",
+            main.HandleViewportKey(main.Viewport.CameraKeys.Forward, slow, isRepeat: false));
+        check("walk mode claims cover-ground + a movement key",
+            main.HandleViewportKey(main.Viewport.CameraKeys.Back, fast, isRepeat: false));
+        check("and leaves the same modifier on a key that is not one of the four alone",
+            !main.HandleViewportKey(Key.Q, slow, isRepeat: false));
+
+        main.Viewport.WalkMode = false;
+        check("outside walk mode the combination is not claimed",
+            !main.HandleViewportKey(main.Viewport.CameraKeys.Forward, slow, isRepeat: false));
+    }
+
+    private static void Press(Window host, PresentationSource source, Key key, bool down)
+    {
+        host.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key)
+        {
+            RoutedEvent = down ? Keyboard.PreviewKeyDownEvent : Keyboard.PreviewKeyUpEvent,
+        });
     }
 
     /// <summary>

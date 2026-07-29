@@ -20,4 +20,11 @@
     <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The held-key set behind the fly camera is internal on purpose, but the diagnostic probes in the app
+         assembly assert against it: whether a key reaches the camera depends on how the HOST window routes
+         it, so the check only means anything from over there. -->
+    <InternalsVisibleTo Include="Illusion" />
+  </ItemGroup>
+
 </Project>
