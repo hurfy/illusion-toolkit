@@ -647,20 +647,25 @@ internal static class ActorProbes
             if (placements.TargetOf(a) is not { Children.Count: > 0 } target) continue;
             if (placements.PackOf(a) is not { } p || !p.SceneReferences.Any(r => r.FrameHash == a.FrameHash)) continue;
 
-            if (ActorPrototypeCloner.CanClone(target)) placing ??= a;
+            if (!ActorPrototypeCloner.CanClone(target)) continue; // a skinned character is not copyable at all
+            if (ActorPrototypeCloner.HullsOf(target) == 0) placing ??= a;
             else physical ??= a;
             if (placing != null && physical != null) break;
         }
 
-        // An object built on collision is refused rather than half-copied — see ActorPrototypeCloner.
+        // An object built on collision copies like any other — it is only flagged to the user, because one such
+        // copy crashed the game on load and why is still unknown (see ActorPrototypeCloner.HullsOf).
         if (physical != null && placements.TargetOf(physical) is { } physicalTarget)
         {
-            ActorPrototypeCloner.ClonedPrototype? refused =
-                ActorPrototypeCloner.TryClone(document, physicalTarget, out string? refusal);
-            check("an object built on collision is refused, with a reason",
-                refused == null && !string.IsNullOrEmpty(refusal),
-                $"{physical.EntityName}: {refusal ?? "(no reason given)"}");
-            refused?.Detach();
+            ActorPrototypeCloner.ClonedPrototype? physicalClone =
+                ActorPrototypeCloner.TryClone(document, physicalTarget, out string? physicalReason);
+            check("an object built on collision copies, and its hulls come with it",
+                physicalClone != null
+                && ActorPrototypeCloner.HullsOf(physicalClone.Root) == ActorPrototypeCloner.HullsOf(physicalTarget),
+                physicalClone == null
+                    ? $"{physical.EntityName}: {physicalReason}"
+                    : $"{physical.EntityName}: {ActorPrototypeCloner.HullsOf(physicalClone.Root)} hull(s)");
+            physicalClone?.Detach();
         }
 
         if (placing == null || placements.PackOf(placing) is not { } pack)

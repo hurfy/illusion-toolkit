@@ -87,23 +87,27 @@ public static class ActorPrototypeCloner
     {
         ArgumentNullException.ThrowIfNull(root);
         reason = null;
+        return AllCopyable(root, new HashSet<FrameObjectBase>(), ref reason);
+    }
 
-        // An object built on collision is refused. Its hulls are what the game's physics is made of, and
-        // copying the frames that name them is not the same as copying the object: a copy of a destructible
-        // gate with three hulls is the one copy that made the game refuse a district on load. In the shipped
-        // data this shape is exactly the physics-driven types — C_CrashObject, C_Door, C_Lift, C_Boat, and
-        // nothing else — while every object that is a plain mesh or an empty holder copies and works, verified
-        // in the game on a pinup and on a blocker. Refusing by shape rather than by type name keeps it honest:
-        // whatever a district holds, the rule is "we can copy what we can reproduce".
+    /// <summary>
+    /// How many collision hulls the object carries — nothing is refused for it, but a copy of such an object
+    /// has not been shown to work yet and the caller says so.
+    ///
+    /// A destructible gate with three hulls is the one copy that made the game refuse a district on load, and
+    /// the files it produced were verified correct field by field, so the reason is not known. It is NOT
+    /// "physics cannot be copied": the engine plainly instantiates destructible props many times over — a
+    /// city_crash row places hundreds of copies of one prototype, and duplicating those works. Nor is it "an
+    /// actor cannot be given a fresh object": copying a pinup produces a new object and works in the game,
+    /// action included. What is still untried is a copy of an object whose subtree carries hulls but is
+    /// SIMPLER than that gate — a door with one, the port platform with two.
+    /// </summary>
+    public static int HullsOf(FrameObjectBase root)
+    {
+        ArgumentNullException.ThrowIfNull(root);
         var hulls = new List<FrameObjectCollision>();
         CollectCollisions(root, hulls, new HashSet<FrameObjectBase>());
-        if (hulls.Count > 0)
-        {
-            reason = $"its object is built on collision ({hulls.Count} hull(s)) — copying that needs its own " +
-                     "physics, which crashed the game the one time it was tried";
-            return false;
-        }
-        return AllCopyable(root, new HashSet<FrameObjectBase>(), ref reason);
+        return hulls.Count;
     }
 
     // Every node of the subtree has to be a type the cloner reproduces — a skinned model brings a skeleton and
@@ -111,8 +115,11 @@ public static class ActorPrototypeCloner
     private static bool AllCopyable(FrameObjectBase frame, HashSet<FrameObjectBase> seen, ref string? reason)
     {
         if (!seen.Add(frame)) return true;
+        // The same set CopyOf reproduces — kept in step with it deliberately, since a type this list allows and
+        // that one does not would be discovered halfway through a clone.
         bool copyable = frame.GetType() == typeof(FrameObjectSingleMesh)
-            || frame is FrameObjectFrame or FrameObjectDummy or FrameObjectArea or FrameObjectPoint;
+            || frame is FrameObjectFrame or FrameObjectCollision or FrameObjectDummy or FrameObjectArea
+                or FrameObjectPoint;
         if (!copyable)
         {
             reason = $"'{frame.Name}' is a {frame.GetType().Name}, which cannot be copied yet";

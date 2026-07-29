@@ -143,6 +143,16 @@ internal sealed class ActorEditController
         {
             _host.RaiseNotice($"{skipped} actor(s) not copied — {lastReason}", isError: false);
         }
+
+        // Copies of an object built on collision are allowed but flagged: one such copy — a destructible gate
+        // with three hulls — made the game refuse the district on load, and why is still unknown. Everything
+        // whose object carries no hull is verified working in the game.
+        int withHulls = items.Count(i => i.Clone != null && ActorPrototypeCloner.HullsOf(i.Clone.Root) > 0);
+        if (withHulls > 0)
+        {
+            _host.RaiseNotice($"{withHulls} copy/copies carry collision — test the district in the game before " +
+                              "building on it; a copy of this shape crashed on load once", isError: false);
+        }
     }
 
     private sealed class CopiedActor
