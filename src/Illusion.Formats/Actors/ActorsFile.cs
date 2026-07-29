@@ -1,4 +1,6 @@
+using System.Numerics;
 using Illusion.Formats.IO;
+using Illusion.Formats.Mathematics;
 
 namespace Illusion.Formats.Actors;
 
@@ -53,10 +55,10 @@ public enum EntityType : uint
 /// <summary>
 /// An actor pack (.act / Actors resource): the scene-reference table that links actors to frame objects,
 /// plus the inner actor binary (v6, compressed or uncompressed). Ported from MafiaToolkitV2's
-/// C_ActorsPack, which is itself read-only. This port types the outer structure — the string buffer and
-/// the scene-reference records (frame hash → resolved name + frame index) — and unpacks the inner binary
-/// into its three offset-delimited regions plus the entity offset table (<see cref="Binary"/>), so the file
-/// round-trips byte-exact. Per-entity field typing over the item blob is the gradual next slice.
+/// C_ActorsPack, which is itself read-only. The outer structure (string buffer, scene-reference records),
+/// the inner binary's three offset-delimited regions and the placed actors themselves (<see cref="Actors"/>)
+/// are typed; the entity-init property blobs and the cutscene lookup ride as capsules. The core verifies
+/// every actor by re-encoding it at read time, so the file round-trips byte-exact.
 /// </summary>
 public sealed class ActorsFile
 {
@@ -66,6 +68,11 @@ public sealed class ActorsFile
     /// <summary>The name string buffer, kept verbatim (scene-ref names index into it).</summary>
     public byte[] StringBuffer { get; set; } = Array.Empty<byte>();
     public List<ActorSceneReference> SceneReferences { get; } = new();
+
+    /// <summary>The placed actors, in item-table order.</summary>
+    public IReadOnlyList<ActorEntry> Actors => ActorList;
+
+    internal List<ActorEntry> ActorList { get; } = new();
 
     /// <summary>The unpacked inner actor binary (header + props/items/cutscenes regions + entity offset
     /// table). Internal until per-entity fields are typed.</summary>
@@ -103,6 +110,56 @@ public sealed class ActorsFile
         output.WriteBytes(Native.Misc.NativeMiscFiles.ActorsToBytes(this));
     }
 
+}
+
+/// <summary>
+/// One placed actor: what it is, the names that tie it to a scene object and to its definition, and the
+/// transform the game spawns it with. The transform is the editable part — its wire size is fixed, so a
+/// change cannot shift the pack's offset tables. Everything else is read-only: the strings are
+/// length-coupled to those offsets, and moving them is a separate slice of work.
+/// </summary>
+public sealed class ActorEntry
+{
+    /// <summary>Row in the pack's item table.</summary>
+    public required int Index { get; init; }
+
+    /// <summary>False for an item the core could not type exactly (unknown field shape) — it rides raw
+    /// and its fields below are unset. Such an actor cannot be placed or edited.</summary>
+    public required bool IsTyped { get; init; }
+
+    public required uint TypeId { get; init; }
+    /// <summary><see cref="TypeId"/> as the known entity enum (an unmapped id keeps its numeric value).</summary>
+    public EntityType Type => (EntityType)TypeId;
+    /// <summary>The engine class name ("C_Door"). Empty in a compressed pack, which stores only the id.</summary>
+    public required string TypeName { get; init; }
+
+    public required string EntityName { get; init; }
+    public required string Name1 { get; init; }
+    public required string SceneSector { get; init; }
+    /// <summary>The definition (prototype) this actor was instanced from.</summary>
+    public required string LinkedDefinition { get; init; }
+    /// <summary>Name of the frame object this actor places — resolve it through <see cref="ActorsFile.SceneReferences"/>
+    /// by <see cref="FrameHash"/>, not by name: many actors name a frame that lives in another archive.</summary>
+    public required string LinkedFrame { get; init; }
+
+    public required ulong EntityHash { get; init; }
+    /// <summary>Hash of <see cref="LinkedFrame"/> — the key a scene reference is found by. Zero in an
+    /// uncompressed pack, which stores no hashes.</summary>
+    public required ulong FrameHash { get; init; }
+
+    public Vector3 Position { get; set; }
+    public Quaternion Rotation { get; set; }
+    public Vector3 Scale { get; set; }
+
+    public required ushort Flags { get; init; }
+    /// <summary>Whether the game activates this actor as soon as the pack loads.</summary>
+    public bool ActivateOnInit => (Flags & 1) != 0;
+    /// <summary>Row in the entity-init property table, or -1 when the actor has no property blob.
+    /// Several actors may share one row.</summary>
+    public required short InitPropId { get; init; }
+
+    /// <summary>The spawn transform in the same rotation·scale convention frame matrices use.</summary>
+    public Matrix4x4 Transform => MatrixExtensions.SetMatrix(Rotation, Scale, Position);
 }
 
 /// <summary>Links an actor to a frame object: the frame's name hash, the name's position in the string

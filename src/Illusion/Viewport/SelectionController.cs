@@ -1,5 +1,8 @@
 using System.Numerics;
+using Illusion.Assets.Actors;
+using Illusion.Assets.Adapters;
 using Illusion.Domain;
+using Illusion.Formats.Actors;
 using Illusion.Rendering.Gpu;
 using Illusion.Scene;
 
@@ -75,6 +78,9 @@ internal sealed class SelectionController
         var meshes = new List<GpuMesh>(_selected.Count);
         foreach (SceneNode n in _selected)
             if (n.Mesh is { Instanced: false } m) meshes.Add(m);
+        // A selected actor carries no mesh of its own — outline the geometry of the subtree it places, which is
+        // exactly what was clicked in the viewport.
+        meshes.AddRange(_host.Streamer.ActorSelectionOutlines(_selected));
         _host.Rnd.SetSelectionMeshes(meshes);
 
         // Instanced collision hulls have no per-node mesh, so they highlight through a dedicated renderer path.
@@ -83,6 +89,17 @@ internal sealed class SelectionController
         // Crash props are instanced too: one selected copy is outlined by re-drawing its prototype at that copy's
         // matrix (an instanced mesh has no World of its own to outline).
         _host.Rnd.SetSelectionPlacements(_host.Streamer.CrashSelectionOutlines(_selected));
+
+        // An actor with no geometry has nothing to outline, so its glyph is redrawn larger and white instead —
+        // and it is drawn whether or not the actor overlay is on, so a tree click always shows where it is. An
+        // actor that DOES place geometry is already outlined above; giving it a glyph too would just put a white
+        // diamond over the object.
+        var actors = new List<ActorEntry>(1);
+        foreach (SceneNode n in _selected)
+            if (n.Source is ActorNodeAdapter a && a.HasGlyph) actors.Add(a.Actor);
+        _host.Rnd.SetSelectedActorMarkers(actors.Count > 0
+            ? ActorMarkerBuilder.Build(actors, scale: 1.9f, colorOverride: new Vector4(1f, 1f, 1f, 1f))
+            : null);
 
         GizmoPivot = ComputeGroupPivot();
     }
@@ -107,6 +124,14 @@ internal sealed class SelectionController
                 min = Vector3.Min(min, p);
                 max = Vector3.Max(max, p);
             }
+            else if (n.Source is ActorNodeAdapter actor)
+            {
+                // An actor is a point in space; give "look at this" the glyph's extent so the camera stops at a
+                // sane distance instead of flying into the marker.
+                Vector3 p = actor.Actor.Position;
+                min = Vector3.Min(min, p - new Vector3(ActorMarkerBuilder.Radius));
+                max = Vector3.Max(max, p + new Vector3(ActorMarkerBuilder.Radius));
+            }
         }
         return min.X <= max.X;
     }
@@ -127,6 +152,7 @@ internal sealed class SelectionController
         {
             if (n.TryGetWorldBounds(out Vector3 min, out Vector3 max)) { sum += (min + max) * 0.5f; count++; }
             else if (n.Source is IFrameNode fn) { sum += fn.WorldTransform.Translation; count++; }
+            else if (n.Source is ActorNodeAdapter actor) { sum += actor.Actor.Position; count++; }
         }
         return count > 0 ? sum / count : Vector3.Zero;
     }

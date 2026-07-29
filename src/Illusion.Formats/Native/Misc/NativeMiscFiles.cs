@@ -1,3 +1,4 @@
+using System.Numerics;
 using Illusion.Formats.Actors;
 using Illusion.Formats.CityAreas;
 using Illusion.Formats.Navigation;
@@ -29,11 +30,51 @@ internal static class NativeMiscFiles
                 Name = reference.Name,
             });
         }
+        for (int i = 0; i < wire.Binary.Items.Count; i++)
+        {
+            Model.ActorItemW item = wire.Binary.Items[i];
+            file.ActorList.Add(new ActorEntry
+            {
+                Index = i,
+                IsTyped = item.Typed != 0,
+                TypeId = item.TypeId,
+                TypeName = item.TypeName,
+                EntityName = item.EntityName,
+                Name1 = item.Name1,
+                SceneSector = item.SceneSector,
+                LinkedDefinition = item.LinkedDefinition,
+                LinkedFrame = item.LinkedFrame,
+                EntityHash = item.EntityHash,
+                FrameHash = item.FrameHash,
+                Position = item.Position,
+                Rotation = new Quaternion(item.RotationX, item.RotationY, item.RotationZ, item.RotationW),
+                Scale = item.Scale,
+                Flags = item.Flags,
+                InitPropId = item.InitPropId,
+            });
+        }
         return file;
     }
 
     internal static byte[] ActorsToBytes(ActorsFile file)
     {
+        // The transform is the only editable part of an actor, and it writes back into the same wire
+        // items the read produced — the untouched fields (and every offset) then re-emit as they were.
+        foreach (ActorEntry actor in file.ActorList)
+        {
+            if (!actor.IsTyped || actor.Index < 0 || actor.Index >= file.Binary.Items.Count)
+            {
+                continue;
+            }
+            Model.ActorItemW item = file.Binary.Items[actor.Index];
+            item.Position = actor.Position;
+            item.RotationX = actor.Rotation.X;
+            item.RotationY = actor.Rotation.Y;
+            item.RotationZ = actor.Rotation.Z;
+            item.RotationW = actor.Rotation.W;
+            item.Scale = actor.Scale;
+        }
+
         var wire = new Model.ActorsFileW
         {
             StringBuffer = file.StringBuffer,

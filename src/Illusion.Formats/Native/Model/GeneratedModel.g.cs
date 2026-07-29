@@ -5320,6 +5320,100 @@ internal sealed class ActSceneReferenceW
     }
 }
 
+internal sealed class ActorItemW
+{
+    public byte Typed { get; set; }
+    public uint TypeId { get; set; }
+    public string TypeName { get; set; } = "";
+    public string EntityName { get; set; } = "";
+    public string Name1 { get; set; } = "";
+    public string SceneSector { get; set; } = "";
+    public string LinkedDefinition { get; set; } = "";
+    public string LinkedFrame { get; set; } = "";
+    public ulong EntityHash { get; set; }
+    public ulong FrameHash { get; set; }
+    public Vector3 Position { get; set; }
+    public float RotationX { get; set; }
+    public float RotationY { get; set; }
+    public float RotationZ { get; set; }
+    public float RotationW { get; set; }
+    public Vector3 Scale { get; set; }
+    public ushort Flags { get; set; }
+    public short InitPropId { get; set; }
+    public byte[] Raw { get; set; } = [];
+
+    internal static ActorItemW ReadFrom(BinaryReader reader)
+    {
+        var value = new ActorItemW();
+        value.Typed = reader.ReadByte();
+        value.TypeId = reader.ReadUInt32();
+        value.TypeName = Wire.ReadString(reader);
+        value.EntityName = Wire.ReadString(reader);
+        value.Name1 = Wire.ReadString(reader);
+        value.SceneSector = Wire.ReadString(reader);
+        value.LinkedDefinition = Wire.ReadString(reader);
+        value.LinkedFrame = Wire.ReadString(reader);
+        value.EntityHash = reader.ReadUInt64();
+        value.FrameHash = reader.ReadUInt64();
+        value.Position = Wire.ReadVector3(reader);
+        value.RotationX = reader.ReadSingle();
+        value.RotationY = reader.ReadSingle();
+        value.RotationZ = reader.ReadSingle();
+        value.RotationW = reader.ReadSingle();
+        value.Scale = Wire.ReadVector3(reader);
+        value.Flags = reader.ReadUInt16();
+        value.InitPropId = reader.ReadInt16();
+        value.Raw = Wire.ReadBytes(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Typed);
+        writer.Write(TypeId);
+        Wire.WriteString(writer, TypeName);
+        Wire.WriteString(writer, EntityName);
+        Wire.WriteString(writer, Name1);
+        Wire.WriteString(writer, SceneSector);
+        Wire.WriteString(writer, LinkedDefinition);
+        Wire.WriteString(writer, LinkedFrame);
+        writer.Write(EntityHash);
+        writer.Write(FrameHash);
+        Wire.WriteVector3(writer, Position);
+        writer.Write(RotationX);
+        writer.Write(RotationY);
+        writer.Write(RotationZ);
+        writer.Write(RotationW);
+        Wire.WriteVector3(writer, Scale);
+        writer.Write(Flags);
+        writer.Write(InitPropId);
+        Wire.WriteBytes(writer, Raw);
+    }
+
+    internal static void Diff(string path, ActorItemW a, ActorItemW b, List<string> diffs)
+    {
+        if (a.Typed != b.Typed) diffs.Add($"{path}.Typed: {a.Typed} vs {b.Typed}");
+        if (a.TypeId != b.TypeId) diffs.Add($"{path}.TypeId: {a.TypeId} vs {b.TypeId}");
+        if (!string.Equals(a.TypeName, b.TypeName, StringComparison.Ordinal)) diffs.Add($"{path}.TypeName: '{a.TypeName}' vs '{b.TypeName}'");
+        if (!string.Equals(a.EntityName, b.EntityName, StringComparison.Ordinal)) diffs.Add($"{path}.EntityName: '{a.EntityName}' vs '{b.EntityName}'");
+        if (!string.Equals(a.Name1, b.Name1, StringComparison.Ordinal)) diffs.Add($"{path}.Name1: '{a.Name1}' vs '{b.Name1}'");
+        if (!string.Equals(a.SceneSector, b.SceneSector, StringComparison.Ordinal)) diffs.Add($"{path}.SceneSector: '{a.SceneSector}' vs '{b.SceneSector}'");
+        if (!string.Equals(a.LinkedDefinition, b.LinkedDefinition, StringComparison.Ordinal)) diffs.Add($"{path}.LinkedDefinition: '{a.LinkedDefinition}' vs '{b.LinkedDefinition}'");
+        if (!string.Equals(a.LinkedFrame, b.LinkedFrame, StringComparison.Ordinal)) diffs.Add($"{path}.LinkedFrame: '{a.LinkedFrame}' vs '{b.LinkedFrame}'");
+        if (a.EntityHash != b.EntityHash) diffs.Add($"{path}.EntityHash: {a.EntityHash} vs {b.EntityHash}");
+        if (a.FrameHash != b.FrameHash) diffs.Add($"{path}.FrameHash: {a.FrameHash} vs {b.FrameHash}");
+        Wire.DiffVector3($"{path}.Position", a.Position, b.Position, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.RotationX) != BitConverter.SingleToUInt32Bits(b.RotationX)) diffs.Add($"{path}.RotationX: {a.RotationX} vs {b.RotationX}");
+        if (BitConverter.SingleToUInt32Bits(a.RotationY) != BitConverter.SingleToUInt32Bits(b.RotationY)) diffs.Add($"{path}.RotationY: {a.RotationY} vs {b.RotationY}");
+        if (BitConverter.SingleToUInt32Bits(a.RotationZ) != BitConverter.SingleToUInt32Bits(b.RotationZ)) diffs.Add($"{path}.RotationZ: {a.RotationZ} vs {b.RotationZ}");
+        if (BitConverter.SingleToUInt32Bits(a.RotationW) != BitConverter.SingleToUInt32Bits(b.RotationW)) diffs.Add($"{path}.RotationW: {a.RotationW} vs {b.RotationW}");
+        Wire.DiffVector3($"{path}.Scale", a.Scale, b.Scale, diffs);
+        if (a.Flags != b.Flags) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+        if (a.InitPropId != b.InitPropId) diffs.Add($"{path}.InitPropId: {a.InitPropId} vs {b.InitPropId}");
+        Wire.DiffBytes($"{path}.Raw", a.Raw, b.Raw, diffs);
+    }
+}
+
 internal sealed class ActorBinaryW
 {
     public byte Typed { get; set; }
@@ -5330,6 +5424,8 @@ internal sealed class ActorBinaryW
     public uint Size1 { get; set; }
     public byte[] Props { get; set; } = [];
     public List<uint> ItemOffsets { get; set; } = [];
+    public byte ItemsTyped { get; set; }
+    public List<ActorItemW> Items { get; set; } = [];
     public byte[] ItemData { get; set; } = [];
     public byte[] Cutscenes { get; set; } = [];
 
@@ -5350,6 +5446,14 @@ internal sealed class ActorBinaryW
                 value.ItemOffsets.Add(reader.ReadUInt32());
             }
         }
+        value.ItemsTyped = reader.ReadByte();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Items.Add(ActorItemW.ReadFrom(reader));
+            }
+        }
         value.ItemData = Wire.ReadBytes(reader);
         value.Cutscenes = Wire.ReadBytes(reader);
         return value;
@@ -5368,6 +5472,12 @@ internal sealed class ActorBinaryW
         foreach (uint item in ItemOffsets)
         {
             writer.Write(item);
+        }
+        writer.Write(ItemsTyped);
+        Wire.WriteCount(writer, Items.Count);
+        foreach (ActorItemW item in Items)
+        {
+            item.WriteTo(writer);
         }
         Wire.WriteBytes(writer, ItemData);
         Wire.WriteBytes(writer, Cutscenes);
@@ -5391,6 +5501,18 @@ internal sealed class ActorBinaryW
             for (int i = 0; i < a.ItemOffsets.Count; i++)
             {
                 if (a.ItemOffsets[i] != b.ItemOffsets[i]) diffs.Add($"{path}.ItemOffsets[{i}]: {a.ItemOffsets[i]} vs {b.ItemOffsets[i]}");
+            }
+        }
+        if (a.ItemsTyped != b.ItemsTyped) diffs.Add($"{path}.ItemsTyped: {a.ItemsTyped} vs {b.ItemsTyped}");
+        if (a.Items.Count != b.Items.Count)
+        {
+            diffs.Add($"{path}.Items: count {a.Items.Count} vs {b.Items.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Items.Count; i++)
+            {
+                ActorItemW.Diff($"{path}.Items[{i}]", a.Items[i], b.Items[i], diffs);
             }
         }
         Wire.DiffBytes($"{path}.ItemData", a.ItemData, b.ItemData, diffs);

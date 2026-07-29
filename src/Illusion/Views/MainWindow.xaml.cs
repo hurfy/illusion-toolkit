@@ -10,6 +10,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using Illusion.Assets;
+using Illusion.Assets.Adapters;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
 using Illusion.Domain;
@@ -439,8 +440,12 @@ public partial class MainWindow : Window
             && (ReferenceEquals(cur, ObjectTab) || ReferenceEquals(cur, TypeTab) || ReferenceEquals(cur, MaterialsTab));
         if (!keepCurrent) target.IsSelected = true; // its Visibility binding has already made it visible
 
-        // Selecting a mesh (viewport ray-pick or tree click) scrolls the hierarchy to that mesh's row.
-        if (Viewport.SelectedNode is { Mesh: not null } meshNode) BringNodeIntoView(meshNode);
+        // Selecting a mesh or an actor (viewport ray-pick or tree click) scrolls the hierarchy to its row —
+        // an actor node carries no mesh, and without this a viewport pick left the tree where it was.
+        if (Viewport.SelectedNode is { } picked && (picked.Mesh != null || picked.Source is ActorNodeAdapter))
+        {
+            BringNodeIntoView(picked);
+        }
     }
 
     // Scrolls the scene tree to a node's row, realizing it through the virtualized panels — WPF's TreeView does
@@ -1202,5 +1207,7 @@ public partial class MainWindow : Window
         Viewport.ShowProxyScenes = ProxyScenesToggle.IsChecked == true;
         Viewport.ShowProxyMeshes = ProxyMeshesToggle.IsChecked == true;
         Viewport.ShowSnowScenes = SnowScenesToggle.IsChecked == true;
+        // Actor glyphs are pure overlay — no scene reload, unlike the three filters above.
+        Viewport.ShowActors = ActorsToggle.IsChecked == true;
     }
 }

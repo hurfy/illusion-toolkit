@@ -1,4 +1,5 @@
 using System.Numerics;
+using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Domain;
 using Illusion.Formats.Archive;
@@ -70,26 +71,35 @@ public static class SdsMeshLoader
     }
 
     // Shared loader prologue: extract (if needed), warm up materials, build the scene, and return its
-    // FrameResource — or null when the scene carries no frame objects.
-    private static FrameResource? OpenFrameResource(FileInfo sdsFile, out string extracted)
+    // FrameResource — or null when the scene carries no frame objects. `placements` is where the archive's
+    // actor pack puts the prototype objects it spawns (empty when there is none).
+    private static FrameResource? OpenFrameResource(FileInfo sdsFile, out string extracted,
+        out ActorPlacements placements)
     {
         extracted = EnsureExtracted(sdsFile);
         MafiaMaterials.EnsureLoaded();
-        FrameResource? fr = OpenScene(extracted).FrameResource;
-        return fr?.FrameObjects == null ? null : fr;
+        ExtractedSds scene = OpenScene(extracted);
+        FrameResource? fr = scene.FrameResource;
+        if (fr?.FrameObjects == null)
+        {
+            placements = ActorPlacements.Empty;
+            return null;
+        }
+        placements = ActorPlacements.Load(scene.Manifest, fr);
+        return fr;
     }
 
     public static List<MeshData> LoadSds(FileInfo sdsFile)
     {
         var result = new List<MeshData>();
-        FrameResource? fr = OpenFrameResource(sdsFile, out _);
+        FrameResource? fr = OpenFrameResource(sdsFile, out _, out ActorPlacements placements);
         if (fr == null) return result;
 
         foreach (var pair in fr.FrameObjects)
         {
             if (pair.Value is FrameObjectSingleMesh mesh && mesh.Geometry != null)
             {
-                MeshData? md = TryConvert(mesh);
+                MeshData? md = TryConvert(mesh, placement: placements.For(mesh));
                 if (md != null) result.Add(md);
             }
         }
@@ -115,10 +125,10 @@ public static class SdsMeshLoader
                 if (!d.Equals(self, StringComparison.OrdinalIgnoreCase)) others.Add(d);
 
         var meshes = new List<MeshData>();
-        FrameResource? fr = OpenFrameResource(sdsFile, out _);
+        FrameResource? fr = OpenFrameResource(sdsFile, out _, out ActorPlacements placements);
         if (fr == null) return (new List<SdsFrameNode>(), meshes, null);
 
-        var document = new SceneDocumentAdapter(fr, sdsFile);
+        var document = new SceneDocumentAdapter(fr, sdsFile, placements);
         var roots = BuildRoots(fr, document, others, meshes, null);
         return (roots, meshes, document);
     }
@@ -132,10 +142,10 @@ public static class SdsMeshLoader
         CrashPlacements? Placements) LoadCrashHierarchy(FileInfo crashSds)
     {
         var meshes = new List<MeshData>();
-        FrameResource? fr = OpenFrameResource(crashSds, out string extracted);
+        FrameResource? fr = OpenFrameResource(crashSds, out string extracted, out ActorPlacements actors);
         if (fr == null) return (new List<SdsFrameNode>(), meshes, null, null);
 
-        var document = new SceneDocumentAdapter(fr, crashSds);
+        var document = new SceneDocumentAdapter(fr, crashSds, actors);
         CrashPlacements? placements = LoadPlacements(crashSds, extracted, fr);
         var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildClouds());
         return (roots, meshes, document, placements);
@@ -254,7 +264,7 @@ public static class SdsMeshLoader
         {
             CrashPlacements.Cloud cloud = default;
             instanceMap?.TryGetValue(sm, out cloud);
-            MeshData? md = TryConvert(sm, cloud.Matrices, cloud.DrawDistances);
+            MeshData? md = TryConvert(sm, cloud.Matrices, cloud.DrawDistances, document.Placements.For(sm));
             if (md != null) { node.Mesh = md; meshes.Add(md); }
         }
 
@@ -423,7 +433,7 @@ public static class SdsMeshLoader
 
     // Internal for the frame duplicator, which needs a render-ready MeshData for a freshly cloned object.
     internal static MeshData? TryConvert(FrameObjectSingleMesh mesh, Matrix4x4[]? instances = null,
-        float[]? drawDistances = null)
+        float[]? drawDistances = null, Matrix4x4? placement = null)
     {
         try
         {
@@ -435,10 +445,21 @@ public static class SdsMeshLoader
 
             MeshPart[] parts = BuildParts(mesh, decoded.Indices.Length);
 
+            // An actor-placed mesh carries an identity matrix of its own — the actor pack holds where it
+            // stands (see ActorPlacements). Instanced copies get the same treatment per copy, so a crash
+            // archive that also ships actors stays consistent.
+            Matrix4x4 place = placement ?? Matrix4x4.Identity;
+            if (!place.IsIdentity && instances != null)
+            {
+                var placed = new Matrix4x4[instances.Length];
+                for (int i = 0; i < instances.Length; i++) placed[i] = instances[i] * place;
+                instances = placed;
+            }
+
             return new MeshData
             {
                 Name = mesh.Name?.ToString() ?? "mesh",
-                World = mesh.WorldTransform,
+                World = mesh.WorldTransform * place,
                 Positions = decoded.Positions,
                 Normals = decoded.Normals,
                 UVs = decoded.UVs,

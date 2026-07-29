@@ -1,3 +1,4 @@
+using Illusion.Assets.Actors;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
 using Illusion.Formats.Frames;
@@ -20,17 +21,36 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     private readonly HashSet<ulong> _dirtyIndexBuffers = new();
     private bool _nameTableDirty;
 
-    public SceneDocumentAdapter(FrameResource frame, FileInfo sourceArchive)
+    public SceneDocumentAdapter(FrameResource frame, FileInfo sourceArchive, ActorPlacements? placements = null)
     {
         _frame = frame;
         SourceArchive = sourceArchive;
+        Placements = placements ?? ActorPlacements.Empty;
     }
 
     public FileInfo SourceArchive { get; }
 
+    /// <summary>Where the scene's actor pack puts its prototype objects. Objects an actor places carry an
+    /// identity matrix of their own, so every world transform this document hands out folds the actor's
+    /// matrix in — see <see cref="ActorPlacements"/>.</summary>
+    public ActorPlacements Placements { get; }
+
     /// <summary>The wrapped vendor resource — for the asset layer's own machinery (the bridge's
     /// object factory); the UI never touches it.</summary>
     internal FrameResource Frame => _frame;
+
+    private readonly Dictionary<Formats.Actors.ActorEntry, ActorNodeAdapter> _actorNodes = new();
+
+    /// <summary>Wraps one of the scene's actors as a property source, canonically — the tree and the property
+    /// panel must agree on identity the same way they do for frame objects.</summary>
+    public ActorNodeAdapter ActorNode(Formats.Actors.ActorEntry actor)
+    {
+        if (!_actorNodes.TryGetValue(actor, out ActorNodeAdapter? node))
+        {
+            _actorNodes[actor] = node = new ActorNodeAdapter(actor, Placements);
+        }
+        return node;
+    }
 
     public int ObjectCount => _frame.FrameObjects?.Count ?? 0;
     public int GeometryCount => _frame.FrameGeometries?.Count ?? 0;

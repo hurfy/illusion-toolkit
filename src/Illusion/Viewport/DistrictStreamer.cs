@@ -2,11 +2,13 @@ using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using Illusion.Assets;
+using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Collisions;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
 using Illusion.Domain;
+using Illusion.Formats.Actors;
 using Illusion.Formats.Collisions;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Translokator;
@@ -117,6 +119,138 @@ internal sealed class DistrictStreamer
         public IReadOnlyList<Vector3>? NavLines;                     // decoded .nov road graph (edge endpoint pairs), null if none
         public IReadOnlyList<Vector3>? NavMeshLines;                // decoded .nov AI-mesh box wireframe, null if none
         public IReadOnlyList<Vector3>? NavWorldLines;               // decoded .nav path-object boxes, null if none
+        public ActorMarkerRenderData? ActorMarkers;                 // glyphs for the actors nothing draws, null if none
+        public List<(SceneNode Node, Vector3 Position)>? ActorPickables; // those glyphs, tree nodes, for ray-picking
+        public ActorPlacements? ActorPlacements;                          // which actor governs which frame
+        public Dictionary<ActorEntry, SceneNode>? ActorNodes;             // actor → its tree node
+        public Dictionary<FrameObjectBase, SceneNode>? MeshNodeByFrame;   // frame → its mesh leaf (outline lookup)
+    }
+
+    // Glyph → its tree node, per resident district (keyed by the SDS node, as the renderer keys its buffers).
+    // A glyph has no geometry, so the mesh pick cannot see it; this is what a viewport click tests against.
+    private readonly Dictionary<SceneNode, List<(SceneNode Node, Vector3 Position)>> _actorPickables = new();
+
+    // Per resident district: which actor governs which frame (the placements know), and each actor's tree node.
+    // Together these make a click on a placed mesh select the ACTOR that puts it there — the mesh is only its
+    // prototype. _meshNodeByFrame is the way back, so the actor's geometry can still be outlined.
+    private readonly Dictionary<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> _actorScenes = new();
+    private readonly Dictionary<SceneNode, Dictionary<FrameObjectBase, SceneNode>> _meshNodeByFrame = new();
+
+    // Districts whose glyph buffer must be rebuilt because a tree eye was toggled. Rebuilding is a full buffer
+    // upload, so it is coalesced to once per frame rather than done per node of a cascade.
+    private readonly HashSet<SceneNode> _actorMarkersDirty = new();
+
+    // An actor node owns nothing the eye's usual cascade can reach: a glyph is not a GpuMesh, and the geometry an
+    // actor places hangs under the FrameResource branch, not under the actor. So each actor node is watched, and
+    // hiding it either drops its glyph from the district buffer or hides the meshes of the subtree it places.
+    private void WatchActorVisibility(SceneNode sdsNode, IEnumerable<SceneNode> actorNodes)
+    {
+        foreach (SceneNode node in actorNodes)
+        {
+            SceneNode captured = node;
+            captured.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(SceneNode.IsVisible)) return;
+                if (captured.Source is not ActorNodeAdapter actor) return;
+
+                if (actor.HasGlyph) _actorMarkersDirty.Add(sdsNode);
+                else if (actor.Target is { } target)
+                {
+                    var meshes = new List<GpuMesh>();
+                    CollectSubtreeMeshes(target, meshes, new HashSet<FrameObjectBase>());
+                    foreach (GpuMesh m in meshes) m.Visible = captured.IsVisible;
+                }
+            };
+        }
+    }
+
+    // Re-uploads the glyph buffers of districts whose visibility changed this frame.
+    private void RebuildDirtyActorMarkers()
+    {
+        if (_actorMarkersDirty.Count == 0 || _host.Rnd == null) return;
+
+        foreach (SceneNode sdsNode in _actorMarkersDirty)
+        {
+            if (!_actorPickables.TryGetValue(sdsNode, out List<(SceneNode Node, Vector3 Position)>? pickables)) continue;
+
+            var visible = new List<ActorEntry>(pickables.Count);
+            foreach ((SceneNode node, _) in pickables)
+            {
+                if (node.IsVisible && node.Source is ActorNodeAdapter a) visible.Add(a.Actor);
+            }
+            _host.Rnd.SetActorDistrict(sdsNode, visible.Count > 0 ? ActorMarkerBuilder.Build(visible) : null);
+        }
+        _actorMarkersDirty.Clear();
+    }
+
+    /// <summary>The actor node governing a frame object, or null when no actor places it.</summary>
+    public SceneNode? ActorNodeFor(FrameObjectBase frame)
+    {
+        foreach ((ActorPlacements placements, Dictionary<ActorEntry, SceneNode> nodes) in _actorScenes.Values)
+        {
+            if (placements.ActorCovering(frame) is { } actor && nodes.TryGetValue(actor, out SceneNode? node))
+            {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>GPU meshes to outline for the selected actors — an actor with geometry has no mesh of its own,
+    /// so the highlight is the meshes of the subtree it places.</summary>
+    public IReadOnlyList<GpuMesh> ActorSelectionOutlines(IReadOnlyList<SceneNode> selected)
+    {
+        var meshes = new List<GpuMesh>();
+        foreach (SceneNode n in selected)
+        {
+            if (n.Source is not ActorNodeAdapter actor || actor.Target is not { } target) continue;
+            CollectSubtreeMeshes(target, meshes, new HashSet<FrameObjectBase>());
+        }
+        return meshes;
+    }
+
+    // Mesh leaves keyed by their frame object, so an actor's subtree can find the geometry to outline.
+    private static Dictionary<FrameObjectBase, SceneNode>? BuildMeshNodeMap(List<SceneNode> meshLeaves)
+    {
+        if (meshLeaves.Count == 0) return null;
+        var map = new Dictionary<FrameObjectBase, SceneNode>(meshLeaves.Count);
+        foreach (SceneNode leaf in meshLeaves)
+        {
+            if (leaf.Source is FrameNodeAdapter fna) map[fna.Frame] = leaf;
+        }
+        return map.Count > 0 ? map : null;
+    }
+
+    private void CollectSubtreeMeshes(FrameObjectBase frame, List<GpuMesh> into, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
+        {
+            if (map.TryGetValue(frame, out SceneNode? leaf) && leaf.Mesh is { Instanced: false } m) into.Add(m);
+        }
+        foreach (FrameObjectBase child in frame.Children) CollectSubtreeMeshes(child, into, seen);
+    }
+
+    /// <summary>Nearest actor glyph under the ray, or null. Glyphs draw over everything, so they win a pick
+    /// outright — clicking the marker you can see selects that actor, wall in between or not.</summary>
+    public SceneNode? PickActor(Vector3 origin, Vector3 dir, out float bestT)
+    {
+        bestT = float.PositiveInfinity;
+        SceneNode? hit = null;
+        foreach (List<(SceneNode Node, Vector3 Position)> list in _actorPickables.Values)
+        {
+            var positions = new Vector3[list.Count];
+            for (int i = 0; i < list.Count; i++) positions[i] = list[i].Position;
+
+            int index = ActorPicking.Pick(positions, origin, dir, ActorMarkerBuilder.Radius, out float t);
+            if (index >= 0 && t < bestT)
+            {
+                bestT = t;
+                hit = list[index].Node;
+            }
+        }
+        if (hit == null) bestT = float.PositiveInfinity;
+        return hit;
     }
 
     private Task<PreparedLoad?>? _loadTask;
@@ -136,6 +270,9 @@ internal sealed class DistrictStreamer
         // Completed background load → attach its tree, then feed meshes to the renderer per frame.
         if (!_building && _loadTask != null && _loadTask.IsCompleted) BeginBuild();
         if (_building) AttachStep();
+
+        // Glyphs hidden through the tree's eye: one coalesced rebuild per frame (see WatchActorVisibility).
+        RebuildDirtyActorMarkers();
 
         // The queue (single area / city_univers when streaming) has priority over streaming.
         if (!_building && _loadTask == null && _loadQueue.Count > 0)
@@ -788,7 +925,9 @@ internal sealed class DistrictStreamer
             var sds = new SceneNode(label, "Sds", true);
             // The document carries its source archive (ISceneDocument.SourceArchive), so an edited object
             // under this node can be saved (re-serialize into the extracted folder) and built (repack → .sds).
-            var frNode = new SceneNode("FrameResource", "FrameResource", true) { Source = document, IsExpanded = true };
+            // Not expanded on creation: opening an SDS should show what it holds (FrameResource, Collisions, AI,
+            // Actors), not dump a district's whole frame tree into the list.
+            var frNode = new SceneNode("FrameResource", "FrameResource", true) { Source = document };
             foreach (SdsFrameNode r in roots) frNode.AddChild(SceneTree.BuildSceneTree(r, meshLeaves));
             sds.AddChild(frNode);
 
@@ -910,6 +1049,51 @@ internal sealed class DistrictStreamer
             }
             ct.ThrowIfCancellationRequested();
 
+            // "Actors" section: everything the .act pack places, grouped by what it is. Each leaf carries an
+            // ActorNodeAdapter, so selecting it fills the property panel with the actor's own fields. The ones
+            // with no geometry also become viewport glyphs (ShowActors gates drawing).
+            ActorMarkerRenderData? actorMarkers = null;
+            List<(SceneNode Node, Vector3 Position)>? actorPickables = null;
+            var actorNodes = new Dictionary<ActorEntry, SceneNode>();
+            ActorPlacements? actorPlacements = null;
+            if (document is SceneDocumentAdapter sceneDoc && sceneDoc.Placements.All.Count > 0)
+            {
+                ActorPlacements placements2 = sceneDoc.Placements;
+                actorPlacements = placements2;
+                var actors = new SceneNode("Actors", "Actors", true);
+
+                // Grouped by the entity type itself ("C_Sound", "LightEntity") — the tree stays a plain list of
+                // type → actor. Counts and coverage live in the property panel, not in the row labels.
+                var invisible = new HashSet<ActorEntry>(placements2.Invisible);
+                foreach (IGrouping<string, ActorEntry> group in placements2.All
+                             .GroupBy(a => a.TypeName.Length > 0 ? a.TypeName : a.Type.ToString())
+                             .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    var section = new SceneNode(group.Key, "Actors", true);
+                    foreach (ActorEntry actor in group)
+                    {
+                        ActorNodeAdapter adapter = sceneDoc.ActorNode(actor);
+                        var node = new SceneNode(adapter.Name, "Actor", false) { Source = adapter };
+                        section.AddChild(node);
+                        actorNodes[actor] = node;
+                    }
+                    actors.AddChild(section);
+                }
+                sds.AddChild(actors);
+
+                if (placements2.Invisible.Count > 0)
+                {
+                    actorMarkers = ActorMarkerBuilder.Build(placements2.Invisible);
+                    // Same order as the glyphs, so a picked index maps straight back to its node.
+                    actorPickables = new List<(SceneNode, Vector3)>(placements2.Invisible.Count);
+                    foreach (ActorEntry actor in placements2.Invisible)
+                    {
+                        if (actorNodes.TryGetValue(actor, out SceneNode? node)) actorPickables.Add((node, actor.Position));
+                    }
+                }
+            }
+            ct.ThrowIfCancellationRequested();
+
             return new PreparedLoad
             {
                 Sds = sds,
@@ -923,6 +1107,11 @@ internal sealed class DistrictStreamer
                 NavLines = navLines,
                 NavMeshLines = navMeshLines,
                 NavWorldLines = navWorldLines,
+                ActorMarkers = actorMarkers,
+                ActorPickables = actorPickables,
+                ActorPlacements = actorPlacements,
+                ActorNodes = actorNodes.Count > 0 ? actorNodes : null,
+                MeshNodeByFrame = BuildMeshNodeMap(meshLeaves),
             };
         }
         catch (Exception ex)
@@ -1012,6 +1201,16 @@ internal sealed class DistrictStreamer
         if (load.NavMeshLines != null) _host.Rnd!.SetNavMeshDistrict(load.Sds, load.NavMeshLines);
         // .nav path objects (cover / vault-over markers): separate toggle (ShowNavWorld), same keying.
         if (load.NavWorldLines != null) _host.Rnd!.SetNavWorldDistrict(load.Sds, load.NavWorldLines);
+        // Actor glyphs (sounds, lights, triggers…): own toggle (ShowActors), same per-district keying.
+        if (load.ActorMarkers != null) _host.Rnd!.SetActorDistrict(load.Sds, load.ActorMarkers);
+        if (load.ActorPickables is { Count: > 0 }) _actorPickables[load.Sds] = load.ActorPickables;
+        if (load.MeshNodeByFrame != null) _meshNodeByFrame[load.Sds] = load.MeshNodeByFrame;
+        if (load.ActorPlacements != null && load.ActorNodes != null)
+        {
+            _actorScenes[load.Sds] = (load.ActorPlacements, load.ActorNodes);
+            // After the mesh map is in place: hiding an actor has to find the geometry it places.
+            WatchActorVisibility(load.Sds, load.ActorNodes.Values);
+        }
 
         if (load.Meshes.Count == 0) { _building = false; _host.RaiseSceneChanged(); }
     }
@@ -1119,6 +1318,11 @@ internal sealed class DistrictStreamer
             _host.Rnd!.RemoveNavDistrict(node);       // and its .nov graph overlay
             _host.Rnd!.RemoveNavMeshDistrict(node);   // and its .nov AI-mesh overlay
             _host.Rnd!.RemoveNavWorldDistrict(node);  // and its .nav path-object overlay
+            _host.Rnd!.RemoveActorDistrict(node);     // and its actor glyphs
+            _actorPickables.Remove(node);             // and their pick entries
+            _actorMarkersDirty.Remove(node);          // and any pending glyph rebuild
+            _actorScenes.Remove(node);                // and the actor ↔ node maps
+            _meshNodeByFrame.Remove(node);            // and the frame → mesh-leaf map
             _collisionSources.RemoveAll(s => ReferenceEquals(s.Sds, node)); // its "Collisions" tree node leaves with the SDS subtree
             _crashSources.RemoveAll(s => ReferenceEquals(s.Sds, node));     // …and its "Crash objects" layer
         }
@@ -1150,6 +1354,11 @@ internal sealed class DistrictStreamer
         _host.Rnd?.ClearCollision();
         _host.Rnd?.ClearNov();
         _host.Rnd?.ClearNavWorld();
+        _host.Rnd?.ClearActors();
+        _actorPickables.Clear();
+        _actorMarkersDirty.Clear();
+        _actorScenes.Clear();
+        _meshNodeByFrame.Clear();
         _collisionSources.Clear();
         _crashSources.Clear();
         _host.Tree.Clear();

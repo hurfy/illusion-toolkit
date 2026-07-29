@@ -1,0 +1,321 @@
+using System.IO;
+using System.Text;
+using Illusion.Assets;
+using Illusion.Assets.Actors;
+using Illusion.Assets.Adapters;
+using Illusion.Assets.Sds;
+using Illusion.Domain;
+using Illusion.Domain.Properties;
+using Illusion.Formats.Actors;
+using Illusion.Formats.Frames;
+using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Rendering.Scene;
+using static Illusion.Diagnostics.Probes.ProbeAssert;
+
+namespace Illusion.Diagnostics.Probes;
+
+/// <summary>Probes of the actor layer: a scene's .act pack, and the placement it gives the frame objects
+/// it spawns.</summary>
+internal static class ActorProbes
+{
+    /// <summary>
+    /// Actor placement for one district: reads the pack, resolves it against the frame resource and checks
+    /// that every placed prototype now stands where its actor says — and that nothing else moved. Also
+    /// re-saves the pack and requires the bytes back unchanged, since reading now types every actor.
+    /// Output: %TEMP%\illusion_actors.txt
+    /// </summary>
+    internal static void RunActorPlacementProbe(string district)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_actors.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            string sds = Path.Combine(MafiaEnvironment.CityFolder, district + ".sds");
+            if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
+
+            string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
+            ExtractedSds scene = SdsMeshLoader.OpenScene(extracted);
+            FrameResource? fr = scene.FrameResource;
+            if (fr?.FrameObjects == null) { sb.AppendLine("district carries no frame objects"); return; }
+
+            string[] packFiles = scene.Manifest.GetFiles("Actors").ToArray();
+            sb.AppendLine($"ACTOR PLACEMENT PROBE — district={district}, packs={packFiles.Length}");
+            Check("district ships an actor pack", packFiles.Length > 0, string.Join(", ", packFiles.Select(Path.GetFileName)));
+            if (packFiles.Length == 0) return;
+
+            // ── The pack itself: typed and byte-exact ──
+            var packs = new List<ActorsFile>();
+            int typed = 0, raw = 0, fixpoint = 0;
+            foreach (string file in packFiles)
+            {
+                ActorsFile pack = ActorsFile.Load(file);
+                packs.Add(pack);
+                foreach (ActorEntry a in pack.Actors) { if (a.IsTyped) typed++; else raw++; }
+                if (pack.ToBytes().AsSpan().SequenceEqual(File.ReadAllBytes(file))) fixpoint++;
+            }
+            Check("packs re-save byte-identically", fixpoint == packFiles.Length, $"{fixpoint}/{packFiles.Length}");
+            Check("every actor is typed", raw == 0, $"typed={typed}, raw={raw}");
+
+            // ── Resolution, on the very scene the viewport loads (a second FrameResource would be a
+            //    different set of objects, and the placements would not apply to it) ──
+            (List<SdsFrameNode> roots, List<MeshData> meshes, ISceneDocument? loaded) =
+                SdsMeshLoader.LoadHierarchy(new FileInfo(sds));
+            Check("district loads", loaded is SceneDocumentAdapter, $"{roots.Count} roots, {meshes.Count} meshes");
+            if (loaded is not SceneDocumentAdapter document) return;
+
+            ActorPlacements placements = document.Placements;
+            sb.AppendLine($"actors={typed + raw}, placed={placements.PlacedCount}, " +
+                          $"covered frames={placements.CoveredCount}, unresolved={placements.UnresolvedCount}");
+            Check("some actors resolve to frame objects", placements.PlacedCount > 0, $"{placements.PlacedCount}");
+
+            var nodes = new List<FrameNodeAdapter>();
+            void Walk(SdsFrameNode n)
+            {
+                if (n.Source is FrameNodeAdapter adapter) nodes.Add(adapter);
+                foreach (SdsFrameNode c in n.Children) Walk(c);
+            }
+            foreach (SdsFrameNode r in roots) Walk(r);
+
+            // ── The prototypes an actor places are parked at the origin; with the placement folded in they
+            //    report the actor's own position — which is what the gizmo and the renderer read ──
+            int placedAtOrigin = 0, placedElsewhere = 0, matched = 0, mismatched = 0;
+            string firstMismatch = "";
+            foreach (FrameNodeAdapter node in nodes)
+            {
+                ActorEntry? actor = placements.ActorOf(node.Frame);
+                if (actor == null) continue;
+
+                if (node.Frame.WorldTransform.Translation.LengthSquared() < 1e-8f) placedAtOrigin++;
+                else placedElsewhere++;
+
+                if (Approx(node.WorldTransform.Translation, actor.Position, 1e-2f)) matched++;
+                else
+                {
+                    mismatched++;
+                    if (firstMismatch == "")
+                        firstMismatch = $"{node.Frame.Name} → {node.WorldTransform.Translation} vs actor {actor.Position}";
+                }
+            }
+            Check("placed prototypes sit at the origin in the frame resource", placedElsewhere == 0,
+                $"atOrigin={placedAtOrigin}, elsewhere={placedElsewhere}");
+            Check("scene nodes report the actor's position", mismatched == 0 && matched > 0,
+                $"matched={matched}, off={mismatched} {firstMismatch}");
+
+            // ── Nothing outside the placed subtrees moved ──
+            int untouched = 0, moved = 0;
+            foreach (FrameNodeAdapter node in nodes)
+            {
+                if (placements.TryGet(node.Frame, out _)) continue;
+                if (Approx(node.WorldTransform.Translation, node.Frame.WorldTransform.Translation)) untouched++;
+                else moved++;
+            }
+            Check("frames no actor places keep their own world transform", moved == 0, $"untouched={untouched}");
+
+            // ── The meshes under a placed prototype travel with it: the render matrix must agree with the node ──
+            int placedMeshes = 0, meshOff = 0;
+            string firstMeshOff = "";
+            foreach (FrameNodeAdapter node in nodes)
+            {
+                if (node.Frame is not FrameObjectSingleMesh) continue;
+                if (!placements.TryGet(node.Frame, out _)) continue;
+                SdsFrameNode? treeNode = FindTreeNode(roots, node);
+                if (treeNode?.Mesh == null) continue;
+
+                placedMeshes++;
+                if (!Approx(treeNode.Mesh.World.Translation, node.WorldTransform.Translation))
+                {
+                    meshOff++;
+                    if (firstMeshOff == "")
+                        firstMeshOff = $"{node.Frame.Name}: mesh {treeNode.Mesh.World.Translation} vs node {node.WorldTransform.Translation}";
+                }
+            }
+            Check("placed meshes render at their node's placed transform", meshOff == 0 && placedMeshes > 0,
+                $"meshes={placedMeshes}, off={meshOff} {firstMeshOff}");
+
+            // ── A click on placed geometry must resolve to the ACTOR, not to the prototype frame ──
+            int governed = 0, ungoverned = 0, wrongOwner = 0;
+            string firstWrongOwner = "";
+            foreach (FrameNodeAdapter node in nodes)
+            {
+                ActorEntry? covering = placements.ActorCovering(node.Frame);
+                bool placed = placements.TryGet(node.Frame, out _);
+
+                if (placed)
+                {
+                    if (covering == null)
+                    {
+                        wrongOwner++;
+                        if (firstWrongOwner == "") firstWrongOwner = $"{node.Frame.Name} is placed but has no actor";
+                        continue;
+                    }
+                    // The placement folded into this node must be the covering actor's own transform: the node's
+                    // world is the frame's own world followed by that actor's matrix (not a plain offset — the
+                    // actor's rotation turns the whole subtree around it).
+                    FrameObjectBase? target = placements.TargetOf(covering);
+                    System.Numerics.Matrix4x4 expected = node.Frame.WorldTransform * covering.Transform;
+                    if (target == null || !Approx(node.WorldTransform.Translation, expected.Translation, 1e-2f))
+                    {
+                        wrongOwner++;
+                        if (firstWrongOwner == "")
+                            firstWrongOwner = $"{node.Frame.Name} → {covering.EntityName}: " +
+                                              $"{node.WorldTransform.Translation} vs {expected.Translation}";
+                        continue;
+                    }
+                    governed++;
+                }
+                else if (covering == null) ungoverned++;
+                else
+                {
+                    wrongOwner++;
+                    if (firstWrongOwner == "") firstWrongOwner = $"{node.Frame.Name} claims {covering.EntityName} without a placement";
+                }
+            }
+            Check("every placed frame resolves back to its actor", wrongOwner == 0,
+                $"governed={governed}, plain={ungoverned}, wrong={wrongOwner} {firstWrongOwner}");
+
+            // ── The actors nothing draws: census, glyphs, property panel ──
+            sb.AppendLine($"invisible actors: {placements.Invisible.Count} of {placements.All.Count}");
+            foreach (var g in placements.All.GroupBy(a => ActorCategories.Of(a.Type)).OrderByDescending(g => g.Count()))
+            {
+                int hidden = g.Count(placements.Invisible.Contains);
+                sb.AppendLine($"    {ActorCategories.Label(g.Key),-18} {g.Count(),5}   without geometry: {hidden}");
+            }
+
+            ActorMarkerRenderData markers = ActorMarkerBuilder.Build(placements.Invisible);
+            Check("a glyph is built for every actor with nothing to draw",
+                markers.MarkerCount == placements.Invisible.Count,
+                $"{markers.MarkerCount}/{placements.Invisible.Count}");
+            Check("glyph geometry is well formed",
+                markers.Positions.Length == markers.Colors.Length
+                && markers.Positions.Length == markers.MarkerCount * 24
+                && markers.Positions.Length % 2 == 0,
+                $"{markers.Positions.Length} vertices, {markers.Colors.Length} colours");
+
+            // A glyph must stand where its actor does: the octahedron's poles average back to the centre.
+            bool centred = true;
+            string firstOff = "";
+            for (int i = 0; i < placements.Invisible.Count && centred; i++)
+            {
+                var sum = System.Numerics.Vector3.Zero;
+                for (int v = i * 24; v < (i + 1) * 24; v++) sum += markers.Positions[v];
+                System.Numerics.Vector3 centre = sum / 24f;
+                if (!Approx(centre, placements.Invisible[i].Position, 1e-2f))
+                {
+                    centred = false;
+                    firstOff = $"{placements.Invisible[i].EntityName}: {centre} vs {placements.Invisible[i].Position}";
+                }
+            }
+            Check("each glyph is centred on its actor", centred, firstOff);
+
+            // ── Ray-picking the glyphs: aim at each one from a few metres away and expect that one back ──
+            if (placements.Invisible.Count > 0)
+            {
+                var points = new List<System.Numerics.Vector3>(placements.Invisible.Count);
+                foreach (ActorEntry a in placements.Invisible) points.Add(a.Position);
+
+                // The contract is "nearest glyph along the ray", not "the one aimed at": in a dense interior
+                // another marker can genuinely stand between the camera and the target, and picking that one is
+                // correct. So each pick is checked against a naive nearest-hit reference.
+                int exact = 0, occluded = 0, wrong = 0, misses = 0;
+                string firstBad = "";
+                var dir = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(0.6f, 0.5f, -0.62f));
+                for (int i = 0; i < points.Count; i++)
+                {
+                    System.Numerics.Vector3 origin = points[i] - dir * 8f;
+                    int hit = ActorPicking.Pick(points, origin, dir, ActorMarkerBuilder.Radius, out float t);
+
+                    if (hit < 0)
+                    {
+                        misses++;
+                        if (firstBad == "") firstBad = $"missed {placements.Invisible[i].EntityName}";
+                        continue;
+                    }
+                    if (hit == i) { exact++; continue; }
+
+                    // A different marker is only acceptable when it really is on the ray and in front.
+                    System.Numerics.Vector3 toHit = points[hit] - origin;
+                    float along = System.Numerics.Vector3.Dot(toHit, dir);
+                    float perp = MathF.Sqrt(MathF.Max(0f, toHit.LengthSquared() - along * along));
+                    float allowance = MathF.Max(ActorMarkerBuilder.Radius, along * 0.011f);
+                    if (perp <= allowance && t <= 8f + 1e-3f) occluded++;
+                    else
+                    {
+                        wrong++;
+                        if (firstBad == "")
+                            firstBad = $"{placements.Invisible[i].EntityName} → {placements.Invisible[hit].EntityName} " +
+                                       $"(t={t:F2}, off-ray by {perp:F2})";
+                    }
+                }
+                Check("a click on a glyph picks the nearest glyph on the ray", misses == 0 && wrong == 0,
+                    $"exact={exact}, in-front={occluded}, wrong={wrong}, missed={misses} {firstBad}");
+
+                // Aiming away from everything must report a miss, not the nearest marker.
+                int stray = ActorPicking.Pick(points, points[0] + new System.Numerics.Vector3(0, 0, 5000f),
+                    System.Numerics.Vector3.UnitZ, ActorMarkerBuilder.Radius, out _);
+                Check("aiming at nothing picks nothing", stray < 0);
+            }
+
+            // The property panel reads through the same adapter the tree hands the UI.
+            if (placements.All.Count > 0)
+            {
+                ActorEntry sample = placements.All[0];
+                ActorNodeAdapter adapter = document.ActorNode(sample);
+                Check("the actor adapter is canonical", ReferenceEquals(adapter, document.ActorNode(sample)));
+
+                IReadOnlyList<PropertyGroup> groups = adapter.GetPropertyGroups();
+                int fields = groups.Sum(g => g.Properties.Count);
+                Check("the property panel has the actor's fields", groups.Count >= 3 && fields >= 15,
+                    $"{groups.Count} groups, {fields} fields");
+
+                PropertyDescriptor? position = groups.SelectMany(g => g.Properties)
+                    .FirstOrDefault(p => p.Id == "Actor.Position");
+                Check("the panel reports the actor's spawn position",
+                    position != null && position.Get() is System.Numerics.Vector3 v && Approx(v, sample.Position),
+                    $"{adapter.Name} @ {sample.Position}");
+                Check("actor fields are read-only in this build",
+                    groups.SelectMany(g => g.Properties).All(p => p.IsReadOnly && p.Set == null));
+            }
+        }
+        catch (Exception ex)
+        {
+            fail++;
+            sb.AppendLine("[FAIL] unexpected exception — " + ex);
+        }
+        finally
+        {
+            sb.Insert(0, $"ACTOR PROBE: {pass} passed, {fail} failed\n\n");
+            File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
+    // The tree node that wraps a given frame adapter (the mesh lives on the tree node, not on the adapter).
+    private static SdsFrameNode? FindTreeNode(List<SdsFrameNode> roots, FrameNodeAdapter adapter)
+    {
+        foreach (SdsFrameNode root in roots)
+        {
+            SdsFrameNode? found = FindTreeNode(root, adapter);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static SdsFrameNode? FindTreeNode(SdsFrameNode node, FrameNodeAdapter adapter)
+    {
+        if (ReferenceEquals(node.Source, adapter)) return node;
+        foreach (SdsFrameNode child in node.Children)
+        {
+            SdsFrameNode? found = FindTreeNode(child, adapter);
+            if (found != null) return found;
+        }
+        return null;
+    }
+}

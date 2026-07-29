@@ -1131,6 +1131,14 @@
                                                     <Setter Property="Stroke" Value="#5FD08A" />
                                                     <Setter Property="Data" Value="{StaticResource IconEmpty}" />
                                                 </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Actors">
+                                                    <Setter Property="Stroke" Value="#E8873C" />
+                                                    <Setter Property="Data" Value="M6,0.6 L11.4,6 L6,11.4 L0.6,6 Z" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Kind}" Value="Actor">
+                                                    <Setter Property="Stroke" Value="#E8873C" />
+                                                    <Setter Property="Data" Value="M6,2.2 L9.8,6 L6,9.8 L2.2,6 Z" />
+                                                </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
                                     </Path.Style>
@@ -1241,6 +1249,28 @@
                                 <ToggleButton Grid.Column="2" x:Name="SnowScenesToggle"
                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
                                               ToolTip="Winter-only snow geometry (scene4XX). Auto-follows the winter selector — toggle to override."
+                                              Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                            </Grid>
+
+                            <!-- (d) actor markers — diamond glyph, orange #E8873C -->
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                                      Margin="0,0,9,0" Fill="Transparent" Stroke="#E8873C" StrokeThickness="1.2"
+                                      StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M6,0.6 L11.4,6 L6,11.4 L0.6,6 Z" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Render actors" Foreground="White" FontSize="12" />
+                                    <TextBlock Text="Sounds, lights, triggers — things with no mesh" Foreground="#80FFFFFF"
+                                               FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <ToggleButton Grid.Column="2" x:Name="ActorsToggle"
+                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                              ToolTip="Glyphs where the .act pack places actors that draw nothing themselves — colour per category (sound, light, particles, script, cutscene, item, trigger)."
                                               Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
                             </Grid>
                         </StackPanel>

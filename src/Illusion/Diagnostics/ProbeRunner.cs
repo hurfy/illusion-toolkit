@@ -188,6 +188,13 @@ internal static class ProbeRunner
             case "--probe-restore":
                 SaveProbes.RunRestoreProbe();
                 return true;
+            // Actor placement: a district's .act pack types every actor and re-saves byte-identically, its
+            // actors resolve to frame objects (by hash, through the scene references), and each placed
+            // prototype — parked at the origin in the frame resource — reports the actor's own position once
+            // the placement is folded in. Output: %TEMP%\illusion_actors.txt
+            case "--probe-actors":
+                ActorProbes.RunActorPlacementProbe(args.Length >= 2 ? args[1] : "eastside");
+                return true;
             // Reusable AppDialog: construct it from options + render its content to a PNG so the layout can be
             // eyeballed (no game data, no GPU). Output: %TEMP%\illusion_dialog.png / .txt
             case "--probe-dialog":

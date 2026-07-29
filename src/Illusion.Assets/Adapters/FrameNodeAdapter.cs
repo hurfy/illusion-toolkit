@@ -1,4 +1,5 @@
 using System.Numerics;
+using Illusion.Assets.Actors;
 using Illusion.Assets.Properties;
 using Illusion.Domain;
 using Illusion.Domain.Materials;
@@ -37,12 +38,26 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
         set => _frame.LocalTransform = value;
     }
 
-    public Matrix4x4 WorldTransform => _frame.WorldTransform;
+    /// <summary>The frame's world transform with its actor placement folded in: a frame an actor spawns is a
+    /// prototype parked at the origin, and the actor pack holds where it actually stands (see
+    /// <see cref="ActorPlacements"/>). Identity placement for everything else, so ordinary frames are
+    /// unaffected.</summary>
+    public Matrix4x4 WorldTransform => _frame.WorldTransform * _document.Placements.For(_frame);
 
     /// <summary>Parent's world, falling back to the scene root's world for parentless frames — the same
-    /// lookup the vendor's SetWorldTransform decomposition uses.</summary>
-    public Matrix4x4 ParentWorldTransform =>
-        _frame.Parent?.WorldTransform ?? _frame.Root?.WorldTransform ?? Matrix4x4.Identity;
+    /// lookup the vendor's SetWorldTransform decomposition uses, and likewise placement-aware. For the frame
+    /// an actor targets there is no parent, and the placement itself is the frame it lives in — which is what
+    /// keeps a drag of such an object landing where the cursor is.</summary>
+    public Matrix4x4 ParentWorldTransform
+    {
+        get
+        {
+            FrameObjectBase? parent = _frame.Parent ?? _frame.Root;
+            return parent != null
+                ? parent.WorldTransform * _document.Placements.For(parent)
+                : _document.Placements.For(_frame);
+        }
+    }
 
     /// <summary>The frame this one hangs under: its hierarchy parent, or — for a frame that only has an anchor —
     /// that anchor. Falling back to Root matches <see cref="ParentWorldTransform"/>, which already does; reporting

@@ -130,6 +130,15 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         set { if (Rnd != null) Rnd.ShowNavWorld = value; }
     }
 
+    /// <summary>Actor glyphs: mark the actors a scene cannot draw — sounds, lights, particles, triggers,
+    /// script hooks — where the .act pack puts them, coloured per category. Built and uploaded at district
+    /// load; this only gates drawing (no scene reload).</summary>
+    public bool ShowActors
+    {
+        get => Rnd?.ShowActors ?? false;
+        set { if (Rnd != null) Rnd.ShowActors = value; }
+    }
+
     // ── Facade: catalogs ──
 
     /// <summary>Main catalog: map areas (districts + interiors from cityareas) for the selector.</summary>
@@ -598,10 +607,23 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         // skips it). Picking one copy is its own pass; it wins over the cloud's prototype at the same spot,
         // which is what makes clicking a street lamp select that lamp.
         SceneNode? crash = Streamer.PickCrash(origin, dir, out float crashT);
+        // Actor glyphs draw over everything and have no geometry of their own, so they are tested separately
+        // and win outright: clicking a marker you can see selects that actor, whatever stands in front of it.
+        SceneNode? actor = Streamer.PickActor(origin, dir, out _);
+        if (actor != null) return actor;
 
         if (col != null && (gm == null || colT <= meshT) && (crash == null || colT <= crashT)) return col;
         if (crash != null && (gm == null || crashT <= meshT)) return crash;
-        return gm?.Owner as SceneNode;
+
+        // A mesh an actor places is that actor's prototype — the actor is what stands there and what governs it,
+        // so clicking the bottle selects the bottle's actor, not the frame object it was instanced from. The
+        // frame itself is still reachable through the FrameResource branch of the tree.
+        if (gm?.Owner is SceneNode meshNode)
+        {
+            if (meshNode.Source is FrameNodeAdapter fna && Streamer.ActorNodeFor(fna.Frame) is { } owner) return owner;
+            return meshNode;
+        }
+        return null;
     }
 
     public override void Dispose()

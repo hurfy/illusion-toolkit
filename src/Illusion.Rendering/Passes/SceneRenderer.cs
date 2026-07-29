@@ -24,6 +24,8 @@ public sealed unsafe class SceneRenderer : IDisposable
     private readonly NavGraphRenderer _navRenderer;
     private readonly NavGraphRenderer _navMeshRenderer;
     private readonly NavGraphRenderer _navWorldRenderer;
+    private readonly ActorMarkerRenderer _actorRenderer;
+    private readonly ActorMarkerRenderer _actorSelectionRenderer;
     private readonly SelectionOutlineRenderer _selectionOutline;
 
     /// <summary>Whether to show debug loading-zone boxes (UI toggle). Off by default.</summary>
@@ -69,6 +71,26 @@ public sealed unsafe class SceneRenderer : IDisposable
     public void RemoveNavWorldDistrict(object key) => _navWorldRenderer.RemoveDistrict(key);
     /// <summary>Removes all .nav overlays (scene reset).</summary>
     public void ClearNavWorld() => _navWorldRenderer.Clear();
+
+    /// <summary>Whether to draw glyphs for the actors nothing else draws (sounds, lights, triggers, script
+    /// hooks…). Off by default; uploaded per district at load, so this only gates drawing.</summary>
+    public bool ShowActors { get; set; }
+    /// <summary>Uploads/replaces one district's actor glyphs (keyed for streaming).</summary>
+    public void SetActorDistrict(object key, Domain.ActorMarkerRenderData? markers) => _actorRenderer.SetDistrict(key, markers);
+    /// <summary>Removes one district's actor glyphs (district unload).</summary>
+    public void RemoveActorDistrict(object key) => _actorRenderer.RemoveDistrict(key);
+    /// <summary>Removes every district's actor glyphs (scene reset).</summary>
+    public void ClearActors() => _actorRenderer.Clear();
+    /// <summary>Actor glyphs currently resident.</summary>
+    public int ActorMarkerCount => _actorRenderer.MarkerCount;
+
+    /// <summary>Highlights the selected actors' glyphs (replaces any prior highlight; null clears it). Drawn
+    /// whether or not <see cref="ShowActors"/> is on — selecting an actor in the tree has to show where it is
+    /// even with the overlay off.</summary>
+    public void SetSelectedActorMarkers(Domain.ActorMarkerRenderData? markers) =>
+        _actorSelectionRenderer.SetDistrict(SelectionKey, markers);
+
+    private static readonly object SelectionKey = new();
 
     // Selected mesh(es) to outline. The highlight is a screen-space silhouette contour of the exact geometry
     // (SelectionOutlineRenderer), not a bounding box — so only mesh objects are ever highlighted.
@@ -169,6 +191,8 @@ public sealed unsafe class SceneRenderer : IDisposable
         _navRenderer = new NavGraphRenderer(gpu);
         _navMeshRenderer = new NavGraphRenderer(gpu);
         _navWorldRenderer = new NavGraphRenderer(gpu);
+        _actorRenderer = new ActorMarkerRenderer(gpu);
+        _actorSelectionRenderer = new ActorMarkerRenderer(gpu);
         _selectionOutline = new SelectionOutlineRenderer(gpu);
         Textures = new TextureLibrary(gpu);
 
@@ -411,6 +435,11 @@ public sealed unsafe class SceneRenderer : IDisposable
         // .nav overlay: AI path objects (cover / vault-over / action markers) as cyan boxes.
         if (ShowNavWorld) _navWorldRenderer.Render(ctx, viewProj, new Vector4(0.2f, 0.7f, 1f, 0.9f));
 
+        // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per category.
+        if (ShowActors) _actorRenderer.Render(ctx, viewProj);
+        // The selected actor's glyph is drawn even with the overlay off, so a tree selection always shows up.
+        _actorSelectionRenderer.Render(ctx, viewProj);
+
         // Selection silhouette outline (screen-space, on top of everything): an offscreen mask of the selected
         // mesh's exact geometry, then a dilation pass paints a constant-width contour — never a bounding box.
         if (_selectionMeshes.Count > 0 || _selectionPlacements.Count > 0)
@@ -596,6 +625,8 @@ public sealed unsafe class SceneRenderer : IDisposable
         _rasterWire.Dispose();
         _raster.Dispose();
         _selectionOutline.Dispose();
+        _actorSelectionRenderer.Dispose();
+        _actorRenderer.Dispose();
         _navWorldRenderer.Dispose();
         _navMeshRenderer.Dispose();
         _navRenderer.Dispose();
