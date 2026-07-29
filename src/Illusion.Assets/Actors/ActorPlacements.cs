@@ -125,10 +125,17 @@ public sealed class ActorPlacements
         return target;
     }
 
-    /// <summary>Re-attaches an actor dropped by <see cref="Detach"/> (undo), restoring its placement.</summary>
-    public void Attach(ActorEntry actor, FrameObjectBase? target, int index, bool hadGlyph)
+    /// <summary>
+    /// Re-attaches an actor dropped by <see cref="Detach"/> (undo), restoring its placement — and the pack it
+    /// belongs to, which every later edit of it goes through. Leaving that out is silent: the actor comes back
+    /// in the tree and in the viewport, but <see cref="PackOf"/> returns null for it, and the editor's delete
+    /// and duplicate both skip an actor with no pack — so undoing a delete once made that actor permanently
+    /// un-deletable for the rest of the session, with no error to show for it.
+    /// </summary>
+    public void Attach(ActorEntry actor, ActorsFile pack, FrameObjectBase? target, int index, bool hadGlyph)
     {
         _allList.Insert(Math.Clamp(index, 0, _allList.Count), actor);
+        _packByActor[actor] = pack;
         if (hadGlyph && _invisibleSet.Add(actor)) _invisibleList.Add(actor);
 
         if (target == null) return;

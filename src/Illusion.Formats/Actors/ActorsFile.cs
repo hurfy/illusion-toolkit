@@ -221,9 +221,10 @@ public sealed class ActorsFile
         return copy;
     }
 
-    /// <summary>Drops a copy made by <see cref="Duplicate"/> (undo) — it owns no scene reference, so removing
-    /// its row is all there is to undo.</summary>
-    public void RemoveCopy(ActorEntry copy) => Remove(copy);
+    /// <summary>Drops a copy made by <see cref="Duplicate"/> (undo). Returns the same token <see cref="Restore"/>
+    /// takes, so a redo puts back the very row that was undone — calling <see cref="Duplicate"/> again would
+    /// mint a different record under a different name, leaving the tree pointing at one the pack never got.</summary>
+    public ActorRemoval RemoveCopy(ActorEntry copy) => Remove(copy);
 
     // "name" → "name_copy", "name_copy2", … — unique within the pack, which is what the engine keys entities by.
     private string UniqueName(string baseName)

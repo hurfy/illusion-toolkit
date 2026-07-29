@@ -2,7 +2,6 @@ using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Formats.Actors;
 using Illusion.Formats.Frames.ObjectTypes;
-using Illusion.Rendering.Gpu;
 using Illusion.Scene;
 
 namespace Illusion.Viewport;
@@ -122,7 +121,9 @@ internal sealed class ActorEditController
         public required int TreeIndex;
         public required ActorDocumentAdapter Document;
         public required ActorsFile Pack;
-        public bool Applied;
+
+        // Set while the copy is undone: the token that puts this exact row back into the pack.
+        public ActorRemoval? Removal;
     }
 
     private sealed class DuplicateActorsEdit : INodeEdit
@@ -143,22 +144,27 @@ internal sealed class ActorEditController
 
         public void Redo()
         {
+            // A redo puts the very rows the undo took out back into the pack — in reverse, since each removal
+            // recorded the index the list had at that moment (the first Redo has them there already, from the
+            // Duplicate that created this edit).
+            for (int i = _items.Count - 1; i >= 0; i--)
+            {
+                if (_items[i].Removal is not { } removal) continue;
+                _items[i].Pack.Restore(removal);
+                _items[i].Removal = null;
+            }
+
             var selection = new List<SceneNode>(_items.Count);
             foreach (CopiedActor item in _items)
             {
-                // Redo after an undo has to put the record back into the pack as well as the row into the tree.
-                if (!item.Applied && !item.Pack.Actors.Contains(item.Copy))
-                {
-                    item.Pack.Duplicate(item.Source, out _); // fresh copy is not reused: the row must be rebuilt
-                }
                 item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack);
+                _owner._host.Streamer.AddActorNode(item.Document.Placements, item.Copy, item.Node);
                 if (item.Parent != null)
                 {
                     int at = Math.Clamp(item.TreeIndex, 0, item.Parent.Children.Count);
                     item.Parent.Children.Insert(at, item.Node);
                     _owner._host.Persistence.MarkFrameModified(item.Parent);
                 }
-                item.Applied = true;
                 selection.Add(item.Node);
             }
             _owner.AfterChange(selection);
@@ -168,11 +174,10 @@ internal sealed class ActorEditController
         {
             foreach (CopiedActor item in _items)
             {
-                item.Pack.RemoveCopy(item.Copy);
+                item.Removal = item.Pack.RemoveCopy(item.Copy);
                 item.Document.Placements.Detach(item.Copy);
                 item.Parent?.Children.Remove(item.Node);
                 if (item.Parent != null) _owner._host.Persistence.MarkFrameModified(item.Parent);
-                item.Applied = false;
             }
             _owner.AfterChange(Array.Empty<SceneNode>());
         }
@@ -239,11 +244,20 @@ internal sealed class ActorEditController
 
         public void Undo()
         {
+            // The pack's rows go back in REVERSE. Each removal recorded the index the row list had at that
+            // moment, so putting several back in the order they were taken lands every one after the first in
+            // the wrong slot. The tree rows and the placement slots recorded their ORIGINAL indices up front,
+            // before anything was removed, so those go back in order.
+            for (int i = _items.Count - 1; i >= 0; i--)
+            {
+                if (_items[i].Removal is { } removal) _items[i].Pack.Restore(removal);
+            }
+
             foreach (DeletedActor item in _items)
             {
                 if (item.Removal == null) continue;
-                item.Pack.Restore(item.Removal);
-                item.Document.Placements.Attach(item.Adapter.Actor, item.PlacedFrame, item.PlacementIndex, item.HadGlyph);
+                item.Document.Placements.Attach(item.Adapter.Actor, item.Pack, item.PlacedFrame,
+                    item.PlacementIndex, item.HadGlyph);
                 _owner.SetSubtreeVisible(item.PlacedFrame, true);
                 if (item.Parent != null)
                 {
@@ -261,10 +275,7 @@ internal sealed class ActorEditController
     // only the actor decides whether the game ever spawns them.
     private void SetSubtreeVisible(FrameObjectBase? frame, bool visible)
     {
-        if (frame == null) return;
-        var meshes = new List<GpuMesh>();
-        _host.Streamer.CollectPlacedMeshes(frame, meshes);
-        foreach (GpuMesh mesh in meshes) mesh.Visible = visible;
+        if (frame != null) _host.Streamer.SetPlacedSubtreeVisible(frame, visible);
     }
 
     // Common tail of both directions: the glyph buffers, the selection and the panels are all stale now.

@@ -446,15 +446,18 @@ public static class SdsMeshLoader
             MeshPart[] parts = BuildParts(mesh, decoded.Indices.Length);
 
             // An actor-placed mesh carries an identity matrix of its own — the actor pack holds where it
-            // stands (see ActorPlacements). Instanced copies get the same treatment per copy, so a crash
-            // archive that also ships actors stays consistent.
-            Matrix4x4 place = placement ?? Matrix4x4.Identity;
-            if (!place.IsIdentity && instances != null)
-            {
-                var placed = new Matrix4x4[instances.Length];
-                for (int i = 0; i < instances.Length; i++) placed[i] = instances[i] * place;
-                instances = placed;
-            }
+            // stands (see ActorPlacements), so the placement goes in front of the frame's own world transform.
+            //
+            // An INSTANCED mesh is a different animal and gets none of this. A translokator copy's matrix is
+            // already an absolute world placement (CrashPlacements.CloudFor: the row's own offset times the
+            // .tra record — the format has no parent at all), so composing it with an actor placement adds two
+            // unrelated world transforms together and scatters the whole row. It bites for real: city_crash.sds
+            // ships its own actor packs which claim the very prototypes the .tra table instances. Picking and
+            // the selection outline build their matrices straight from the table, so folding here would also
+            // put the geometry somewhere the ray never looks.
+            // The test matches GpuMesh's own "is this a cloud" rule, so the two never disagree about which
+            // matrix moves the geometry.
+            Matrix4x4 place = instances is { Length: > 0 } ? Matrix4x4.Identity : placement ?? Matrix4x4.Identity;
 
             return new MeshData
             {

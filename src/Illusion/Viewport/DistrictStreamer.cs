@@ -136,8 +136,9 @@ internal sealed class DistrictStreamer
     private readonly Dictionary<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> _actorScenes = new();
     private readonly Dictionary<SceneNode, Dictionary<FrameObjectBase, SceneNode>> _meshNodeByFrame = new();
 
-    // Districts whose glyph buffer must be rebuilt because a tree eye was toggled. Rebuilding is a full buffer
-    // upload, so it is coalesced to once per frame rather than done per node of a cascade.
+    // Districts whose glyphs and pick entries no longer match their actor list: an eye was toggled, an actor
+    // moved, or one was deleted, copied or restored. Rebuilding is a full buffer upload, so it is coalesced to
+    // once per frame rather than done per node of a cascade.
     private readonly HashSet<SceneNode> _actorMarkersDirty = new();
 
     // An actor node owns nothing the eye's usual cascade can reach: a glyph is not a GpuMesh, and the geometry an
@@ -145,58 +146,106 @@ internal sealed class DistrictStreamer
     // hiding it either drops its glyph from the district buffer or hides the meshes of the subtree it places.
     private void WatchActorVisibility(SceneNode sdsNode, IEnumerable<SceneNode> actorNodes)
     {
-        foreach (SceneNode node in actorNodes)
-        {
-            SceneNode captured = node;
-            captured.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName != nameof(SceneNode.IsVisible)) return;
-                if (captured.Source is not ActorNodeAdapter actor) return;
-
-                if (actor.HasGlyph) _actorMarkersDirty.Add(sdsNode);
-                else if (actor.Target is { } target)
-                {
-                    var meshes = new List<GpuMesh>();
-                    CollectSubtreeMeshes(target, meshes, new HashSet<FrameObjectBase>());
-                    foreach (GpuMesh m in meshes) m.Visible = captured.IsVisible;
-                }
-            };
-        }
+        foreach (SceneNode node in actorNodes) WatchActorNode(sdsNode, node);
     }
 
-    /// <summary>Marks every resident district's glyph buffer for rebuild — after an actor was deleted or
-    /// restored, the buffers no longer match the actor list.</summary>
+    private void WatchActorNode(SceneNode sdsNode, SceneNode node)
+    {
+        node.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(SceneNode.IsVisible)) return;
+            if (node.Source is not ActorNodeAdapter actor) return;
+
+            if (actor.HasGlyph) _actorMarkersDirty.Add(sdsNode);
+            else if (actor.Target is { } target) SetPlacedSubtreeVisible(target, node.IsVisible);
+        };
+    }
+
+    /// <summary>Marks every resident district's glyphs and pick entries for rebuild — after an actor was
+    /// deleted, copied or restored, neither matches the actor list any more.</summary>
     public void RefreshActorMarkers()
     {
-        foreach (SceneNode sdsNode in _actorPickables.Keys) _actorMarkersDirty.Add(sdsNode);
+        foreach (SceneNode sdsNode in _actorScenes.Keys) _actorMarkersDirty.Add(sdsNode);
     }
 
-    /// <summary>The GPU meshes of the subtree an actor places (its prototype's geometry).</summary>
-    public void CollectPlacedMeshes(FrameObjectBase frame, List<GpuMesh> into) =>
-        CollectSubtreeMeshes(frame, into, new HashSet<FrameObjectBase>());
+    /// <summary>
+    /// Registers an actor the editor just created (a copy) with the district that owns
+    /// <paramref name="placements"/>, so its glyph is drawn and its marker can be clicked. The row is kept even
+    /// when the copy is undone: identity is what everything keys on, the actor list is what decides what is
+    /// drawn, and re-adding it on redo would otherwise wire a second visibility handler onto the same node.
+    /// </summary>
+    public void AddActorNode(ActorPlacements placements, ActorEntry actor, SceneNode node)
+    {
+        if (FindActorDistrict(placements) is not { } sdsNode) return;
+        if (_actorScenes[sdsNode].Nodes.TryAdd(actor, node)) WatchActorNode(sdsNode, node);
+        _actorMarkersDirty.Add(sdsNode);
+    }
 
-    // Re-uploads the glyph buffers of districts whose visibility changed this frame.
+    /// <summary>Marks the district owning these placements stale — an actor of it moved or changed.</summary>
+    public void MarkActorMarkersDirty(ActorPlacements placements)
+    {
+        if (FindActorDistrict(placements) is { } sdsNode) _actorMarkersDirty.Add(sdsNode);
+    }
+
+    private SceneNode? FindActorDistrict(ActorPlacements placements)
+    {
+        foreach (KeyValuePair<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> pair
+                 in _actorScenes)
+        {
+            if (ReferenceEquals(pair.Value.Placements, placements)) return pair.Key;
+        }
+        return null;
+    }
+
+    // Rebuilds the glyphs AND the pick entries of every district that went stale, both out of one walk over the
+    // LIVE actor list. Deriving them together is what keeps a picked index pointing at the glyph it was aimed
+    // at; deriving them from the list rather than from a load-time snapshot is what makes a deleted actor stop
+    // being clickable, a copy start being clickable, and a moved one take its marker with it.
     private void RebuildDirtyActorMarkers()
     {
         if (_actorMarkersDirty.Count == 0 || _host.Rnd == null) return;
 
         foreach (SceneNode sdsNode in _actorMarkersDirty)
         {
-            if (!_actorPickables.TryGetValue(sdsNode, out List<(SceneNode Node, Vector3 Position)>? pickables)) continue;
+            if (!_actorScenes.TryGetValue(sdsNode,
+                    out (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes) scene)) continue;
 
-            // A deleted actor is gone from the placements but its row object is still in this list, so the
-            // check is "still placed AND visible" rather than visibility alone.
-            var visible = new List<ActorEntry>(pickables.Count);
-            foreach ((SceneNode node, _) in pickables)
-            {
-                if (node.IsVisible && node.Source is ActorNodeAdapter a && a.Placements.HasGlyph(a.Actor))
-                {
-                    visible.Add(a.Actor);
-                }
-            }
+            int capacity = scene.Placements.Invisible.Count;
+            var visible = new List<ActorEntry>(capacity);
+            var pickables = new List<(SceneNode Node, Vector3 Position)>(capacity);
+            ActorGlyphSet.Collect(scene.Placements, scene.Nodes, visible, pickables);
+
+            if (pickables.Count > 0) _actorPickables[sdsNode] = pickables;
+            else _actorPickables.Remove(sdsNode);
             _host.Rnd.SetActorDistrict(sdsNode, visible.Count > 0 ? ActorMarkerBuilder.Build(visible) : null);
         }
         _actorMarkersDirty.Clear();
+    }
+
+    /// <summary>
+    /// Shows or hides the geometry of the subtree an actor places — through the tree nodes, not their GPU
+    /// meshes. A mesh still queued for upload has no GpuMesh yet, and what the upload applies when it lands is
+    /// the NODE's flag; setting the mesh alone leaves such a mesh to attach visible moments later, which is how
+    /// a deleted actor's geometry could stay on screen.
+    /// </summary>
+    public void SetPlacedSubtreeVisible(FrameObjectBase frame, bool visible) =>
+        SetSubtreeNodesVisible(frame, visible, new HashSet<FrameObjectBase>());
+
+    private void SetSubtreeNodesVisible(FrameObjectBase frame, bool visible, HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshNodeByFrame.Values)
+        {
+            if (!map.TryGetValue(frame, out SceneNode? leaf)) continue;
+
+            // An instanced prototype is left alone: in city_crash the .tra table copies it across the whole map
+            // and one actor is not what puts those copies there, so hiding it would blank a whole row of props.
+            // Pending meshes are asked before they exist, which is the point — the node's flag is what the
+            // upload applies when it lands.
+            bool instanced = leaf.Mesh?.Instanced ?? leaf.Pending?.Instances is { Length: > 0 };
+            if (!instanced) leaf.IsVisible = visible;
+        }
+        foreach (FrameObjectBase child in frame.Children) SetSubtreeNodesVisible(child, visible, seen);
     }
 
     /// <summary>The actor node governing a frame object, or null when no actor places it.</summary>
@@ -213,10 +262,14 @@ internal sealed class DistrictStreamer
     }
 
     /// <summary>Re-uploads the world matrices of the geometry an actor places, after that actor moved. The
-    /// placement was already refreshed by the adapter, so each frame's node reports its new world.</summary>
+    /// placement was already refreshed by the adapter, so each frame's node reports its new world. An actor
+    /// with no geometry moves its glyph instead, which is a district rebuild — hence the dirty mark either
+    /// way, since the marker is also what the click test uses.</summary>
     public void SyncActorMeshes(SceneNode actorNode)
     {
-        if (actorNode.Source is not ActorNodeAdapter actor || actor.Target is not { } target) return;
+        if (actorNode.Source is not ActorNodeAdapter actor) return;
+        MarkActorMarkersDirty(actor.Placements);
+        if (actor.Target is not { } target) return;
         SyncSubtreeMeshes(target, new HashSet<FrameObjectBase>());
     }
 
@@ -273,6 +326,11 @@ internal sealed class DistrictStreamer
     /// outright — clicking the marker you can see selects that actor, wall in between or not.</summary>
     public SceneNode? PickActor(Vector3 origin, Vector3 dir, out float bestT)
     {
+        // A click must never be tested against entries the last edit already invalidated: an actor pick wins
+        // outright over the geometry behind it, so one stale marker would swallow every click near it. The
+        // rebuild is normally the render loop's, this only pulls it forward when an edit landed in between.
+        RebuildDirtyActorMarkers();
+
         bestT = float.PositiveInfinity;
         SceneNode? hit = null;
         foreach (List<(SceneNode Node, Vector3 Position)> list in _actorPickables.Values)
@@ -1126,13 +1184,12 @@ internal sealed class DistrictStreamer
 
                 if (placements2.Invisible.Count > 0)
                 {
-                    actorMarkers = ActorMarkerBuilder.Build(placements2.Invisible);
-                    // Same order as the glyphs, so a picked index maps straight back to its node.
+                    // Same walk the rebuild uses, so the initial state and every later one agree on which
+                    // actors have a glyph and on the order a picked index resolves through.
+                    var glyphs = new List<ActorEntry>(placements2.Invisible.Count);
                     actorPickables = new List<(SceneNode, Vector3)>(placements2.Invisible.Count);
-                    foreach (ActorEntry actor in placements2.Invisible)
-                    {
-                        if (actorNodes.TryGetValue(actor, out SceneNode? node)) actorPickables.Add((node, actor.Position));
-                    }
+                    ActorGlyphSet.Collect(placements2, actorNodes, glyphs, actorPickables);
+                    actorMarkers = glyphs.Count > 0 ? ActorMarkerBuilder.Build(glyphs) : null;
                 }
             }
             ct.ThrowIfCancellationRequested();

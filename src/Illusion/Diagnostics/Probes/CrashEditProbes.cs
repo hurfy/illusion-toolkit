@@ -5,6 +5,7 @@ using Illusion.Assets;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
+using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Translokator;
 
 namespace Illusion.Diagnostics.Probes;
@@ -217,6 +218,49 @@ internal static class CrashEditProbes
             {
                 try { if (Directory.Exists(scratch)) Directory.Delete(scratch, true); } catch { /* scratch */ }
             }
+
+            // 8. What the renderer draws a copy at, and what a click is tested against, must be the same matrix.
+            //    They are computed by different code — the loader builds the instance buffer, PickCrash and the
+            //    selection outline rebuild each matrix from the table — so the only thing keeping them together
+            //    is that neither adds anything of its own. A .tra matrix is already an absolute world placement,
+            //    and this archive ships actor packs claiming the very prototypes the table instances, so folding
+            //    an actor placement in here would scatter whole rows and leave every click missing them.
+            (List<SdsFrameNode> crashRoots, _, ISceneDocument? crashDoc, CrashPlacements? crashPlacements) =
+                SdsMeshLoader.LoadCrashHierarchy(sds);
+            if (crashDoc is SceneDocumentAdapter scene && crashPlacements != null)
+            {
+                var meshByFrame = new Dictionary<FrameObjectBase, MeshData>();
+                foreach (SdsFrameNode root in crashRoots) IndexMeshes(root, meshByFrame);
+
+                Dictionary<FrameObjectSingleMesh, CrashPlacements.Cloud> clouds = crashPlacements.BuildClouds();
+                int claimed = 0, compared = 0, drifted = 0;
+                string firstDrift = "";
+                foreach (FrameObjectSingleMesh prototype in crashPlacements.Meshes)
+                {
+                    if (!scene.Placements.For(prototype).IsIdentity) claimed++;
+
+                    if (!meshByFrame.TryGetValue(prototype, out MeshData? md)) continue;
+                    if (md.Instances == null || md.Instances.Length == 0) continue;
+
+                    Matrix4x4[] expected = clouds[prototype].Matrices;
+                    compared++;
+                    for (int i = 0; i < md.Instances.Length && i < expected.Length; i++)
+                    {
+                        if (md.Instances[i].Equals(expected[i])) continue;
+                        drifted++;
+                        if (firstDrift.Length == 0)
+                        {
+                            firstDrift = $"{prototype.Name} copy {i}: drawn at {md.Instances[i].Translation}, " +
+                                         $"clicked at {expected[i].Translation}";
+                        }
+                        break;
+                    }
+                }
+                Check("the archive's actors do claim instanced prototypes (the trap is still armed)", claimed > 0,
+                    $"{claimed} of {crashPlacements.Meshes.Count()} prototypes are actor-placed");
+                Check("every copy is drawn where a click looks for it", drifted == 0 && compared > 0,
+                    $"rows compared={compared}, drifted={drifted} {firstDrift}");
+            }
         }
         catch (Exception ex)
         {
@@ -226,6 +270,13 @@ internal static class CrashEditProbes
 
         sb.Insert(0, $"CRASH EDIT PROBE: {pass} passed, {fail} failed\n\n");
         File.WriteAllText(outFile, sb.ToString());
+    }
+
+    // Mesh leaves by the frame object they render, so a prototype can be matched to what the loader built for it.
+    private static void IndexMeshes(SdsFrameNode node, Dictionary<FrameObjectBase, MeshData> into)
+    {
+        if (node.Mesh != null && node.Source is FrameNodeAdapter adapter) into[adapter.Frame] = node.Mesh;
+        foreach (SdsFrameNode child in node.Children) IndexMeshes(child, into);
     }
 
     // The streaming-grid cell that counts a row's copies at this position (the grid whose key is its GridMax).

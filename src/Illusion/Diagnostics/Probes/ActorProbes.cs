@@ -11,6 +11,7 @@ using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Rendering.Scene;
 using Illusion.Scene;
+using Illusion.Viewport;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
 namespace Illusion.Diagnostics.Probes;
@@ -421,6 +422,26 @@ internal static class ActorProbes
                     Check("undo restores the pack byte for byte",
                         pack3.ToBytes().AsSpan().SequenceEqual(original), $"{pack3.Actors.Count} actors");
 
+                    // Deleting a multi-actor selection is one edit, and its undo has to put the rows back in
+                    // the OPPOSITE order: each removal recorded the index the list had at that moment, so
+                    // restoring them in the order they were taken lands every row after the first one slot
+                    // short. This is the contract ActorEditController's delete and duplicate edits follow.
+                    if (pack3.Actors.Count >= 4)
+                    {
+                        ActorEntry firstVictim = pack3.Actors[1];
+                        ActorEntry secondVictim = pack3.Actors[3];
+                        ActorRemoval firstRemoval = pack3.Remove(firstVictim);
+                        ActorRemoval secondRemoval = pack3.Remove(secondVictim);
+                        Check("deleting two actors drops exactly two rows",
+                            pack3.Actors.Count == countBefore - 2, $"{countBefore} → {pack3.Actors.Count}");
+
+                        pack3.Restore(secondRemoval);
+                        pack3.Restore(firstRemoval);
+                        Check("undoing a two-actor delete restores the pack byte for byte",
+                            pack3.ToBytes().AsSpan().SequenceEqual(original),
+                            $"rows {firstVictim.Index} and {secondVictim.Index}");
+                    }
+
                     // ── Duplicating: a glyph-only actor copies; one that places a scene object is refused,
                     //    because that copy would need its own clone of the object.
                     ActorEntry? loose = pack3.Actors.FirstOrDefault(a =>
@@ -469,6 +490,9 @@ internal static class ActorProbes
                     }
                 }
             }
+
+            CheckPinnedOrientations(district, placements, nodes, sb, Check);
+            CheckGlyphSet(district, document, placements, sb, Check);
         }
         catch (Exception ex)
         {
@@ -480,6 +504,241 @@ internal static class ActorProbes
             sb.Insert(0, $"ACTOR PROBE: {pass} passed, {fail} failed\n\n");
             File.WriteAllText(outFile, sb.ToString());
         }
+    }
+
+    /// <summary>
+    /// Vanilla orientations, pinned.
+    ///
+    /// A rotation convention flip is invisible to every other check in this file: no translation moves, the
+    /// pack still re-saves byte for byte (an inversion applied on both read and write is byte-neutral), and the
+    /// round-trip check compares the flipped value against itself. It shows up only as every placed object in
+    /// the game standing turned the wrong way — which is how the last one was found, by eye, after it shipped.
+    /// These lines are the state the viewport was verified against.
+    ///
+    /// Regenerate deliberately — never to turn a red check green. The probe prints "PIN" lines for a district
+    /// it has none for; those are what belongs here, once the viewport has been re-checked against the game.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> PinnedOrientations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["distillery"] =
+        [
+            "DE_lahev33|0.0000,0.0000,0.5792,0.8152|-1564.05,-111.59,2.63",
+            "2D_box38|0.0000,0.0000,-0.1147,0.9934|-1559.38,-114.92,4.98",
+            "2D_zidle14|0.0000,0.0000,-0.5927,0.8054|-1559.25,-109.77,-9.65",
+            "2D_zidle04|0.0000,0.0000,0.8115,0.5844|-1570.18,-88.66,-14.58",
+            "DE_lahev44|0.0000,0.0000,-0.0860,0.9963|-1559.77,-114.96,4.26",
+            "2D_ELECTR_38|0.0000,0.0000,0.7071,0.7071|-1565.03,-98.79,-12.84",
+            "X2D_box71|0.0000,0.0000,-0.7071,0.7071|-1554.59,-118.30,-13.66",
+            "X2D_box69|0.0000,0.0000,0.0872,0.9962|-1554.39,-115.20,-13.66",
+            "DE_bedna01>box_dI|-1562.55,-113.42,-0.17",
+            "DE_bedna10>box_dI|-1558.21,-120.50,-8.38",
+            "DE_bedna12>box_dI|-1562.64,-118.41,-11.58",
+            "DE_bedna16>box_dI|-1568.04,-108.82,-4.28",
+        ],
+        ["eastside"] =
+        [
+            "AmbiRV_city10_train_whistle100|0.0000,0.0000,-0.7076,0.7066|154.85,143.35,-8.88",
+            "AmbiRV_city10_car_horn05|0.0000,0.0000,-0.6921,0.7218|-470.03,186.99,42.00",
+            "wanted57|0.0000,0.0000,-0.4617,0.8870|-15.63,80.45,-8.89",
+            "wanted58|0.0000,0.0000,-0.7065,0.7077|-47.21,418.02,-9.37",
+            "wanted61|-0.0267,0.0267,-0.7066,0.7066|95.57,261.06,-16.85",
+            "wanted62|0.0204,-0.0204,-0.7068,0.7068|-7.27,146.13,-9.53",
+            "wanted63|0.0000,0.0000,0.7066,0.7077|-120.18,412.67,-9.24",
+            "wanted64|-0.0158,-0.0158,0.7069,0.7069|-343.58,255.23,0.11",
+        ],
+        ["port"] =
+        [
+            "jachta01|0.0000,0.0000,0.1634,0.9866|-614.56,-856.14,-24.15",
+            "jachta02|0.0000,0.0000,-0.5884,0.8086|-466.80,-984.76,-24.15",
+            "jachta05|0.0000,0.0000,-0.7136,0.7006|-515.73,-823.65,-24.15",
+            "jachta06|0.0000,0.0000,-0.9872,0.1595|-632.75,-834.45,-24.15",
+            "jachta04|0.0000,0.0000,0.6903,0.7235|-491.03,-785.63,-24.15",
+            "jachta09|0.0000,0.0000,0.1634,0.9866|-656.64,-841.59,-24.15",
+            "boatXXL01|0.0000,0.0000,-0.7012,0.7130|-465.47,-790.49,-24.50",
+            "jachta10|0.0000,0.0000,0.7215,0.6924|-469.47,-916.70,-24.15",
+            "jachta00>teziste|-516.66,-921.70,-26.67",
+            "jachta01>teziste|-614.85,-858.43,-26.67",
+            "jachta04>teziste|-489.01,-786.74,-26.67",
+            "jachta05>teziste|-517.78,-822.60,-26.67",
+        ],
+        ["prisone"] =
+        [
+            "CDi_light__02|0.7071,-0.0000,0.0000,0.7071|63.12,16.21,296.06",
+            "CDi_light__01|0.7071,-0.0000,0.0000,0.7071|63.12,26.65,296.04",
+            "bedna2|0.0000,0.0000,-0.7071,0.7071|-12.70,-42.21,303.02",
+            "basketBall|0.0000,0.0000,0.6635,0.7481|19.70,-0.99,303.11",
+            "bedna1|0.0000,0.0000,-0.7071,0.7071|-12.66,-44.01,303.02",
+            "playBallPickUpPos|0.0000,0.0000,-0.7476,0.6642|7.44,-3.21,303.00",
+            "playBallThrowPos|0.0000,0.0000,-0.7388,0.6739|10.76,-3.26,303.00",
+            "playerBallPickUpPos|0.0000,0.0000,0.6635,0.7481|19.16,-1.03,303.00",
+            "bush09>C_bush03_Collision|15.47,-95.21,301.68",
+            "celtis08>celtis01 trunk|41.01,-54.88,306.48",
+            "celtis06>celtis01 trunk|31.11,-179.98,301.37",
+            "celtis03>celtis01 trunk|24.15,-102.31,307.41",
+        ],
+    };
+
+    // A rotated actor as a comparable line: the quaternion it stores, and where its turn puts a point of the
+    // prototype it places. The point is what makes this catch a composition-order or scale error too — an
+    // inverted, differently-ordered or unscaled transform lands it somewhere else.
+    private static string PinOf(ActorEntry actor)
+    {
+        System.Numerics.Vector3 probe =
+            TransformMath.TransformCoordinate(new System.Numerics.Vector3(1f, 2f, 3f), actor.Transform);
+        return $"{actor.EntityName}|{actor.Rotation.X:F4},{actor.Rotation.Y:F4},{actor.Rotation.Z:F4}," +
+               $"{actor.Rotation.W:F4}|{probe.X:F2},{probe.Y:F2},{probe.Z:F2}";
+    }
+
+    // A turn a convention flip would actually MOVE something with. Half turns are excluded on purpose: the
+    // conjugate of a 180° rotation is the same rotation negated, which is the same orientation — pinning those
+    // would compare a number that changes against geometry that does not, and prove nothing about the viewport.
+    private static bool IsSensitiveTurn(ActorEntry actor) =>
+        actor.IsTyped && MathF.Abs(actor.Rotation.W) is > 0.05f and < 0.999f;
+
+    private static List<ActorEntry> RotatedActors(ActorPlacements placements, int count)
+    {
+        var picked = new List<ActorEntry>(count);
+        foreach (ActorEntry actor in placements.All)
+        {
+            if (!IsSensitiveTurn(actor)) continue;
+            picked.Add(actor);
+            if (picked.Count == count) break;
+        }
+        return picked;
+    }
+
+    private static void CheckPinnedOrientations(string district, ActorPlacements placements,
+        List<FrameNodeAdapter> nodes, StringBuilder sb, Action<string, bool, string> check)
+    {
+        List<ActorEntry> rotated = RotatedActors(placements, 8);
+        var lines = new List<string>(rotated.Count + 4);
+        foreach (ActorEntry actor in rotated) lines.Add(PinOf(actor));
+
+        // Plus a few real placed children: their world transform runs through the scene adapter, so these pin
+        // the whole path the renderer reads, not just the arithmetic on the actor's own record.
+        var pinnedActors = new HashSet<string>(StringComparer.Ordinal);
+        foreach (FrameNodeAdapter node in nodes)
+        {
+            if (pinnedActors.Count == 4) break;
+            if (node.Frame.WorldTransform.Translation.LengthSquared() < 1e-4f) continue;
+            if (placements.ActorCovering(node.Frame) is not { } covering) continue;
+            if (!IsSensitiveTurn(covering) || !pinnedActors.Add(covering.EntityName)) continue;
+
+            System.Numerics.Vector3 w = node.WorldTransform.Translation;
+            lines.Add($"{covering.EntityName}>{node.Frame.Name}|{w.X:F2},{w.Y:F2},{w.Z:F2}");
+        }
+
+        if (!PinnedOrientations.TryGetValue(district, out string[]? expected))
+        {
+            sb.AppendLine($"(no pinned orientations for '{district}' — add these to PinnedOrientations)");
+            foreach (string line in lines) sb.AppendLine($"    PIN  \"{line}\",");
+            return;
+        }
+
+        int matched = 0;
+        string firstOff = "";
+        for (int i = 0; i < expected.Length; i++)
+        {
+            if (i < lines.Count && string.Equals(lines[i], expected[i], StringComparison.Ordinal)) { matched++; continue; }
+            if (firstOff.Length == 0)
+            {
+                firstOff = $"expected \"{expected[i]}\", got \"{(i < lines.Count ? lines[i] : "(nothing)")}\"";
+            }
+        }
+        check("vanilla actors are turned the way they were pinned", matched == expected.Length && lines.Count == expected.Length,
+            $"{matched}/{expected.Length} {firstOff}");
+    }
+
+    // The glyphs and the click targets of a district, which used to be snapshots taken once at load: a deleted
+    // actor stayed clickable (and an actor pick beats the geometry behind it, so it swallowed clicks meant for
+    // something else), a copy was never drawn, and a moved actor left its marker behind.
+    private static void CheckGlyphSet(string district, SceneDocumentAdapter document, ActorPlacements placements,
+        StringBuilder sb, Action<string, bool, string> check)
+    {
+        var rows = new Dictionary<ActorEntry, SceneNode>();
+        foreach (ActorEntry actor in placements.All)
+        {
+            rows[actor] = new SceneNode(actor.EntityName, "Actor", false) { Source = document.ActorNode(actor) };
+        }
+
+        List<ActorEntry> glyphs = new();
+        List<(SceneNode Node, System.Numerics.Vector3 Position)> picks = new();
+        void Collect()
+        {
+            glyphs = new List<ActorEntry>();
+            picks = new List<(SceneNode, System.Numerics.Vector3)>();
+            ActorGlyphSet.Collect(placements, rows, glyphs, picks);
+        }
+
+        Collect();
+        int baseline = glyphs.Count;
+        check("every glyph actor gets a marker and a click target",
+            baseline == placements.Invisible.Count && picks.Count == baseline,
+            $"{baseline} of {placements.Invisible.Count}, {picks.Count} click targets");
+        if (baseline == 0) { sb.AppendLine("(district has no glyph actors — glyph-set checks skipped)"); return; }
+
+        bool aligned = true;
+        for (int i = 0; i < glyphs.Count && aligned; i++) aligned = glyphs[i].Position == picks[i].Position;
+        check("a picked index names the glyph it was aimed at", aligned, $"{glyphs.Count} in step");
+
+        // Deleting: the actor leaves the list, so nothing draws it and nothing can click it.
+        ActorEntry victim = placements.Invisible[baseline / 2];
+        int victimIndex = placements.All.ToList().IndexOf(victim);
+        ActorsFile? victimPack = placements.PackOf(victim);
+        FrameObjectBase? victimTarget = placements.Detach(victim);
+        Collect();
+        check("a deleted actor stops being drawn and stops being clickable",
+            glyphs.Count == baseline - 1 && !glyphs.Contains(victim) && picks.Count == baseline - 1,
+            $"{glyphs.Count} left, still listed: {glyphs.Contains(victim)}");
+
+        placements.Attach(victim, victimPack!, victimTarget, victimIndex, hadGlyph: true);
+        Collect();
+        check("undoing the delete brings its marker back", glyphs.Contains(victim), $"{glyphs.Count} markers");
+
+        // …and brings back everything a LATER edit of it needs. The editor skips an actor whose pack it cannot
+        // find, silently — so an actor restored without one looks fine and can never be deleted again.
+        check("an actor restored by undo can still be edited",
+            ReferenceEquals(placements.PackOf(victim), victimPack) && victimPack != null,
+            placements.PackOf(victim) == null ? "PackOf is null after undo" : "pack intact");
+
+        // Moving: the marker and the click target travel with the actor, rather than staying where it loaded.
+        // Deliberately not the actor the delete test used — its state has already been through a round trip.
+        ActorEntry mover = placements.Invisible.FirstOrDefault(a => !ReferenceEquals(a, victim)) ?? victim;
+        System.Numerics.Vector3 was = mover.Position;
+        mover.Position = was + new System.Numerics.Vector3(12f, -7f, 3f);
+        Collect();
+        int moverAt = glyphs.IndexOf(mover);
+        check("a moved actor takes its marker and its click target with it",
+            moverAt >= 0 && picks[moverAt].Position == mover.Position,
+            moverAt >= 0 ? $"{was} → {picks[moverAt].Position}" : "(not listed)");
+        mover.Position = was;
+
+        // Copying: a new actor is drawn and clickable as soon as it has a row.
+        if (placements.PackOf(mover) is { } pack && pack.Duplicate(mover, out _) is { } copy)
+        {
+            placements.AddCopy(copy, mover, pack);
+            Collect();
+            check("a copy is drawn and clickable only once it has a row",
+                !glyphs.Contains(copy), "no row yet");
+
+            rows[copy] = new SceneNode(copy.EntityName, "Actor", false) { Source = document.ActorNode(copy) };
+            Collect();
+            check("a copy with a row is drawn and clickable",
+                glyphs.Contains(copy) && picks.Count == glyphs.Count, $"{glyphs.Count} markers");
+
+            placements.Detach(copy);
+            pack.RemoveCopy(copy);
+            rows.Remove(copy);
+        }
+
+        // Hiding a row takes its glyph with it — the eye has nothing else to act on for a glyph actor.
+        rows[mover].IsVisible = false;
+        Collect();
+        check("hiding an actor's row hides its glyph", !glyphs.Contains(mover), $"{glyphs.Count} markers");
+        rows[mover].IsVisible = true;
+
+        Collect();
+        check("the district ends where it started", glyphs.Count == baseline, $"{glyphs.Count} vs {baseline}");
     }
 
     // The tree node that wraps a given frame adapter (the mesh lives on the tree node, not on the adapter).

@@ -47,11 +47,13 @@ internal static class NativeMiscFiles
                 EntityHash = item.EntityHash,
                 FrameHash = item.FrameHash,
                 Position = item.Position,
-                // The pack stores the INVERSE of the orientation the engine places the actor with — proven two
-                // ways: no actor's stored quaternion matches the collision hull standing in its own spot (0 of
-                // 32 pairs), 11 match its conjugate, and a +90° turn made in the editor came out as -90° in the
-                // game. Conjugating on both sides puts the whole toolkit in the engine's convention.
-                Rotation = Quaternion.Conjugate(new Quaternion(item.RotationX, item.RotationY, item.RotationZ, item.RotationW)),
+                // Straight through, no convention change. A conjugate here was tried and reverted: it is
+                // byte-neutral for an untouched pack (conjugating twice restores the bits), so no round-trip
+                // check can see it, but it silently turns every vanilla placement in the viewport — which is
+                // how it was caught. The evidence for it was a comparison against collision hulls, and those
+                // carry their own REFLECTED convention (TransformMath.CollisionEulerToQuaternion), so the
+                // partial "conjugate matches" correlation it produced said nothing about this format.
+                Rotation = new Quaternion(item.RotationX, item.RotationY, item.RotationZ, item.RotationW),
                 Scale = item.Scale,
                 Flags = item.Flags,
                 InitPropId = item.InitPropId,
@@ -72,13 +74,10 @@ internal static class NativeMiscFiles
             }
             Model.ActorItemW item = file.Binary.Items[actor.Index];
             item.Position = actor.Position;
-            // Back into the pack's inverted convention (see ReadActors). Conjugating twice restores the exact
-            // bits, so an untouched actor still re-saves byte for byte.
-            Quaternion stored = Quaternion.Conjugate(actor.Rotation);
-            item.RotationX = stored.X;
-            item.RotationY = stored.Y;
-            item.RotationZ = stored.Z;
-            item.RotationW = stored.W;
+            item.RotationX = actor.Rotation.X;
+            item.RotationY = actor.Rotation.Y;
+            item.RotationZ = actor.Rotation.Z;
+            item.RotationW = actor.Rotation.W;
             item.Scale = actor.Scale;
         }
 
