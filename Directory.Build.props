@@ -26,7 +26,10 @@
          the output directory, so with the documentation dropped there (see Directory.Build.targets)
          it would otherwise fail copying an Illusion.xml that was never written. -->
     <PublishDocumentationFiles>false</PublishDocumentationFiles>
-    <Version>0.3.0</Version>
+    <!-- The fallback for builds the release workflow did not make; the tag is what a release is versioned
+         from. Kept in step with the newest published tag so a build from source does not report itself as
+         older than the release it was cut from and offer to "update" over the build output. -->
+    <Version>0.3.1</Version>
     <Authors>hurfy</Authors>
     <Product>Illusion Toolkit</Product>
   </PropertyGroup>

@@ -4,6 +4,11 @@
 # of the version number; nothing in the repository has to be edited to cut a release (the <Version>
 # in Directory.Build.props is only the fallback for local builds).
 #
+# Two assets go out, and the toolkit's own updater reads BOTH: the archive, and a `.sha256` beside it
+# that a download is checked against before anything is replaced. Keep the archive's name shaped
+# `...-win-x64.zip` — that substring is how the updater tells the archive apart from everything else
+# attached to a release.
+#
 # The archive is framework-dependent: the .NET Desktop Runtime is NOT bundled, which keeps it small
 # but means a machine without the runtime shows the "you must install .NET" dialog on first launch.
 # The release notes say so.
@@ -94,6 +99,9 @@ jobs:
           $junk = Get-ChildItem $root -Recurse -File -Include *.pdb, *.xml, *.md, *.txt
           if ($junk) { throw "Not release payload: $(($junk.Name | Sort-Object -Unique) -join ', ')" }
 
+      # The checksum is published as its own asset, not only quoted in the notes: the in-app updater downloads
+      # it beside the archive and refuses to install anything that does not match (see UpdateDownloader). The
+      # sha256sum layout — "<hash>  <file>" — is what it reads, and what `sha256sum -c` reads too.
       - name: Archive
         id: archive
         shell: pwsh
@@ -104,7 +112,13 @@ jobs:
           Compress-Archive -Path "publish/$env:NAME" -DestinationPath $zip -CompressionLevel Optimal
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+          $sums = "$zip.sha256"
+          # Written by hand rather than with Set-Content: no byte-order mark in front of the hash, and a
+          # single LF at the end, so `sha256sum -c` on a non-Windows machine reads it too.
+          [IO.File]::WriteAllText(
+            (Join-Path $PWD $sums), "$hash  $zip`n", [Text.UTF8Encoding]::new($false))
           "zip=$zip" >> $env:GITHUB_OUTPUT
+          "sums=$sums" >> $env:GITHUB_OUTPUT
           "sha256=$hash" >> $env:GITHUB_OUTPUT
           "size=$size" >> $env:GITHUB_OUTPUT
 
@@ -116,6 +130,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           ZIP: ${{ steps.archive.outputs.zip }}
+          SUMS: ${{ steps.archive.outputs.sums }}
           SHA256: ${{ steps.archive.outputs.sha256 }}
           SIZE: ${{ steps.archive.outputs.size }}
         run: |
@@ -124,8 +139,11 @@ jobs:
           $notes = @'
           ### Install
 
-          Download `Illusion-Toolkit-0.3.1-win-x64.zip` (7.2 MB) and unpack it anywhere.
+          Download `{ZIP}` ({SIZE} MB) and unpack it anywhere.
           Run `Illusion.exe`. On first launch it asks for your Mafia II folder.
+
+          Already have a copy? Unpack this one over it — or, if that copy is new enough to look for
+          updates itself, its launcher has already offered you this one beside the settings gear.
 
           Needs the **[.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)**
           and the **[Visual C++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe)**.
@@ -138,7 +156,7 @@ jobs:
           $notes = $notes.Replace('{ZIP}', $env:ZIP).Replace('{SIZE}', $env:SIZE).Replace('{SHA256}', $env:SHA256)
           Set-Content notes.md -Value $notes -Encoding utf8
           # --generate-notes appends the commit/PR log under the notes above.
-          gh release create "v$env:VERSION" $env:ZIP `
+          gh release create "v$env:VERSION" $env:ZIP $env:SUMS `
             --draft `
             --title "Illusion Toolkit $env:VERSION" `
             --notes-file notes.md `

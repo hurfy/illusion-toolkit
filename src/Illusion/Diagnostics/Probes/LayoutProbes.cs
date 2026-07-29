@@ -215,7 +215,9 @@ internal static class LayoutProbes
     /// <summary>A child's rendered rectangle in its parent panel's coordinates (margins excluded, as drawn).</summary>
     private static Rect Bounds(Panel parent, int index) => BoundsIn((UIElement)parent.Children[index], parent);
 
-    private static Rect BoundsIn(UIElement child, Visual ancestor)
+    /// <summary>Internal so the update probe can measure the launcher's corner with its second button
+    /// showing — that state only exists when a check has found something, which this probe never does.</summary>
+    internal static Rect BoundsIn(UIElement child, Visual ancestor)
     {
         Point origin = child.TransformToAncestor(ancestor).Transform(new Point(0, 0));
         return new Rect(origin, child.RenderSize);

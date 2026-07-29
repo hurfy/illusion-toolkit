@@ -1,4 +1,8 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -7,6 +11,7 @@ using Illusion.Assets;
 using Illusion.Assets.Sds;
 using Illusion.Mcp;
 using Illusion.Settings;
+using Illusion.Updates;
 using Microsoft.Win32;
 
 namespace Illusion.Views;
@@ -27,6 +32,9 @@ public partial class LauncherWindow : Window
     private readonly McpServerHost? _mcp = App.McpServer;
     private DispatcherTimer? _copiedTimer;
     private bool _busy;
+
+    /// <summary>The release the download button would install, or null while there is nothing to install.</summary>
+    private ReleaseInfo? _update;
 
     public LauncherWindow()
     {
@@ -55,6 +63,11 @@ public partial class LauncherWindow : Window
             // Prefill with the saved path — the same setting the settings window edits.
             PathBox.Text = UserSettings.Current.GamePath ?? "";
             RefreshState();
+
+            // Not awaited: whether a newer release exists has nothing to do with opening the game, and the
+            // check can only ever ADD the button. UpdateChecker remembers the answer for the session, so
+            // coming back here from the editor costs no second request.
+            _ = LookForUpdateAsync();
         };
     }
 
@@ -157,8 +170,8 @@ public partial class LauncherWindow : Window
         UnpackBtn.IsEnabled = validPath && !unpacked;
         MapEditorBtn.IsEnabled = unpacked;
 
-        // Idle: the live-unpack panel is always hidden here.
-        UnpackPanel.Visibility = Visibility.Collapsed;
+        // Idle: the progress panel is always hidden here.
+        WorkPanel.Visibility = Visibility.Collapsed;
 
         if (unpacked)
         {
@@ -184,9 +197,20 @@ public partial class LauncherWindow : Window
     private void ShowWarn(string message)
     {
         ReadyPanel.Visibility = Visibility.Collapsed;
-        UnpackPanel.Visibility = Visibility.Collapsed;
+        WorkPanel.Visibility = Visibility.Collapsed;
         WarnPanel.Visibility = Visibility.Visible;
         WarnText.Text = message;
+    }
+
+    // Takes the card over for a run that has a progress bar (unpacking, downloading an update).
+    private void ShowWork(string status)
+    {
+        WarnPanel.Visibility = Visibility.Collapsed;
+        ReadyPanel.Visibility = Visibility.Collapsed;
+        WorkPanel.Visibility = Visibility.Visible;
+        WorkProgress.Maximum = 1;
+        WorkProgress.Value = 0;
+        WorkStatus.Text = status;
     }
 
     private void Path_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => RefreshState();
@@ -251,33 +275,22 @@ public partial class LauncherWindow : Window
             return;
         }
 
-        _busy = true;
-        UnpackBtn.IsEnabled = false;
         // Changing the game folder mid-unpack would leave the run writing into the old one.
-        BrowseBtn.IsEnabled = false;
-        SettingsBtn.IsEnabled = false;
-        PathBox.IsEnabled = false;
-
-        // Reveal the live-unpack panel exclusively.
-        WarnPanel.Visibility = Visibility.Collapsed;
-        ReadyPanel.Visibility = Visibility.Collapsed;
-        UnpackPanel.Visibility = Visibility.Visible;
-        UnpackProgress.Maximum = 1;
-        UnpackProgress.Value = 0;
-        UnpackStatus.Text = "Preparing…";
+        SetBusy(true);
+        ShowWork("Preparing…");
 
         var progress = new Progress<(int done, int total, string name)>(p =>
         {
-            UnpackProgress.Maximum = Math.Max(1, p.total);
-            UnpackProgress.Value = p.done;
-            UnpackStatus.Text = $"{p.done}/{p.total} · {p.name}";
+            WorkProgress.Maximum = Math.Max(1, p.total);
+            WorkProgress.Value = p.done;
+            WorkStatus.Text = $"{p.done}/{p.total} · {p.name}";
         });
 
         string? unpackError = null;
         try
         {
             await Task.Run(() => ResourceUnpacker.UnpackAll(progress, CancellationToken.None));
-            UnpackStatus.Text = "Unpacking complete.";
+            WorkStatus.Text = "Unpacking complete.";
         }
         catch (Exception ex)
         {
@@ -285,13 +298,155 @@ public partial class LauncherWindow : Window
         }
         finally
         {
-            _busy = false;
-            SettingsBtn.IsEnabled = true;
-            PathBox.IsEnabled = true;
-            RefreshState(); // hides UnpackPanel, shows the ready banner on success
+            SetBusy(false);
+            RefreshState(); // hides WorkPanel, shows the ready banner on success
 
-            // RefreshState hides UnpackPanel — show the error on top, otherwise it would vanish instantly.
+            // RefreshState hides WorkPanel — show the error on top, otherwise it would vanish instantly.
             if (unpackError != null) ShowWarn("Unpack failed: " + unpackError);
+        }
+    }
+
+    // Everything that must not be touched while a long run owns the window. _busy also makes RefreshState a
+    // no-op, so it is cleared BEFORE the refresh that ends the run — and that refresh is what puts the
+    // path-dependent buttons back, which is why leaving the run does not re-enable them here.
+    private void SetBusy(bool busy)
+    {
+        _busy = busy;
+        SettingsBtn.IsEnabled = !busy;
+        UpdateBtn.IsEnabled = !busy;
+        PathBox.IsEnabled = !busy;
+        if (busy)
+        {
+            BrowseBtn.IsEnabled = false;
+            UnpackBtn.IsEnabled = false;
+            MapEditorBtn.IsEnabled = false;
+        }
+    }
+
+    // ── Updates ──
+
+    private async Task LookForUpdateAsync()
+    {
+        if (!UserSettings.Current.CheckUpdatesOnStartup) return;
+        ShowUpdate(await UpdateChecker.CheckAsync());
+    }
+
+    /// <summary>
+    /// Puts a check result on screen — which here means the download button, and only when there is something
+    /// to download. A failed check shows nothing at all: no network is a normal way to run the toolkit, and
+    /// anyone who wants the reason can press the check in the settings, which does report it.
+    /// </summary>
+    internal void ShowUpdate(UpdateCheckResult result)
+    {
+        _update = result.HasUpdate ? result.Release : null;
+        UpdateBtn.Visibility = _update is null ? Visibility.Collapsed : Visibility.Visible;
+        if (_update is not null)
+        {
+            UpdateBtn.ToolTip =
+                $"Version {_update.Version} is out ({_update.AssetSizeText}) — click to install it";
+        }
+    }
+
+    private async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        if (_update is not { } release || _busy) return;
+
+        // Asked before a byte is downloaded: a folder that cannot be written to is not going to become
+        // writable afterwards, and the release page is the honest fallback.
+        if (!UpdateInstaller.CanInstall(out string reason))
+        {
+            DialogOutcome refusal = AppDialog.Show(this, new DialogOptions
+            {
+                Icon = DialogIcon.Info,
+                Heading = $"Version {release.Version} is out",
+                Text = reason,
+                Buttons = DialogButtons.YesCancel,
+                ConfirmText = "Open the release",
+                CancelText = "Close",
+            });
+            if (refusal.Confirmed) OpenInBrowser(release.PageUrl);
+            return;
+        }
+
+        // A download declined at the restart prompt is still on disk; asking again must not fetch it twice.
+        StagedUpdate? staged = UpdateDownloader.ReadyFor(release);
+        string? error = null;
+        if (staged is null)
+        {
+            SetBusy(true);
+            ShowWork($"Downloading {release.AssetName}…");
+
+            var progress = new Progress<DownloadProgress>(p =>
+            {
+                WorkProgress.Maximum = Math.Max(1, p.Total);
+                WorkProgress.Value = p.Received;
+                WorkStatus.Text = p.Total > 0
+                    ? $"{Megabytes(p.Received)} / {Megabytes(p.Total)} MB"
+                    : $"{Megabytes(p.Received)} MB";
+            });
+
+            try
+            {
+                staged = await UpdateDownloader.DownloadAsync(release, progress);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException
+                                           or UnauthorizedAccessException or OperationCanceledException)
+            {
+                error = ex.Message;
+            }
+            finally
+            {
+                SetBusy(false);
+                RefreshState();
+            }
+        }
+
+        if (staged is null)
+        {
+            // RefreshState has just repainted the card — the failure goes on top of it, as unpacking's does.
+            ShowWarn("The update could not be downloaded: " + error);
+            return;
+        }
+
+        DialogOutcome outcome = AppDialog.Show(this, new DialogOptions
+        {
+            Icon = DialogIcon.Success,
+            Heading = $"Version {staged.Version} is ready",
+            Text = "The toolkit closes, replaces its own files and opens again. It takes a moment.",
+            Buttons = DialogButtons.YesCancel,
+            ConfirmText = "Restart now",
+            CancelText = "Later",
+        });
+        if (!outcome.Confirmed) return;
+
+        try
+        {
+            UpdateInstaller.Start(staged);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+            ShowWarn("The downloaded toolkit would not start: " + ex.Message);
+            return;
+        }
+
+        // Nothing else may run now — the staged copy is waiting for this process to let go of its files.
+        Application.Current.Shutdown();
+    }
+
+    private static string Megabytes(long bytes) =>
+        (bytes / (1024.0 * 1024.0)).ToString("0.0", CultureInfo.InvariantCulture);
+
+    /// <summary>Hands a URL to the shell. Shared with the settings window, which links to the same pages.</summary>
+    internal static void OpenInBrowser(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            // No browser registered for http — there is nothing useful to say about that here.
         }
     }
 

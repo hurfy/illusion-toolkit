@@ -125,6 +125,45 @@
                 </ScrollViewer>
             </TabItem>
 
+            <!-- ═══ Updates ═══ -->
+            <TabItem Header="Updates" Style="{StaticResource SectionTab}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="22,18,22,22">
+                        <TextBlock Text="THIS BUILD" Style="{StaticResource Caption}" />
+                        <TextBlock x:Name="VersionText" Foreground="White" FontFamily="Consolas"
+                                   FontSize="13" />
+                        <TextBlock x:Name="BuildText" Style="{StaticResource Hint}" />
+
+                        <Border Style="{StaticResource SectionRule}" />
+
+                        <TextBlock Text="CHECKING" Style="{StaticResource Caption}" />
+                        <CheckBox x:Name="UpdateStartupCheck" Foreground="White"
+                                  Content="Look for a newer version when the toolkit starts"
+                                  Checked="UpdateStartup_Changed" Unchecked="UpdateStartup_Changed" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="One request to the GitHub releases page, in the background, with no account involved. It can only ever add the download button beside the launcher's gear — a check that fails says nothing and changes nothing." />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button x:Name="CheckUpdateBtn" Content="Check now"
+                                    Style="{StaticResource NeutralButton}" Click="CheckUpdate_Click" />
+                            <Button x:Name="InstallUpdateBtn" Content="Download and install"
+                                    Style="{StaticResource AccentButton}" Margin="8,0,0,0"
+                                    Visibility="Collapsed" Click="InstallUpdate_Click" />
+                        </StackPanel>
+                        <TextBlock x:Name="UpdateStatusText" Style="{StaticResource Hint}" />
+
+                        <Border Style="{StaticResource SectionRule}" />
+
+                        <TextBlock Text="RELEASES" Style="{StaticResource Caption}" />
+                        <Button Content="Open the releases page"
+                                Style="{StaticResource NeutralButton}" HorizontalAlignment="Left"
+                                Click="ReleasesPage_Click" />
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Every version, its notes and its archive. Installing by hand is unpacking one over this folder — nothing here writes anywhere else, and your settings live outside it." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <!-- ═══ Keymap ═══ -->
             <TabItem Header="Keymap" Style="{StaticResource SectionTab}">
                 <DockPanel Margin="22,18,22,16">

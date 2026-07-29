@@ -3,6 +3,7 @@ using System.Windows;
 using Illusion.Diagnostics;
 using Illusion.Mcp;
 using Illusion.Settings;
+using Illusion.Updates;
 using Illusion.Views;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -38,18 +39,29 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // A collision cook that was killed or crashed leaves its scratch directory behind; nothing else ever
-        // deletes them. Best-effort and off the critical path.
-        Task.Run(Assets.Collisions.PhysXCooker.SweepStaleScratch);
-
         // One theme, always dark. Everything the toolkit paints itself — the editor panels, the shared
         // styles in EditorStyles.xaml, the custom controls — is written for a dark surface, so the Fluent
         // chrome around it has to be dark too; following the OS setting would frame those panels in light
         // chrome on a light Windows. ThemeMode is still [Experimental] in WPF (WPF0001); we opt in
-        // deliberately and keep the suppression scoped to this one call.
+        // deliberately and keep the suppression scoped to this one call. Set before any window is shown,
+        // the updater's included.
 #pragma warning disable WPF0001
         ThemeMode = ThemeMode.Dark;
 #pragma warning restore WPF0001
+
+        // Installing an update: this build was started out of its staging folder by the copy that is on its
+        // way out, to replace that copy's files (see UpdateInstaller). Nothing else belongs in this process —
+        // least of all the MCP server, whose port the outgoing toolkit is still holding.
+        if (UpdateInstaller.TryReadApplyRequest(e.Args, out ApplyRequest? applyRequest))
+        {
+            new ApplyUpdateWindow(applyRequest!).Show();
+            return;
+        }
+
+        // A collision cook that was killed or crashed leaves its scratch directory behind, and so does an
+        // update that has been installed; nothing else ever deletes either. Best-effort, off the critical path.
+        Task.Run(Assets.Collisions.PhysXCooker.SweepStaleScratch);
+        Task.Run(UpdateInstaller.SweepStaging);
 
         StartMcpServer();
 

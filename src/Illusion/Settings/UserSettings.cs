@@ -35,6 +35,11 @@ public sealed class UserSettings
     /// Only worth changing if something else on the machine already owns the default.</summary>
     public int McpPort { get; set; } = Mcp.McpHostOptions.DefaultPort;
 
+    /// <summary>Whether the launcher asks GitHub for a newer release when it opens. One request, in the
+    /// background, and a failure is silent — the download button only ever appears when there really is
+    /// something to download. Off leaves the settings window's own check, which is always available.</summary>
+    public bool CheckUpdatesOnStartup { get; set; } = true;
+
     private Dictionary<string, string>? _hotkeys;
 
     /// <summary>

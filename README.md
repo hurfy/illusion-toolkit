@@ -46,6 +46,11 @@ it anywhere and run `Illusion.exe`. It carries no runtime of its own, so the mac
 [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0) - Windows offers
 to fetch it on first launch if it is missing - and the VC++ redistributable listed above.
 
+After that it keeps itself current: the launcher asks the releases page once on startup and, when
+there is a newer version, puts a green download arrow beside the settings gear. One click downloads
+the archive, checks it against the checksum published with the release, and restarts into the new
+build. Settings -> Updates has a check button and the switch that turns the startup check off.
+
 ## Building it yourself
 
 ```powershell
@@ -85,7 +90,9 @@ Settings live in `%LOCALAPPDATA%\Illusion\settings.json`: `GamePath`, `BlenderPa
 ### Launcher
 
 Pick the game folder, bulk-unpack all archives with a live progress bar, then enter the map editor.
-The last path is remembered. *(A "Resource Editor" tile exists but is a disabled stub.)*
+The last path is remembered. A green download arrow appears beside the gear when a newer release is
+out; the same progress bar shows the download, and the toolkit restarts to install it.
+*(A "Resource Editor" tile exists but is a disabled stub.)*
 
 ### Viewport and streaming
 

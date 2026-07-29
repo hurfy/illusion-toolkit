@@ -92,13 +92,22 @@
                     <TextBlock Text="Illusion Toolkit" FontSize="22" FontWeight="SemiBold" />
                     <TextBlock Text="Mafia II Toolkit" FontSize="12" Opacity="0.6" Margin="0,1,0,0" />
                 </StackPanel>
-                <!-- The negative right margin pulls it past the content inset, so it reads as sitting in the
-                     window's corner rather than in the text column. -->
-                <Button x:Name="SettingsBtn" Grid.Column="1" Style="{StaticResource CornerIconButton}"
-                        VerticalAlignment="Top" Margin="12,-2,-4,0"
-                        Content="&#xE713;"
-                        ToolTip="Settings — game folder, keymap, Blender bridge, MCP server"
-                        Click="Settings_Click" />
+                <!-- The negative right margin pulls the pair past the content inset, so they read as sitting in
+                     the window's corner rather than in the text column. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top"
+                            Margin="12,-2,-4,0">
+                    <!-- Only ever visible when a check actually found a newer release. Green rather than the
+                         chrome gray of the gear beside it: this is the one thing in the corner that is news,
+                         and the launcher already uses the same green for the ready card's check. The colour is
+                         a local value, so the hover trigger cannot repaint it white. -->
+                    <Button x:Name="UpdateBtn" Style="{StaticResource CornerIconButton}"
+                            Content="&#xE896;" Foreground="#60C060" Visibility="Collapsed"
+                            Click="Update_Click" />
+                    <Button x:Name="SettingsBtn" Style="{StaticResource CornerIconButton}"
+                            Content="&#xE713;"
+                            ToolTip="Settings — game folder, keymap, updates, Blender bridge, MCP server"
+                            Click="Settings_Click" />
+                </StackPanel>
             </Grid>
 
             <!-- Game folder: the first thing anyone has to set, so it is picked right here rather than one
@@ -153,10 +162,12 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- Live unpacking — shown ONLY during an actual run -->
-                    <StackPanel x:Name="UnpackPanel" VerticalAlignment="Center" Visibility="Collapsed">
-                        <ProgressBar x:Name="UnpackProgress" Height="6" Minimum="0" Maximum="1" Value="0" />
-                        <TextBlock x:Name="UnpackStatus" FontFamily="Consolas" FontSize="12" Opacity="0.8"
+                    <!-- Work in progress — shown ONLY during an actual run (unpacking, or downloading an
+                         update). Both are long, exclusive and worth watching, and the card is where the
+                         launcher already says what it is doing. -->
+                    <StackPanel x:Name="WorkPanel" VerticalAlignment="Center" Visibility="Collapsed">
+                        <ProgressBar x:Name="WorkProgress" Height="6" Minimum="0" Maximum="1" Value="0" />
+                        <TextBlock x:Name="WorkStatus" FontFamily="Consolas" FontSize="12" Opacity="0.8"
                                    Margin="0,7,0,0" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </Grid>

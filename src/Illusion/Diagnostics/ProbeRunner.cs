@@ -491,6 +491,12 @@ internal static class ProbeRunner
             case "--probe-schema":
                 SchemaProbes.RunSchemaProbe(args.Length >= 2 ? args[1] : null);
                 return true;
+            // Updates: version ordering, what is read out of a GitHub release, the checksum file, staging a
+            // downloaded archive, the file swap and the frozen apply command line. Offline unless "live" is
+            // passed, which also asks the real releases page (and SKIPs when it cannot be reached).
+            case "--probe-update":
+                UpdateProbes.RunUpdateProbe(args.Length >= 2 && args[1] == "live");
+                return true;
             // The embedded MCP server: a real client discovers and calls the tool over streamable
             // HTTP, and a busy port is reported rather than thrown.
             case "--probe-mcp":

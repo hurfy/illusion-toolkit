@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -9,6 +10,7 @@ using Illusion.Assets;
 using Illusion.Bridge;
 using Illusion.Mcp;
 using Illusion.Settings;
+using Illusion.Updates;
 using Microsoft.Win32;
 
 namespace Illusion.Views;
@@ -42,6 +44,7 @@ public partial class SettingsWindow : Window
     private readonly List<KeymapGroup> _groups = new();
     private readonly Dictionary<HotkeyId, KeymapRow> _rows = new();
     private string? _autoDetectedBlender;
+    private ReleaseInfo? _update;
     private bool _loading;
 
     public SettingsWindow()
@@ -111,11 +114,14 @@ public partial class SettingsWindow : Window
         BlenderPathBox.Text = settings.BlenderPath ?? "";
         AutoPushCheck.IsChecked = settings.BridgeAutoPush;
         McpPortBox.Text = settings.McpPort.ToString(CultureInfo.InvariantCulture);
+        UpdateStartupCheck.IsChecked = settings.CheckUpdatesOnStartup;
         _loading = false;
 
         RefreshGamePathStatus();
         RefreshBlenderStatus();
         RefreshMcpStatus();
+        ShowVersion();
+        ShowCheckResult(UpdateChecker.Cached);
         RefreshKeymap();
     }
 
@@ -176,6 +182,171 @@ public partial class SettingsWindow : Window
         bool show = BuildNoticeCheck.IsChecked == true;
         UserSettings.Update(s => s.SuppressBuildNotice = !show);
     }
+
+    // ── Updates ──
+
+    /// <summary>True while a map editor window is open. Installing restarts the toolkit, which would take
+    /// whatever is unsaved in it down too — so the button waits rather than asking a question it cannot
+    /// answer from here.</summary>
+    private static bool EditorIsOpen =>
+        Application.Current?.Windows.OfType<MainWindow>().Any() == true;
+
+    private void ShowVersion()
+    {
+        VersionText.Text = AppVersion.Current.IsEmpty ? "unknown" : AppVersion.Current.ToString();
+
+        string origin = AppVersion.IsDevelopmentBuild ? "built from source" : "installed release";
+        BuildText.Text = AppVersion.ShortCommit is { } commit ? $"{origin} · commit {commit}" : origin;
+    }
+
+    private void UpdateStartup_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        bool on = UpdateStartupCheck.IsChecked == true;
+        UserSettings.Update(s => s.CheckUpdatesOnStartup = on);
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        CheckUpdateBtn.IsEnabled = false;
+        InstallUpdateBtn.Visibility = Visibility.Collapsed;
+        Say(UpdateStatusText, "Asking GitHub…", DimBrush);
+
+        // force: this button exists precisely to ignore the answer the session already has.
+        UpdateCheckResult result = await UpdateChecker.CheckAsync(force: true);
+
+        CheckUpdateBtn.IsEnabled = true;
+        ShowCheckResult(result);
+
+        // The launcher shows the same answer as a button in its corner; it is behind this window, so it has
+        // to be told rather than asked again.
+        if (Owner is LauncherWindow launcher) launcher.ShowUpdate(result);
+    }
+
+    /// <summary>Internal rather than private so <c>--probe-update</c> can hand it every answer a check can
+    /// produce; there is no other way to see what this section does with a failure.</summary>
+    internal void ShowCheckResult(UpdateCheckResult? result)
+    {
+        _update = null;
+        InstallUpdateBtn.Visibility = Visibility.Collapsed;
+
+        if (result is null)
+        {
+            Say(UpdateStatusText, "Not looked yet in this session.", DimBrush);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case UpdateStatus.UpdateAvailable when result.Release is { } release:
+            {
+                _update = release;
+                InstallUpdateBtn.Visibility = Visibility.Visible;
+
+                bool possible = UpdateInstaller.CanInstall(out string refusal);
+                bool blocked = EditorIsOpen;
+                InstallUpdateBtn.IsEnabled = possible && !blocked;
+
+                string headline = $"Version {release.Version} is out ({release.AssetSizeText}).";
+                Say(UpdateStatusText,
+                    !possible ? headline + " " + refusal
+                    : blocked ? headline + " Close the map editor first — installing restarts the toolkit."
+                    : headline + " Installing it restarts the toolkit.",
+                    possible && !blocked ? OkBrush : WarnBrush);
+                break;
+            }
+
+            case UpdateStatus.UpToDate:
+                Say(UpdateStatusText, $"Nothing newer than {AppVersion.Current} has been released.", OkBrush);
+                break;
+
+            default:
+                Say(UpdateStatusText, result.Error, WarnBrush);
+                break;
+        }
+    }
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_update is not { } release) return;
+        if (EditorIsOpen)
+        {
+            Say(UpdateStatusText, "Close the map editor first — installing restarts the toolkit.", WarnBrush);
+            return;
+        }
+        if (!UpdateInstaller.CanInstall(out string reason))
+        {
+            Say(UpdateStatusText, reason, WarnBrush);
+            return;
+        }
+
+        StagedUpdate? staged = UpdateDownloader.ReadyFor(release);
+        string? error = null;
+        if (staged is null)
+        {
+            CheckUpdateBtn.IsEnabled = false;
+            InstallUpdateBtn.IsEnabled = false;
+
+            var progress = new Progress<DownloadProgress>(p => Say(
+                UpdateStatusText,
+                p.Total > 0
+                    ? $"Downloading… {100L * p.Received / p.Total}%"
+                    : "Downloading…",
+                DimBrush));
+
+            try
+            {
+                staged = await UpdateDownloader.DownloadAsync(release, progress);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException
+                                           or UnauthorizedAccessException or OperationCanceledException)
+            {
+                error = ex.Message;
+            }
+            finally
+            {
+                CheckUpdateBtn.IsEnabled = true;
+                InstallUpdateBtn.IsEnabled = true;
+            }
+        }
+
+        if (staged is null)
+        {
+            Say(UpdateStatusText, "The update could not be downloaded: " + error, WarnBrush);
+            return;
+        }
+
+        DialogOutcome outcome = AppDialog.Show(this, new DialogOptions
+        {
+            Icon = DialogIcon.Success,
+            Heading = $"Version {staged.Version} is ready",
+            Text = "The toolkit closes, replaces its own files and opens again. It takes a moment.",
+            Buttons = DialogButtons.YesCancel,
+            ConfirmText = "Restart now",
+            CancelText = "Later",
+        });
+        if (!outcome.Confirmed)
+        {
+            Say(UpdateStatusText,
+                $"Version {staged.Version} is downloaded — press the button again to install it.", OkBrush);
+            return;
+        }
+
+        try
+        {
+            UpdateInstaller.Start(staged);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+            Say(UpdateStatusText, "The downloaded toolkit would not start: " + ex.Message, WarnBrush);
+            return;
+        }
+
+        Application.Current.Shutdown();
+    }
+
+    private void ReleasesPage_Click(object sender, RoutedEventArgs e) =>
+        LauncherWindow.OpenInBrowser(UpdateChecker.ReleasesPage);
 
     // ── Blender bridge ──
 
@@ -521,6 +692,7 @@ public partial class SettingsWindow : Window
 public enum SettingsSection
 {
     General,
+    Updates,
     Keymap,
     BlenderBridge,
     McpServer,
