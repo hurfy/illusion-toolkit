@@ -56,6 +56,128 @@ internal sealed class ActorEditController
         _host.History.Push(edit);
     }
 
+    // ── Duplicate (undoable) ──
+
+    /// <summary>Whether the selection contains an actor that can be copied.</summary>
+    public bool HasDuplicableSelection() => SelectedActors().Count > 0;
+
+    /// <summary>Copies the selected actors as ONE undoable edit. An actor that places a scene object is
+    /// skipped with a notice — that copy needs its own clone of the object first.</summary>
+    public void DuplicateSelected()
+    {
+        IReadOnlyList<SceneNode> nodes = SelectedActors();
+        if (nodes.Count == 0) return;
+
+        var items = new List<CopiedActor>(nodes.Count);
+        string? lastReason = null;
+        int skipped = 0;
+
+        foreach (SceneNode node in nodes)
+        {
+            if (node.Source is not ActorNodeAdapter adapter) continue;
+            if (node.OwningDocumentNode()?.Source is not ActorDocumentAdapter document) continue;
+            if (document.Placements.PackOf(adapter.Actor) is not { } pack) continue;
+
+            ActorEntry? copy = pack.Duplicate(adapter.Actor, out string? reason);
+            if (copy == null)
+            {
+                skipped++;
+                lastReason = reason;
+                continue;
+            }
+
+            ActorNodeAdapter copyAdapter = document.ActorNode(copy);
+            var copyNode = new SceneNode(copyAdapter.Name, "Actor", false) { Source = copyAdapter };
+
+            items.Add(new CopiedActor
+            {
+                Source = adapter.Actor,
+                Copy = copy,
+                Node = copyNode,
+                Parent = node.Parent,
+                TreeIndex = (node.Parent?.Children.IndexOf(node) ?? -1) + 1,
+                Document = document,
+                Pack = pack,
+            });
+        }
+
+        if (items.Count > 0)
+        {
+            var edit = new DuplicateActorsEdit(this, items);
+            edit.Redo();
+            _host.History.Push(edit);
+        }
+        if (skipped > 0)
+        {
+            _host.RaiseNotice($"{skipped} actor(s) not copied — {lastReason}", isError: false);
+        }
+    }
+
+    private sealed class CopiedActor
+    {
+        public required ActorEntry Source;
+        public required ActorEntry Copy;
+        public required SceneNode Node;
+        public required SceneNode? Parent;
+        public required int TreeIndex;
+        public required ActorDocumentAdapter Document;
+        public required ActorsFile Pack;
+        public bool Applied;
+    }
+
+    private sealed class DuplicateActorsEdit : INodeEdit
+    {
+        private readonly ActorEditController _owner;
+        private readonly List<CopiedActor> _items;
+
+        public DuplicateActorsEdit(ActorEditController owner, List<CopiedActor> items)
+        {
+            _owner = owner;
+            _items = items;
+        }
+
+        public IEnumerable<SceneNode> Nodes
+        {
+            get { foreach (CopiedActor item in _items) yield return item.Node; }
+        }
+
+        public void Redo()
+        {
+            var selection = new List<SceneNode>(_items.Count);
+            foreach (CopiedActor item in _items)
+            {
+                // Redo after an undo has to put the record back into the pack as well as the row into the tree.
+                if (!item.Applied && !item.Pack.Actors.Contains(item.Copy))
+                {
+                    item.Pack.Duplicate(item.Source, out _); // fresh copy is not reused: the row must be rebuilt
+                }
+                item.Document.Placements.AddCopy(item.Copy, item.Source, item.Pack);
+                if (item.Parent != null)
+                {
+                    int at = Math.Clamp(item.TreeIndex, 0, item.Parent.Children.Count);
+                    item.Parent.Children.Insert(at, item.Node);
+                    _owner._host.Persistence.MarkFrameModified(item.Parent);
+                }
+                item.Applied = true;
+                selection.Add(item.Node);
+            }
+            _owner.AfterChange(selection);
+        }
+
+        public void Undo()
+        {
+            foreach (CopiedActor item in _items)
+            {
+                item.Pack.RemoveCopy(item.Copy);
+                item.Document.Placements.Detach(item.Copy);
+                item.Parent?.Children.Remove(item.Node);
+                if (item.Parent != null) _owner._host.Persistence.MarkFrameModified(item.Parent);
+                item.Applied = false;
+            }
+            _owner.AfterChange(Array.Empty<SceneNode>());
+        }
+    }
+
     private static int IndexIn(IReadOnlyList<ActorEntry> list, ActorEntry actor)
     {
         for (int i = 0; i < list.Count; i++) if (ReferenceEquals(list[i], actor)) return i;
@@ -146,10 +268,12 @@ internal sealed class ActorEditController
     }
 
     // Common tail of both directions: the glyph buffers, the selection and the panels are all stale now.
-    private void AfterChange()
+    private void AfterChange() => AfterChange(Array.Empty<SceneNode>());
+
+    private void AfterChange(IReadOnlyList<SceneNode> selection)
     {
         _host.Streamer.RefreshActorMarkers();
-        _host.Selection.SetSelection(Array.Empty<SceneNode>(), null);
+        _host.Selection.SetSelection(selection, selection.Count > 0 ? selection[^1] : null);
         _host.RaiseSceneChanged();
     }
 }

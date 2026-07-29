@@ -138,6 +138,16 @@ public sealed class ActorPlacements
         Respread(target, actor.Transform, _byFrame, new HashSet<FrameObjectBase>());
     }
 
+    /// <summary>Registers an actor the editor just created (a copy), right after <paramref name="after"/>. It
+    /// places no frame object of its own — see <see cref="ActorsFile.Duplicate"/> — so it is a glyph.</summary>
+    public void AddCopy(ActorEntry copy, ActorEntry after, ActorsFile pack)
+    {
+        int index = _allList.IndexOf(after);
+        _allList.Insert(index < 0 ? _allList.Count : index + 1, copy);
+        _packByActor[copy] = pack;
+        if (_invisibleSet.Add(copy)) _invisibleList.Add(copy);
+    }
+
     private void Unclaim(FrameObjectBase frame, HashSet<FrameObjectBase> seen)
     {
         if (!seen.Add(frame)) return;

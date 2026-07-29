@@ -15,12 +15,18 @@ namespace Illusion.Assets.Adapters;
 public sealed class ActorDocumentAdapter : ISceneDocument
 {
     private readonly ActorPlacements _placements;
+    private readonly SceneDocumentAdapter _scene;
 
-    public ActorDocumentAdapter(ActorPlacements placements, FileInfo sourceArchive)
+    public ActorDocumentAdapter(ActorPlacements placements, FileInfo sourceArchive, SceneDocumentAdapter scene)
     {
         _placements = placements;
+        _scene = scene;
         SourceArchive = sourceArchive;
     }
+
+    /// <summary>Wraps an actor as a node — canonical, shared with the scene document, so a newly created copy
+    /// gets the same adapter identity everything else keys on.</summary>
+    public ActorNodeAdapter ActorNode(ActorEntry actor) => _scene.ActorNode(actor);
 
     public FileInfo SourceArchive { get; }
 

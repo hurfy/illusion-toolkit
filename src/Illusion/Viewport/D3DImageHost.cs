@@ -222,7 +222,8 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     /// <summary>Whether the selection has anything duplicable — a static mesh or a collision placement.</summary>
     public bool CanDuplicateSelection() =>
-        CollisionEditing.HasCollisionSelection() || CrashEditing.HasCrashSelection() || Editing.CanDuplicateSelection();
+        CollisionEditing.HasCollisionSelection() || CrashEditing.HasCrashSelection() || Editing.CanDuplicateSelection()
+        || ActorEditing.HasDuplicableSelection();
 
     /// <summary>Duplicates the selection: collision placements get copies in their .col, static meshes get
     /// deep, independent copies in their FrameResource — both undoable and persisted.</summary>
@@ -230,6 +231,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     {
         CollisionEditing.DuplicateSelected(); // collision placements (re-selects the copies)
         CrashEditing.DuplicateSelected();     // city_crash placements (re-selects the copies)
+        ActorEditing.DuplicateSelected();     // actors (a copy of the record, under a fresh name)
         Editing.DuplicateSelected();          // frame objects (skips collision sources)
     }
 

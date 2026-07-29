@@ -1102,7 +1102,7 @@ internal sealed class DistrictStreamer
                 // actors hang beside the FrameResource branch rather than under it.
                 var actors = new SceneNode("Actors", "Actors", true)
                 {
-                    Source = new ActorDocumentAdapter(placements2, file),
+                    Source = new ActorDocumentAdapter(placements2, file, sceneDoc),
                 };
 
                 // Grouped by the entity type itself ("C_Sound", "LightEntity") — the tree stays a plain list of

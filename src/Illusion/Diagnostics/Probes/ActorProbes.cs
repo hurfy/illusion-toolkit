@@ -354,7 +354,7 @@ internal static class ActorProbes
             // ── An actor edit must reach persistence: the tree enlists an edit by walking UP to the nearest
             //    ISceneDocument, and the actors hang beside the FrameResource branch, not under it. Without a
             //    document on the Actors node, moving an actor marked nothing and a build had nothing to pack.
-            var actorsDoc = new ActorDocumentAdapter(placements, new FileInfo(sds));
+            var actorsDoc = new ActorDocumentAdapter(placements, new FileInfo(sds), document);
             var actorsNode = new SceneNode("Actors", "Actors", true) { Source = actorsDoc };
             var actorLeaf = new SceneNode("leaf", "Actor", false) { Source = document.ActorNode(placements.All[0]) };
             actorsNode.AddChild(actorLeaf);
@@ -420,6 +420,53 @@ internal static class ActorProbes
                     pack3.Restore(removal);
                     Check("undo restores the pack byte for byte",
                         pack3.ToBytes().AsSpan().SequenceEqual(original), $"{pack3.Actors.Count} actors");
+
+                    // ── Duplicating: a glyph-only actor copies; one that places a scene object is refused,
+                    //    because that copy would need its own clone of the object.
+                    ActorEntry? loose = pack3.Actors.FirstOrDefault(a =>
+                        a.IsTyped && !pack3.SceneReferences.Any(r => r.FrameHash == a.FrameHash));
+                    ActorEntry? placing = pack3.Actors.FirstOrDefault(a =>
+                        a.IsTyped && pack3.SceneReferences.Any(r => r.FrameHash == a.FrameHash));
+
+                    if (loose != null)
+                    {
+                        int before = pack3.Actors.Count;
+                        ActorEntry? copy = pack3.Duplicate(loose, out string? why);
+                        Check("an actor with no scene object copies", copy != null, why ?? "");
+                        if (copy != null)
+                        {
+                            Check("the copy lands right after the original and renumbers the rest",
+                                copy.Index == loose.Index + 1 && pack3.Actors.Count == before + 1
+                                && pack3.Actors[copy.Index].EntityName == copy.EntityName,
+                                $"row {copy.Index} of {pack3.Actors.Count}");
+                            Check("the copy gets a fresh name and a matching hash",
+                                copy.EntityName != loose.EntityName
+                                && copy.EntityHash == Illusion.Formats.Hashing.Fnv64.Hash(copy.EntityName),
+                                copy.EntityName);
+                            Check("the copy stands where the original does",
+                                Approx(copy.Position, loose.Position) && QApprox(copy.Rotation, loose.Rotation));
+
+                            byte[] grown = pack3.ToBytes();
+                            using var grownStream = new MemoryStream(grown, writable: false);
+                            ActorsFile regrown = ActorsFile.Read(grownStream);
+                            Check("the grown pack re-reads and is a fixpoint",
+                                regrown.Actors.Count == before + 1
+                                && regrown.Actors.All(a => a.IsTyped)
+                                && regrown.ToBytes().AsSpan().SequenceEqual(grown),
+                                $"{regrown.Actors.Count} actors, {grown.Length} bytes");
+
+                            pack3.RemoveCopy(copy);
+                            Check("undoing the copy restores the pack byte for byte",
+                                pack3.ToBytes().AsSpan().SequenceEqual(original));
+                        }
+                    }
+
+                    if (placing != null)
+                    {
+                        ActorEntry? refused = pack3.Duplicate(placing, out string? why);
+                        Check("an actor that places a scene object is refused, with a reason",
+                            refused == null && !string.IsNullOrEmpty(why), why ?? "(no reason given)");
+                    }
                 }
             }
         }

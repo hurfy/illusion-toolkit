@@ -136,6 +136,104 @@ public sealed class ActorsFile
         return new ActorRemoval(actor, item, index, reference, referenceIndex);
     }
 
+    /// <summary>
+    /// Copies an actor into a new row right after it, under a fresh unique name (its hash is re-derived).
+    /// The copy carries the same init-props row, which is how the engine shares those anyway.
+    ///
+    /// An actor that PLACES a frame object cannot be copied yet: the copy would need its own clone of that
+    /// prototype and its own scene reference, since a frame is spawned by exactly one actor. Those come back
+    /// null with a reason rather than producing a pack the game would read as two actors fighting over one
+    /// object.
+    /// </summary>
+    public ActorEntry? Duplicate(ActorEntry actor, out string? skipReason)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        skipReason = null;
+
+        int index = ActorList.IndexOf(actor);
+        if (index < 0 || index >= Binary.Items.Count)
+        {
+            skipReason = "the actor does not belong to this pack";
+            return null;
+        }
+        if (!actor.IsTyped)
+        {
+            skipReason = "the actor's record could not be typed, so it cannot be rebuilt";
+            return null;
+        }
+        if (actor.FrameHash != 0 && SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
+        {
+            skipReason = "it places a scene object — a copy needs its own clone of that object first";
+            return null;
+        }
+
+        string name = UniqueName(actor.EntityName);
+        ulong hash = Hashing.Fnv64.Hash(name);
+
+        Native.Model.ActorItemW source = Binary.Items[index];
+        var item = new Native.Model.ActorItemW
+        {
+            Typed = source.Typed,
+            TypeId = source.TypeId,
+            TypeName = source.TypeName,
+            EntityName = name,
+            Name1 = source.Name1,
+            SceneSector = source.SceneSector,
+            LinkedDefinition = source.LinkedDefinition,
+            LinkedFrame = source.LinkedFrame,
+            EntityHash = hash,
+            FrameHash = source.FrameHash,
+            Position = source.Position,
+            RotationX = source.RotationX,
+            RotationY = source.RotationY,
+            RotationZ = source.RotationZ,
+            RotationW = source.RotationW,
+            Scale = source.Scale,
+            Flags = source.Flags,
+            InitPropId = source.InitPropId,
+            Raw = source.Raw,
+        };
+
+        var copy = new ActorEntry
+        {
+            Index = index + 1,
+            IsTyped = true,
+            TypeId = actor.TypeId,
+            TypeName = actor.TypeName,
+            EntityName = name,
+            Name1 = actor.Name1,
+            SceneSector = actor.SceneSector,
+            LinkedDefinition = actor.LinkedDefinition,
+            LinkedFrame = actor.LinkedFrame,
+            EntityHash = hash,
+            FrameHash = actor.FrameHash,
+            Position = actor.Position,
+            Rotation = actor.Rotation,
+            Scale = actor.Scale,
+            Flags = actor.Flags,
+            InitPropId = actor.InitPropId,
+        };
+
+        ActorList.Insert(index + 1, copy);
+        Binary.Items.Insert(index + 1, item);
+        Binary.ItemOffsets.Insert(Math.Min(index + 1, Binary.ItemOffsets.Count), 0); // recomputed on write
+        Reindex();
+        return copy;
+    }
+
+    /// <summary>Drops a copy made by <see cref="Duplicate"/> (undo) — it owns no scene reference, so removing
+    /// its row is all there is to undo.</summary>
+    public void RemoveCopy(ActorEntry copy) => Remove(copy);
+
+    // "name" → "name_copy", "name_copy2", … — unique within the pack, which is what the engine keys entities by.
+    private string UniqueName(string baseName)
+    {
+        string stem = baseName.Length > 0 ? baseName : "actor";
+        string candidate = stem + "_copy";
+        for (int n = 2; ActorList.Any(a => a.EntityName == candidate); n++) candidate = $"{stem}_copy{n}";
+        return candidate;
+    }
+
     /// <summary>Puts a removed actor back exactly where it was (undo).</summary>
     public void Restore(ActorRemoval removal)
     {
