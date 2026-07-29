@@ -198,6 +198,12 @@ internal static class ProbeRunner
             // Which way an actor turns the thing it places, measured against the district's .col — the game
             // collides with the hull, so its placement IS the object's real orientation, independent of the
             // actor pack. Optional second argument filters actors by name. Output: %TEMP%\illusion_actor_orient.txt
+            // Field-by-field diff of an editor-made copy against its original, read back from the working copy
+            // on disk — what to run when the game refuses a district the editor was happy with.
+            // Output: %TEMP%\illusion_clonediff.txt
+            case "--probe-clone-diff":
+                CloneDiffProbes.RunCloneDiffProbe(args.Length >= 2 ? args[1] : "uppertown");
+                return true;
             case "--probe-actor-orient":
                 ActorProbes.RunActorOrientationProbe(args.Length >= 2 ? args[1] : "uppertown",
                     args.Length >= 3 ? args[2] : null);

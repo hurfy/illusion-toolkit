@@ -202,6 +202,22 @@ public sealed class ActorPlacements
         }
     }
 
+    /// <summary>What a frame reference id points at in this scene — a scene folder, an object, or nothing.
+    /// For diagnostics: the parent slots are where a hand-built object goes wrong.</summary>
+    public string DescribeRef(int refId)
+    {
+        if (_resource == null) return "(no scene)";
+        if (_resource.FrameScenes.TryGetValue(refId, out Formats.Frames.Resources.FrameHeaderScene? scene))
+        {
+            return $"scene '{scene.Name}'";
+        }
+        if (_resource.FrameObjects.TryGetValue(refId, out object? value) && value is FrameObjectBase frame)
+        {
+            return $"{frame.GetType().Name} '{frame.Name}'";
+        }
+        return $"(dangling #{refId})";
+    }
+
     /// <summary>Resolves packs against the same scene these placements were built from — how a caller checks
     /// that an edited pack, written and read back, still finds the objects it places.</summary>
     public ActorPlacements ResolveAgain(IReadOnlyList<ActorsFile> packs) =>

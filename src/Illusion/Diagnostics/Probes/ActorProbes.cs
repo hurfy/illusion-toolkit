@@ -68,6 +68,27 @@ internal static class ActorProbes
             Check("packs re-save byte-identically", fixpoint == packFiles.Length, $"{fixpoint}/{packFiles.Length}");
             Check("every actor is typed", raw == 0, $"typed={typed}, raw={raw}");
 
+            // A mesh whose flag says it hangs off a second parent, with that slot empty, was suspected of being
+            // what a copied object got wrong. It is not an invariant: the shipped districts contain such
+            // meshes themselves (distillery's 'Glow'), so the engine tolerates it. Recorded rather than
+            // checked, so the next reader does not rediscover the same dead end.
+            int flagWithoutSlot = fr.FrameObjects.Values.OfType<FrameObjectSingleMesh>().Count(m =>
+                m.SingleMeshFlags.HasFlag(SingleMeshFlags.ParentIndex2_Flag)
+                && !m.Refs.ContainsKey(FrameEntryRefTypes.Parent2));
+            sb.AppendLine($"meshes flagged as anchored with an empty slot (the game ships these too): {flagWithoutSlot}");
+
+            // The entity-init property rows: a copy shares its original's row, which is only safe if the
+            // shipped packs share them too. If every actor owned one, the table would be parallel to the
+            // actor list and growing one without the other would hand the engine a mismatch.
+            foreach (ActorsFile p in packs)
+            {
+                var ids = new List<short>();
+                foreach (ActorEntry a in p.Actors) ids.Add(a.InitPropId);
+                int shared = ids.Where(i => i >= 0).GroupBy(i => i).Count(g => g.Count() > 1);
+                sb.AppendLine($"init-props: {ids.Count} actors, {ids.Where(i => i >= 0).Distinct().Count()} distinct rows, " +
+                              $"{ids.Count(i => i < 0)} without one, {shared} row(s) shared by several actors");
+            }
+
             // ── Resolution, on the very scene the viewport loads (a second FrameResource would be a
             //    different set of objects, and the placements would not apply to it) ──
             (List<SdsFrameNode> roots, List<MeshData> meshes, ISceneDocument? loaded) =
@@ -544,12 +565,29 @@ internal static class ActorProbes
             $"{compared} frames compared, {shapeOff} off {firstOff}");
         check("no copied mesh claims an anchor it does not have", danglingAnchor == 0,
             danglingAnchor == 0 ? "" : $"{danglingAnchor} mesh(es) flagged as anchored with an empty slot");
+        foreach (KeyValuePair<FrameObjectBase, FrameObjectBase> pair in clone.Pairs)
+        {
+            sb.AppendLine($"    {pair.Key.GetType().Name} '{pair.Key.Name}' → '{pair.Value.Name}'");
+            sb.AppendLine($"        source: parent1={Describe(placements, pair.Key, FrameEntryRefTypes.Parent1)}" +
+                          $", parent2={Describe(placements, pair.Key, FrameEntryRefTypes.Parent2)}" +
+                          $", flags={(pair.Key as FrameObjectSingleMesh)?.SingleMeshFlags.ToString() ?? "-"}");
+            sb.AppendLine($"        copy:   parent1={Describe(placements, pair.Value, FrameEntryRefTypes.Parent1)}" +
+                          $", parent2={Describe(placements, pair.Value, FrameEntryRefTypes.Parent2)}");
+        }
+
         int withP1 = clone.Pairs.Keys.Count(f => f.Refs.ContainsKey(FrameEntryRefTypes.Parent1));
         int withP2 = clone.Pairs.Keys.Count(f => f.Refs.ContainsKey(FrameEntryRefTypes.Parent2));
         int anchored = clone.Pairs.Keys.OfType<FrameObjectSingleMesh>()
             .Count(m => m.SingleMeshFlags.HasFlag(SingleMeshFlags.ParentIndex2_Flag));
         sb.AppendLine($"    clone: {compared} frames, on the name table: {clone.IsOnNameTable}; " +
                       $"sources with parent1: {withP1}, with parent2: {withP2}, flagged as anchored: {anchored}");
+    }
+
+    // What a parent slot actually points at — a scene folder, another object, or nothing.
+    private static string Describe(ActorPlacements placements, FrameObjectBase frame, FrameEntryRefTypes slot)
+    {
+        if (!frame.Refs.TryGetValue(slot, out int id)) return "(none)";
+        return placements.DescribeRef(id);
     }
 
     // Copying an actor that PLACES an object: it gets its own clone of that object and its own scene
