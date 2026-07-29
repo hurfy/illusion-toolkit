@@ -279,8 +279,10 @@ internal sealed class ActorEditController
                 _owner._host.Streamer.AddActorNode(item.Document.Placements, item.Copy, item.Node);
                 if (item.Parent != null)
                 {
-                    int at = Math.Clamp(item.TreeIndex, 0, item.Parent.Children.Count);
-                    item.Parent.Children.Insert(at, item.Node);
+                    // InsertChild, not Children.Insert: the list alone leaves the row without a parent, and a
+                    // row with no parent cannot find the document it belongs to — which is what made a copy
+                    // impossible to copy again, or to delete.
+                    item.Parent.InsertChild(item.TreeIndex, item.Node);
                     _owner._host.Persistence.MarkFrameModified(item.Parent);
                 }
                 selection.Add(item.Node);
@@ -389,8 +391,9 @@ internal sealed class ActorEditController
                 _owner.SetSubtreeVisible(item.PlacedFrame, true);
                 if (item.Parent != null)
                 {
-                    int at = Math.Clamp(item.TreeIndex, 0, item.Parent.Children.Count);
-                    item.Parent.Children.Insert(at, item.Node);
+                    // InsertChild rather than the list: a restored row has to come back with its parent, or it
+                    // can no longer reach the document that saves it (see the copy path).
+                    item.Parent.InsertChild(item.TreeIndex, item.Node);
                     _owner._host.Persistence.MarkFrameModified(item.Parent);
                 }
                 item.Removal = null;

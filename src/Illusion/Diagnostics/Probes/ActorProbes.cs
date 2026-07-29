@@ -417,6 +417,18 @@ internal static class ActorProbes
 
             Check("an edited actor finds the document that saves it",
                 ReferenceEquals(actorLeaf.OwningDocumentNode(), actorsNode));
+
+            // A row the editor CREATES has to arrive with its parent set, or it can never reach that document:
+            // an actor row added straight to the children list could not be copied again, or deleted, because
+            // the walk upwards ended at the row itself.
+            var insertedLeaf = new SceneNode("copy", "Actor", false)
+            {
+                Source = document.ActorNode(placements.All[^1]),
+            };
+            actorsNode.InsertChild(0, insertedLeaf);
+            Check("a row the editor inserts finds it too",
+                ReferenceEquals(insertedLeaf.OwningDocumentNode(), actorsNode),
+                insertedLeaf.Parent == null ? "the inserted row has no parent" : "");
             Check("that document points at this district's archive",
                 string.Equals(actorsDoc.SourceArchive.FullName, sds, StringComparison.OrdinalIgnoreCase),
                 actorsDoc.SourceArchive.Name);
@@ -675,6 +687,33 @@ internal static class ActorProbes
             pack.SceneReferences.Count == refsBefore + 1
             && pack.SceneReferences.Any(r => r.FrameHash == copy.FrameHash && r.FrameIndex == clone.FrameIndex),
             $"{refsBefore} → {pack.SceneReferences.Count} references");
+
+        // A copy has to be copyable in turn: everything the editor needs to copy an actor — the pack it
+        // belongs to, the object it places — has to be registered for a copy exactly as it is for a row that
+        // came off disk, or the second copy is refused with a reason about the first.
+        placements.AddCopy(copy, placing, pack, clone.Root);
+        check("a copy belongs to the same pack as its original",
+            ReferenceEquals(placements.PackOf(copy), pack), copy.EntityName);
+        check("a copy is registered as placing its own object",
+            ReferenceEquals(placements.TargetOf(copy), clone.Root),
+            placements.TargetOf(copy)?.Name.String ?? "(nothing)");
+
+        ActorPrototypeCloner.ClonedPrototype? second =
+            ActorPrototypeCloner.TryClone(document, clone.Root, out string? secondReason);
+        check("the copy's object can be cloned again", second != null, secondReason ?? "");
+        ActorEntry? copyOfCopy = second == null
+            ? null
+            : pack.Duplicate(copy, new ActorPlacedFrame(second.Root.Name.String, second.FrameIndex), out secondReason);
+        check("a copy can be copied", copyOfCopy != null, secondReason ?? copyOfCopy?.EntityName ?? "");
+        if (copyOfCopy != null)
+        {
+            check("the second copy gets its own name and object",
+                copyOfCopy.EntityName != copy.EntityName && copyOfCopy.FrameHash != copy.FrameHash,
+                $"{copyOfCopy.EntityName} → {copyOfCopy.LinkedFrame}");
+            pack.RemoveCopy(copyOfCopy);
+        }
+        second?.Detach();
+        placements.Detach(copy);
 
         // The pack has to survive the writer, and the copy has to still find its own object afterwards —
         // resolution is by hash through the reference table, exactly as the game does it.
