@@ -206,6 +206,12 @@ internal static class ProbeRunner
             // exactly that field. Output: %TEMP%\illusion_eds_tables.txt
             // The structural writer: item names that change LENGTH move every entry after them and the
             // cutscene lookup's own offsets with them. Output: %TEMP%\illusion_act_relayout.txt
+            // What an archive's actors looked like before the edits, read out of the versioned backups: which
+            // of them moved, and by how much. Output: %TEMP%\illusion_actor_history.txt
+            case "--probe-actor-history":
+                ActorHistoryProbes.RunActorHistoryProbe(args.Length >= 2 ? args[1] : "distillery",
+                    args.Length >= 3 ? args[2] : null);
+                return true;
             case "--probe-act-relayout":
                 ActorProbes.RunActRelayoutProbe();
                 return true;
