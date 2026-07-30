@@ -132,6 +132,24 @@ internal static partial class ActorProbes
             Check("the copy cloud rebuilds from the live table", rebuilt == sampleCopies,
                 $"{rebuilt} vs {sampleCopies}");
 
+            // How much lands in Blender when one copy is clicked: a .tra row is ONE prop, but a prop is built
+            // from several prototype meshes (a lamp is a body, a bulb and a deformed bulb), and selecting a
+            // copy currently sends the row's whole set.
+            var perRow = new SortedDictionary<int, int>();
+            int biggestRow = 0;
+            string biggestRowName = "";
+            foreach (Formats.Translokator.Object row in placements.Rows)
+            {
+                int parts = placements.MeshesOf(row).Count;
+                perRow.TryGetValue(parts, out int seen);
+                perRow[parts] = seen + 1;
+                if (parts > biggestRow) { biggestRow = parts; biggestRowName = row.Name.String; }
+            }
+            sb.AppendLine();
+            sb.AppendLine("prototype meshes per prop (what one click sends to Blender):");
+            foreach ((int parts, int rows) in perRow) sb.AppendLine($"    {parts} mesh(es): {rows} prop(s)");
+            sb.AppendLine($"    worst: '{biggestRowName}' with {biggestRow}");
+
             sb.AppendLine();
             sb.AppendLine("busiest props:");
             foreach (FrameObjectSingleMesh mesh in placements.Meshes
