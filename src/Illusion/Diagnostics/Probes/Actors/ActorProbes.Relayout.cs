@@ -95,6 +95,51 @@ internal static partial class ActorProbes
                       + "backup, or edit it again — adding a reference now re-sorts the whole table."
                     : ""));
 
+            // ── Is a definition that carries PREFAB init data an identity? NO — measured, and recorded so the
+            // question is not asked twice. ──
+            //
+            // An actor names a definition, and some definitions have an entry in the archive's prefab table —
+            // the init data the engine builds that kind of entity from. The guess was that those are per-object
+            // identities a copy may not share. The shipped game says otherwise: 1748 prefab-backed definitions
+            // are used by more than one actor ('10_bar_lampa' by six). So a copy keeping its original's
+            // definition is ordinary, and whatever makes a duplicated door collide with its original is not
+            // this. Reported, not asserted — a check that fails on normal data is noise.
+            int prefabBacked = 0, prefabBackedShared = 0, plainShared = 0;
+            var shared = new List<string>();
+            foreach (string file in files)
+            {
+                string folder = Path.GetDirectoryName(file)!;
+                var prefabs = new HashSet<ulong>();
+                foreach (string prf in Directory.GetFiles(folder, "*.prf"))
+                {
+                    try { foreach (ulong h in Formats.Prefab.PrefabFile.Load(prf).Hashes) prefabs.Add(h); }
+                    catch (Exception) { }
+                }
+                if (prefabs.Count == 0) continue;
+
+                ActorsFile pack;
+                try { pack = ActorsFile.Load(file); }
+                catch (Exception) { continue; }
+
+                foreach (IGrouping<string, ActorEntry> group in pack.Actors
+                             .Where(a => a.LinkedDefinition.Length > 0)
+                             .GroupBy(a => a.LinkedDefinition, StringComparer.Ordinal))
+                {
+                    bool backed = prefabs.Contains(Formats.Hashing.Fnv64.Hash(group.Key));
+                    if (!backed) { if (group.Count() > 1) plainShared++; continue; }
+                    prefabBacked++;
+                    if (group.Count() > 1)
+                    {
+                        prefabBackedShared++;
+                        if (shared.Count < 6) shared.Add($"{Path.GetFileName(file)}:'{group.Key}'×{group.Count()}");
+                    }
+                }
+            }
+            sb.AppendLine($"       definitions: {prefabBacked} carry prefab init data, {prefabBackedShared} of "
+                + $"those are used by more than one actor — sharing one is NORMAL, not an identity clash "
+                + $"(definitions without prefab data are shared {plainShared} times)"
+                + (shared.Count > 0 ? "; e.g. " + string.Join(", ", shared.Take(3)) : ""));
+
             // ── Growing and shrinking a name, on the packs that carry the most to disturb ──
             //
             // A pack with a cutscene lookup is the one that matters: its entries are addressed by offsets

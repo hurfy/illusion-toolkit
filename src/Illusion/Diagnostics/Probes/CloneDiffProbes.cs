@@ -143,6 +143,42 @@ internal static class CloneDiffProbes
                     Line(sb, "  position", Fmt(sourceActor.Position), Fmt(owner.Position));
                 }
 
+                // Both links side by side, field for field. A copy that spawns while the ORIGINAL stops
+                // spawning means the two are colliding over something, and the reference record is where the
+                // engine reads the link from — its name position included, which is what names the definition.
+                Formats.Actors.ActorSceneReference? sourceRef =
+                    pack.SceneReferences.FirstOrDefault(r => r.FrameHash == Formats.Hashing.Fnv64.Hash(origin));
+                sb.AppendLine($"    reference records (table position | frameHash | unk0 | namePos | name | frameIndex):");
+                sb.AppendLine($"      origin  {Describe(pack, sourceRef)}");
+                sb.AppendLine($"      copy    {Describe(pack, reference)}");
+                if (sourceActor != null)
+                {
+                    sb.AppendLine($"      origin actor '{sourceActor.EntityName}' (row {sourceActor.Index}) "
+                        + $"frameHash 0x{sourceActor.FrameHash:X16} name1 '{sourceActor.Name1}'");
+                }
+                if (owner != null)
+                {
+                    sb.AppendLine($"      copy   actor '{owner.EntityName}' (row {owner.Index}) "
+                        + $"frameHash 0x{owner.FrameHash:X16} name1 '{owner.Name1}'");
+                }
+
+                // How many actors the SHIPPED archive already points at this definition. If sharing one is
+                // normal, then sharing it is not what makes a copy collide with its original; if the shipped
+                // data never shares one, the definition is an identity and a copy needs its own.
+                if (sourceActor != null)
+                {
+                    string definition = sourceActor.LinkedDefinition;
+                    int sharers = pack.Actors.Count(a => a.LinkedDefinition == definition);
+                    var byDefinition = pack.Actors
+                        .GroupBy(a => a.LinkedDefinition, StringComparer.Ordinal)
+                        .OrderByDescending(g => g.Count())
+                        .ToList();
+                    sb.AppendLine($"    definition '{definition}' is used by {sharers} actor(s) of this pack; "
+                        + $"across the pack {byDefinition.Count(g => g.Count() > 1)} of {byDefinition.Count} "
+                        + $"definitions are shared, busiest: "
+                        + string.Join(", ", byDefinition.Take(3).Select(g => $"'{g.Key}'×{g.Count()}")));
+                }
+
                 // Which SCENE lists the object. A district's frame resource is split into scenes, and a scene
                 // owns its objects through its own child list — not through either parent slot, which is why
                 // both read -1 here and say nothing. The actor names its sector, so an object no scene lists is
@@ -254,6 +290,18 @@ internal static class CloneDiffProbes
 
     private static string Found(HashSet<ulong> table, string name) =>
         table.Contains(Formats.Hashing.Fnv64.Hash(name)) ? $"yes ('{name}')" : $"no ('{name}')";
+
+    private static string Describe(Formats.Actors.ActorsFile pack, Formats.Actors.ActorSceneReference? reference)
+    {
+        if (reference == null) return "(none)";
+        int at = -1;
+        for (int i = 0; i < pack.SceneReferences.Count; i++)
+        {
+            if (ReferenceEquals(pack.SceneReferences[i], reference)) { at = i; break; }
+        }
+        return $"[{at}]  0x{reference.FrameHash:X16}  unk0={reference.Unk0}  namePos={reference.NamePos}  "
+             + $"'{reference.Name}'  frameIndex={reference.FrameIndex}";
+    }
 
     // The scene whose child list names this object, or a plain "none".
     private static string SceneOf(FrameResource fr, FrameObjectBase frame)
