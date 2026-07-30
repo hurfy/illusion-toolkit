@@ -5320,6 +5320,140 @@ internal sealed class ActSceneReferenceW
     }
 }
 
+internal sealed class ActorPropFieldW
+{
+    public byte Kind { get; set; }
+    public uint Offset { get; set; }
+    public uint Size { get; set; }
+    public string Name { get; set; } = "";
+    public long Num { get; set; }
+    public float F0 { get; set; }
+    public float F1 { get; set; }
+    public float F2 { get; set; }
+    public string Text { get; set; } = "";
+
+    internal static ActorPropFieldW ReadFrom(BinaryReader reader)
+    {
+        var value = new ActorPropFieldW();
+        value.Kind = reader.ReadByte();
+        value.Offset = reader.ReadUInt32();
+        value.Size = reader.ReadUInt32();
+        value.Name = Wire.ReadString(reader);
+        value.Num = reader.ReadInt64();
+        value.F0 = reader.ReadSingle();
+        value.F1 = reader.ReadSingle();
+        value.F2 = reader.ReadSingle();
+        value.Text = Wire.ReadString(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Kind);
+        writer.Write(Offset);
+        writer.Write(Size);
+        Wire.WriteString(writer, Name);
+        writer.Write(Num);
+        writer.Write(F0);
+        writer.Write(F1);
+        writer.Write(F2);
+        Wire.WriteString(writer, Text);
+    }
+
+    internal static void Diff(string path, ActorPropFieldW a, ActorPropFieldW b, List<string> diffs)
+    {
+        if (a.Kind != b.Kind) diffs.Add($"{path}.Kind: {a.Kind} vs {b.Kind}");
+        if (a.Offset != b.Offset) diffs.Add($"{path}.Offset: {a.Offset} vs {b.Offset}");
+        if (a.Size != b.Size) diffs.Add($"{path}.Size: {a.Size} vs {b.Size}");
+        if (!string.Equals(a.Name, b.Name, StringComparison.Ordinal)) diffs.Add($"{path}.Name: '{a.Name}' vs '{b.Name}'");
+        if (a.Num != b.Num) diffs.Add($"{path}.Num: {a.Num} vs {b.Num}");
+        if (BitConverter.SingleToUInt32Bits(a.F0) != BitConverter.SingleToUInt32Bits(b.F0)) diffs.Add($"{path}.F0: {a.F0} vs {b.F0}");
+        if (BitConverter.SingleToUInt32Bits(a.F1) != BitConverter.SingleToUInt32Bits(b.F1)) diffs.Add($"{path}.F1: {a.F1} vs {b.F1}");
+        if (BitConverter.SingleToUInt32Bits(a.F2) != BitConverter.SingleToUInt32Bits(b.F2)) diffs.Add($"{path}.F2: {a.F2} vs {b.F2}");
+        if (!string.Equals(a.Text, b.Text, StringComparison.Ordinal)) diffs.Add($"{path}.Text: '{a.Text}' vs '{b.Text}'");
+    }
+}
+
+internal sealed class ActorPropRowW
+{
+    public int BufferType { get; set; }
+    public string TypeName { get; set; } = "";
+    public List<ActorPropFieldW> Fields { get; set; } = [];
+    public byte[] Payload { get; set; } = [];
+
+    internal static ActorPropRowW ReadFrom(BinaryReader reader)
+    {
+        var value = new ActorPropRowW();
+        value.BufferType = reader.ReadInt32();
+        value.TypeName = Wire.ReadString(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Fields.Add(ActorPropFieldW.ReadFrom(reader));
+            }
+        }
+        value.Payload = Wire.ReadBytes(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(BufferType);
+        Wire.WriteString(writer, TypeName);
+        Wire.WriteCount(writer, Fields.Count);
+        foreach (ActorPropFieldW item in Fields)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteBytes(writer, Payload);
+    }
+
+    internal static void Diff(string path, ActorPropRowW a, ActorPropRowW b, List<string> diffs)
+    {
+        if (a.BufferType != b.BufferType) diffs.Add($"{path}.BufferType: {a.BufferType} vs {b.BufferType}");
+        if (!string.Equals(a.TypeName, b.TypeName, StringComparison.Ordinal)) diffs.Add($"{path}.TypeName: '{a.TypeName}' vs '{b.TypeName}'");
+        if (a.Fields.Count != b.Fields.Count)
+        {
+            diffs.Add($"{path}.Fields: count {a.Fields.Count} vs {b.Fields.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Fields.Count; i++)
+            {
+                ActorPropFieldW.Diff($"{path}.Fields[{i}]", a.Fields[i], b.Fields[i], diffs);
+            }
+        }
+        Wire.DiffBytes($"{path}.Payload", a.Payload, b.Payload, diffs);
+    }
+}
+
+internal sealed class ActCutsceneRefW
+{
+    public string Name { get; set; } = "";
+    public ushort Unk0 { get; set; }
+
+    internal static ActCutsceneRefW ReadFrom(BinaryReader reader)
+    {
+        var value = new ActCutsceneRefW();
+        value.Name = Wire.ReadString(reader);
+        value.Unk0 = reader.ReadUInt16();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteString(writer, Name);
+        writer.Write(Unk0);
+    }
+
+    internal static void Diff(string path, ActCutsceneRefW a, ActCutsceneRefW b, List<string> diffs)
+    {
+        if (!string.Equals(a.Name, b.Name, StringComparison.Ordinal)) diffs.Add($"{path}.Name: '{a.Name}' vs '{b.Name}'");
+        if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
+    }
+}
+
 internal sealed class ActorItemW
 {
     public byte Typed { get; set; }
@@ -5422,11 +5556,15 @@ internal sealed class ActorBinaryW
     public uint Unk0 { get; set; }
     public uint Size { get; set; }
     public uint Size1 { get; set; }
+    public byte PropsTyped { get; set; }
+    public List<ActorPropRowW> PropRows { get; set; } = [];
     public byte[] Props { get; set; } = [];
     public List<uint> ItemOffsets { get; set; } = [];
     public byte ItemsTyped { get; set; }
     public List<ActorItemW> Items { get; set; } = [];
     public byte[] ItemData { get; set; } = [];
+    public byte CutscenesTyped { get; set; }
+    public List<ActCutsceneRefW> CutsceneRefs { get; set; } = [];
     public byte[] Cutscenes { get; set; } = [];
 
     internal static ActorBinaryW ReadFrom(BinaryReader reader)
@@ -5438,6 +5576,14 @@ internal sealed class ActorBinaryW
         value.Unk0 = reader.ReadUInt32();
         value.Size = reader.ReadUInt32();
         value.Size1 = reader.ReadUInt32();
+        value.PropsTyped = reader.ReadByte();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.PropRows.Add(ActorPropRowW.ReadFrom(reader));
+            }
+        }
         value.Props = Wire.ReadBytes(reader);
         {
             uint count = Wire.ReadCount(reader);
@@ -5455,6 +5601,14 @@ internal sealed class ActorBinaryW
             }
         }
         value.ItemData = Wire.ReadBytes(reader);
+        value.CutscenesTyped = reader.ReadByte();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.CutsceneRefs.Add(ActCutsceneRefW.ReadFrom(reader));
+            }
+        }
         value.Cutscenes = Wire.ReadBytes(reader);
         return value;
     }
@@ -5467,6 +5621,12 @@ internal sealed class ActorBinaryW
         writer.Write(Unk0);
         writer.Write(Size);
         writer.Write(Size1);
+        writer.Write(PropsTyped);
+        Wire.WriteCount(writer, PropRows.Count);
+        foreach (ActorPropRowW item in PropRows)
+        {
+            item.WriteTo(writer);
+        }
         Wire.WriteBytes(writer, Props);
         Wire.WriteCount(writer, ItemOffsets.Count);
         foreach (uint item in ItemOffsets)
@@ -5480,6 +5640,12 @@ internal sealed class ActorBinaryW
             item.WriteTo(writer);
         }
         Wire.WriteBytes(writer, ItemData);
+        writer.Write(CutscenesTyped);
+        Wire.WriteCount(writer, CutsceneRefs.Count);
+        foreach (ActCutsceneRefW item in CutsceneRefs)
+        {
+            item.WriteTo(writer);
+        }
         Wire.WriteBytes(writer, Cutscenes);
     }
 
@@ -5491,6 +5657,18 @@ internal sealed class ActorBinaryW
         if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
         if (a.Size != b.Size) diffs.Add($"{path}.Size: {a.Size} vs {b.Size}");
         if (a.Size1 != b.Size1) diffs.Add($"{path}.Size1: {a.Size1} vs {b.Size1}");
+        if (a.PropsTyped != b.PropsTyped) diffs.Add($"{path}.PropsTyped: {a.PropsTyped} vs {b.PropsTyped}");
+        if (a.PropRows.Count != b.PropRows.Count)
+        {
+            diffs.Add($"{path}.PropRows: count {a.PropRows.Count} vs {b.PropRows.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.PropRows.Count; i++)
+            {
+                ActorPropRowW.Diff($"{path}.PropRows[{i}]", a.PropRows[i], b.PropRows[i], diffs);
+            }
+        }
         Wire.DiffBytes($"{path}.Props", a.Props, b.Props, diffs);
         if (a.ItemOffsets.Count != b.ItemOffsets.Count)
         {
@@ -5516,6 +5694,18 @@ internal sealed class ActorBinaryW
             }
         }
         Wire.DiffBytes($"{path}.ItemData", a.ItemData, b.ItemData, diffs);
+        if (a.CutscenesTyped != b.CutscenesTyped) diffs.Add($"{path}.CutscenesTyped: {a.CutscenesTyped} vs {b.CutscenesTyped}");
+        if (a.CutsceneRefs.Count != b.CutsceneRefs.Count)
+        {
+            diffs.Add($"{path}.CutsceneRefs: count {a.CutsceneRefs.Count} vs {b.CutsceneRefs.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.CutsceneRefs.Count; i++)
+            {
+                ActCutsceneRefW.Diff($"{path}.CutsceneRefs[{i}]", a.CutsceneRefs[i], b.CutsceneRefs[i], diffs);
+            }
+        }
         Wire.DiffBytes($"{path}.Cutscenes", a.Cutscenes, b.Cutscenes, diffs);
     }
 }

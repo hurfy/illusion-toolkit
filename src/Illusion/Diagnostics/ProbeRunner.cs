@@ -195,6 +195,12 @@ internal static class ProbeRunner
             case "--probe-actors":
                 ActorProbes.RunActorPlacementProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // The entity-init property table over the whole install: every region parses, its rows decode into
+            // named behavior fields, merely reading them leaves the bytes alone, and an edit lands in exactly the
+            // edited field. Output: %TEMP%\illusion_actor_props.txt
+            case "--probe-actor-props":
+                ActorProbes.RunActorPropertiesProbe();
+                return true;
             // Which way an actor turns the thing it places, measured against the district's .col — the game
             // collides with the hull, so its placement IS the object's real orientation, independent of the
             // actor pack. Optional second argument filters actors by name. Output: %TEMP%\illusion_actor_orient.txt

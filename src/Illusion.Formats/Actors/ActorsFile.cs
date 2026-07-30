@@ -85,6 +85,49 @@ public sealed class ActorsFile
     /// <summary>Number of entities in the inner binary's item table.</summary>
     public int EntityCount => Binary.ItemOffsets.Count;
 
+    /// <summary>Whether the entity-init property table was parsed into rows. False for a region whose shape the
+    /// core did not recognise — it then rides as one capsule and nothing in it can be edited.</summary>
+    public bool ArePropertiesTyped => Binary.PropsTyped != 0;
+
+    /// <summary>Whether the trailing cutscene lookup was parsed into entries (false → it rides as a capsule).</summary>
+    public bool IsCutsceneLookupTyped => Binary.CutscenesTyped != 0;
+
+    /// <summary>The entity names of the pack's C_Cutscene actors, as the trailing lookup lists them.</summary>
+    public IReadOnlyList<string> CutsceneNames =>
+        Binary.CutsceneRefs.Select(r => r.Name).ToArray();
+
+    /// <summary>
+    /// The entity-init property rows — the behavior blobs actors point at by <see cref="ActorEntry.InitPropId"/>.
+    /// Built once on load and cached, because the field views are live over the wire model: rebuilding would hand
+    /// out new objects while an undo entry still holds the old ones.
+    /// </summary>
+    public IReadOnlyList<ActorPropertyRow> PropertyRows => propertyRows ??= BuildPropertyRows();
+
+    private IReadOnlyList<ActorPropertyRow>? propertyRows;
+
+    /// <summary>The behavior row an actor uses, or null when it has none (or points outside the table).</summary>
+    public ActorPropertyRow? PropertiesOf(ActorEntry actor)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        IReadOnlyList<ActorPropertyRow> rows = PropertyRows;
+        return actor.InitPropId >= 0 && actor.InitPropId < rows.Count ? rows[actor.InitPropId] : null;
+    }
+
+    private IReadOnlyList<ActorPropertyRow> BuildPropertyRows()
+    {
+        var sharers = new int[Binary.PropRows.Count];
+        foreach (ActorEntry actor in ActorList)
+        {
+            if (actor.InitPropId >= 0 && actor.InitPropId < sharers.Length) sharers[actor.InitPropId]++;
+        }
+        var rows = new List<ActorPropertyRow>(Binary.PropRows.Count);
+        for (int i = 0; i < Binary.PropRows.Count; i++)
+        {
+            rows.Add(new ActorPropertyRow(Binary.PropRows[i], i, sharers[i]));
+        }
+        return rows;
+    }
+
     public static ActorsFile Load(string path)
     {
         using var stream = new MemoryStream(File.ReadAllBytes(path), writable: false);

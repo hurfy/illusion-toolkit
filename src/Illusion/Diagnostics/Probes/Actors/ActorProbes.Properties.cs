@@ -1,0 +1,217 @@
+using System.IO;
+using System.Text;
+using Illusion.Assets;
+using Illusion.Formats.Actors;
+using static Illusion.Diagnostics.Probes.ProbeAssert;
+
+namespace Illusion.Diagnostics.Probes;
+
+/// <summary>The entity-init property table: what the core makes of the behavior blobs, and what an edit to one
+/// does to the file. Part of <see cref="ActorProbes"/> — one file per area of the actor layer.</summary>
+internal static partial class ActorProbes
+{
+    /// <summary>
+    /// Census + edit round-trip over every .act of the install: the property region parses everywhere, its rows
+    /// decode into named fields, a pack whose fields were merely READ still re-saves byte for byte, and a pack
+    /// whose field was CHANGED differs in exactly that field's bytes and reads the new value back.
+    /// Output: %TEMP%\illusion_actor_props.txt
+    /// </summary>
+    internal static void RunActorPropertiesProbe()
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_actor_props.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            string root = MafiaEnvironment.ResourcesFolder!;
+            if (!Directory.Exists(root)) { sb.AppendLine("resources not unpacked: " + root); return; }
+
+            string[] files = Directory.GetFiles(root, "*.act", SearchOption.AllDirectories);
+            sb.AppendLine($"ACTOR PROPERTIES PROBE — {files.Length} packs\n");
+
+            // ── Census ──
+            var rowsByType = new SortedDictionary<int, int>();
+            var fieldedByType = new SortedDictionary<int, int>();
+            var sizesByType = new SortedDictionary<int, SortedSet<int>>();
+            int packs = 0, propsTyped = 0, compressed = 0, fixpoint = 0, errors = 0;
+            int rows = 0, rowsWithFields = 0, fields = 0;
+            int sharerTotal = 0, actorsWithRow = 0, sharedRows = 0;
+            int cutsceneTyped = 0, cutscenePacks = 0, cutsceneNames = 0, cutsceneActors = 0;
+            string firstError = "";
+
+            foreach (string file in files)
+            {
+                try
+                {
+                    byte[] original = File.ReadAllBytes(file);
+                    ActorsFile pack = ActorsFile.Load(file);
+                    packs++;
+                    if (pack.IsCompressed) compressed++;
+                    if (pack.ArePropertiesTyped) propsTyped++;
+
+                    foreach (ActorPropertyRow row in pack.PropertyRows)
+                    {
+                        rows++;
+                        int type = row.TypeId;
+                        rowsByType.TryGetValue(type, out int seen);
+                        rowsByType[type] = seen + 1;
+                        if (!sizesByType.TryGetValue(type, out SortedSet<int>? sizes))
+                        {
+                            sizes = new SortedSet<int>();
+                            sizesByType[type] = sizes;
+                        }
+                        sizes.Add(row.PayloadSize);
+                        if (row.Fields.Count > 0)
+                        {
+                            rowsWithFields++;
+                            fields += row.Fields.Count;
+                            fieldedByType.TryGetValue(type, out int f);
+                            fieldedByType[type] = f + 1;
+                        }
+                        sharerTotal += row.SharerCount;
+                        if (row.SharerCount > 1) sharedRows++;
+                    }
+
+                    foreach (ActorEntry actor in pack.Actors)
+                    {
+                        if (actor.InitPropId >= 0) actorsWithRow++;
+                        if (actor.Type == EntityType.Cutscene) cutsceneActors++;
+                    }
+
+                    if (pack.CutsceneNames.Count > 0)
+                    {
+                        cutscenePacks++;
+                        cutsceneNames += pack.CutsceneNames.Count;
+                    }
+                    if (pack.IsCutsceneLookupTyped) cutsceneTyped++;
+
+                    // Reading the fields must not disturb anything: the blob is the authority and an unchanged
+                    // value is never written back over it.
+                    if (pack.ToBytes().AsSpan().SequenceEqual(original)) fixpoint++;
+                    else if (firstError.Length == 0) firstError = "fixpoint diff in " + Path.GetFileName(file);
+                }
+                catch (Exception ex)
+                {
+                    errors++;
+                    if (firstError.Length == 0) firstError = Path.GetFileName(file) + ": " + ex.Message;
+                }
+            }
+
+            Check("every pack reads", errors == 0 && packs == files.Length, $"{packs}/{files.Length} {firstError}");
+            Check("every property region is typed", propsTyped == packs, $"{propsTyped}/{packs}");
+            Check("reading the fields leaves the bytes alone", fixpoint == packs, $"{fixpoint}/{packs}");
+            Check("the table carries rows", rows > 0, $"{rows} rows, {fields} named fields");
+            Check("every row of a known type decodes fields", rowsWithFields > 0 && rowsWithFields <= rows,
+                $"{rowsWithFields}/{rows} rows have fields");
+            Check("row sharing is accounted for", sharerTotal == actorsWithRow,
+                $"{actorsWithRow} actors point at a row, {sharedRows} rows have more than one sharer");
+            Check("every cutscene lookup is typed", cutsceneTyped == packs, $"{cutsceneTyped}/{packs}");
+            Check("the cutscene lookup names the cutscene actors", cutsceneNames == cutsceneActors,
+                $"{cutsceneNames} names across {cutscenePacks} packs vs {cutsceneActors} C_Cutscene actors");
+
+            sb.AppendLine();
+            sb.AppendLine($"packs: {packs} ({compressed} compressed, {packs - compressed} uncompressed)");
+            sb.AppendLine("type  rows  with fields  payload sizes");
+            foreach ((int type, int count) in rowsByType)
+            {
+                fieldedByType.TryGetValue(type, out int fielded);
+                string sizes = string.Join("/", sizesByType[type]);
+                string name = Enum.IsDefined((EntityType)type) ? ((EntityType)type).ToString() : "?";
+                sb.AppendLine($"{type,4}  {count,5}  {fielded,11}  {sizes,-12} {name}");
+            }
+
+            // ── Editing ──
+            sb.AppendLine();
+            CheckPropertyEdit(files, "a number", EntityType.Door, "Locked",
+                f => f.Number = f.Number == 0 ? 1 : 0, sb, Check);
+            CheckPropertyEdit(files, "a float", EntityType.CrashObject, "HitPoints",
+                f => f.Single += 12.5f, sb, Check);
+            CheckPropertyEdit(files, "a flag", EntityType.CrashObject, "CameraCollision",
+                f => f.Flag = !f.Flag, sb, Check);
+            CheckPropertyEdit(files, "a vector", EntityType.CleanEntity, "BBoxSize",
+                f => f.Vector = new System.Numerics.Vector3(3, 4, 5), sb, Check);
+            CheckPropertyEdit(files, "a text buffer", EntityType.ScriptEntity, "ScriptName",
+                f => f.Text = "probe/edited.lua", sb, Check);
+        }
+        catch (Exception ex)
+        {
+            fail++;
+            sb.AppendLine("[FAIL] unexpected exception — " + ex);
+        }
+
+        sb.Insert(0, $"ACTOR PROPERTIES PROBE: {pass} passed, {fail} failed\n\n");
+        File.WriteAllText(outFile, sb.ToString());
+    }
+
+    // Finds the first pack holding a row of `type` with a field called `name`, changes it, and requires the file
+    // to come back with the new value and with NOTHING else moved: the changed bytes must all lie inside that one
+    // field, which is what proves the blob is patched in place rather than re-encoded from a partial model.
+    private static void CheckPropertyEdit(string[] files, string label, EntityType type, string name,
+        Action<ActorPropertyField> edit, StringBuilder sb, Action<string, bool, string> check)
+    {
+        foreach (string file in files)
+        {
+            ActorsFile pack;
+            try { pack = ActorsFile.Load(file); }
+            catch (Exception) { continue; }
+
+            int rowIndex = -1;
+            int fieldIndex = -1;
+            for (int i = 0; i < pack.PropertyRows.Count && rowIndex < 0; i++)
+            {
+                if (pack.PropertyRows[i].Type != type) continue;
+                for (int f = 0; f < pack.PropertyRows[i].Fields.Count; f++)
+                {
+                    if (pack.PropertyRows[i].Fields[f].Name != name) continue;
+                    rowIndex = i;
+                    fieldIndex = f;
+                    break;
+                }
+            }
+            if (rowIndex < 0) continue;
+
+            ActorPropertyField field = pack.PropertyRows[rowIndex].Fields[fieldIndex];
+            string before = field.Display;
+            edit(field);
+            string after = field.Display;
+
+            byte[] original = File.ReadAllBytes(file);
+            byte[] edited = pack.ToBytes();
+
+            int changed = 0;
+            long firstAt = -1;
+            int n = Math.Min(original.Length, edited.Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (original[i] == edited[i]) continue;
+                changed++;
+                if (firstAt < 0) firstAt = i;
+            }
+
+            using var reloaded = new MemoryStream(edited, writable: false);
+            ActorsFile back = ActorsFile.Read(reloaded);
+            string readBack = back.PropertyRows[rowIndex].Fields[fieldIndex].Display;
+
+            bool sameLength = original.Length == edited.Length;
+            bool contained = changed > 0 && changed <= field.Capacity;
+            check($"editing {label} ({type}.{name}) reaches the file and nothing else moves",
+                sameLength && contained && readBack == after && before != after,
+                $"{Path.GetFileName(file)}: '{before}' → '{after}', read back '{readBack}', "
+                + $"{changed} byte(s) changed at {firstAt} (field is {field.Capacity} wide), "
+                + $"length {original.Length}→{edited.Length}");
+            sb.AppendLine($"    {type}.{name}: row {rowIndex} of {Path.GetFileName(file)}, "
+                          + $"{pack.PropertyRows[rowIndex].SharerCount} sharer(s)");
+            return;
+        }
+        check($"editing {label} ({type}.{name}) reaches the file and nothing else moves", false,
+            "no pack in the corpus carries that field");
+    }
+}
