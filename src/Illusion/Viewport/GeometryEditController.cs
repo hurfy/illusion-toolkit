@@ -1,6 +1,8 @@
 using System.Numerics;
+using Illusion.Assets.Adapters;
 using Illusion.Assets.Bridge;
 using Illusion.Domain;
+using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Rendering.Gpu;
 using Illusion.Scene;
 
@@ -66,6 +68,19 @@ internal sealed class GeometryEditController
             SwapMesh(item.Node, oldMesh, newMesh);
             children.Add(new GeometryEdit(this, item.Node, item.Result, oldMesh, newMesh));
             _host.Persistence.MarkFrameModified(item.Node);
+
+            // A frame references its mesh, it does not own it: the shipped districts put ten wanted posters on
+            // one geometry block. There is a single buffer in the file, so the game redraws all of them — and
+            // the viewport has to agree, or the editor shows a change the game will not honour object by
+            // object. Every other frame on the block gets the new shape here, each with its own transform.
+            foreach (SceneNode sharer in SharerNodes(item.Node))
+            {
+                GpuMesh? sharerOld = sharer.Mesh;
+                GpuMesh sharerNew = _host.Rnd!.CreateMeshGpu(item.Result.NewMesh!);
+                sharerNew.Owner = sharer;
+                SwapMesh(sharer, sharerOld, sharerNew);
+                children.Add(new SharedMeshEdit(this, sharer, sharerOld, sharerNew));
+            }
         }
 
         foreach (TransformItem item in transforms)
@@ -114,6 +129,26 @@ internal sealed class GeometryEditController
             _host.RaiseSceneChanged();
         }
         return outcomes;
+    }
+
+    /// <summary>The other tree rows drawing the same geometry block as this node's mesh — the frames that just
+    /// changed with it. Empty when the mesh is the block's only user, or when the sharers are not resident.</summary>
+    private IEnumerable<SceneNode> SharerNodes(SceneNode node)
+    {
+        if (node.Source is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh }) yield break;
+
+        SceneDocumentAdapter? document = null;
+        for (SceneNode? n = node; n != null && document == null; n = n.Parent)
+        {
+            document = n.Source as SceneDocumentAdapter;
+        }
+        if (document == null) yield break;
+
+        foreach (FrameObjectSingleMesh other in document.GeometrySharers(mesh))
+        {
+            SceneNode? row = _host.Streamer.Actors.RowOf(other);
+            if (row?.Mesh != null && _host.Tree.IsInScene(row)) yield return row;
+        }
     }
 
     // Detach/attach choreography shared by apply, undo and redo. Also resyncs the world matrix —
@@ -222,6 +257,50 @@ internal sealed class GeometryEditController
             if (!_owner._host.Tree.IsInScene(_item.Node)) return;
             _owner.ApplyTransform(_item.Node, local);
             _owner._host.Persistence.MarkFrameModified(_item.Node);
+        }
+    }
+
+    /// <summary>
+    /// A frame that draws a mesh someone else edited. Nothing of its own data changed — one geometry block
+    /// serves them all — so this only swaps the GPU mesh, and undo swaps the old one back. The data edit is
+    /// the <see cref="GeometryEdit"/> of the frame that was actually pushed.
+    /// </summary>
+    private sealed class SharedMeshEdit : INodeEdit
+    {
+        private readonly GeometryEditController _owner;
+        private readonly SceneNode _node;
+        private readonly GpuMesh? _oldMesh;
+        private readonly GpuMesh _newMesh;
+        private bool _applied = true;
+
+        public SharedMeshEdit(GeometryEditController owner, SceneNode node, GpuMesh? oldMesh, GpuMesh newMesh)
+        {
+            _owner = owner;
+            _node = node;
+            _oldMesh = oldMesh;
+            _newMesh = newMesh;
+        }
+
+        public IEnumerable<SceneNode> Nodes { get { yield return _node; } }
+
+        public void Undo()
+        {
+            if (!_owner._host.Tree.IsInScene(_node) || _oldMesh == null) return;
+            _owner.SwapMesh(_node, _newMesh, _oldMesh);
+            _applied = false;
+        }
+
+        public void Redo()
+        {
+            if (!_owner._host.Tree.IsInScene(_node)) return;
+            _owner.SwapMesh(_node, _oldMesh, _newMesh);
+            _applied = true;
+        }
+
+        public void Discard()
+        {
+            if (_applied) _oldMesh?.Dispose();
+            else _newMesh.Dispose();
         }
     }
 

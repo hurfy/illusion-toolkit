@@ -267,6 +267,16 @@ internal sealed class ActorLayer
         return null;
     }
 
+    /// <summary>The tree row showing a frame object, across every resident district. Null when nothing does.</summary>
+    public SceneNode? RowOf(FrameObjectBase frame)
+    {
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _frameRows.Values)
+        {
+            if (map.TryGetValue(frame, out SceneNode? row)) return row;
+        }
+        return null;
+    }
+
     /// <summary>Every frame's tree row under a FrameResource node, keyed by the frame it shows.</summary>
     public static Dictionary<FrameObjectBase, SceneNode> BuildFrameRows(SceneNode frameResourceNode)
     {

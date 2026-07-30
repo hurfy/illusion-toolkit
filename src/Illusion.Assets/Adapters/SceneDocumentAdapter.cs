@@ -187,17 +187,17 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     /// between them. An edit to such a mesh is an edit to all of them: there is one buffer in the file, and the
     /// viewport only looks otherwise because it swaps the edited node's GPU mesh alone.
     /// </summary>
-    public int CountGeometrySharers(FrameObjectSingleMesh mesh)
+    public IReadOnlyList<FrameObjectSingleMesh> GeometrySharers(FrameObjectSingleMesh mesh)
     {
-        if (mesh.Geometry is not { } geometry) return 0;
-        int sharers = 0;
+        if (mesh.Geometry is not { } geometry) return [];
+        var sharers = new List<FrameObjectSingleMesh>();
         foreach (object? value in _frame.FrameObjects.Values)
         {
             if (value is FrameObjectSingleMesh other
                 && !ReferenceEquals(other, mesh)
                 && ReferenceEquals(other.Geometry, geometry))
             {
-                sharers++;
+                sharers.Add(other);
             }
         }
         return sharers;

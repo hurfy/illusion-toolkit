@@ -602,16 +602,15 @@ internal sealed class BridgeSessionController : IDisposable
                         touchedTotal += result.TouchedVertices;
 
                         // A frame references its mesh rather than owning it, and the shipped districts reuse
-                        // geometry blocks heavily. Reshaping one is reshaping every frame on that block — which
-                        // is the intended meaning (a poster is one poster; a taller pole is a new object, not a
-                        // per-instance edit) but is invisible in the viewport, since only the edited node's GPU
-                        // mesh is swapped. Say it out loud instead.
+                        // geometry blocks heavily. Reshaping one is reshaping every frame on that block — the
+                        // intended meaning (a poster is one poster; a taller pole is a new object, not a
+                        // per-instance edit). The viewport now follows suit, so this only says how far it went.
                         if (fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh single }
                             && FindDocument(node) is SceneDocumentAdapter sceneDoc
-                            && sceneDoc.CountGeometrySharers(single) is > 0 and int sharers)
+                            && sceneDoc.GeometrySharers(single).Count is > 0 and int sharers)
                         {
-                            sharedMeshNotes.Add($"{node.Name}: {sharers} other frame(s) draw this same mesh — "
-                                + "they changed with it (the viewport only redraws the one that was edited)");
+                            sharedMeshNotes.Add(
+                                $"{node.Name}: {sharers} other frame(s) draw this same mesh and changed with it");
                         }
                     }
 
