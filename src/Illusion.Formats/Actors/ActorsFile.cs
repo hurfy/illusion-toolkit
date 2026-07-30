@@ -244,7 +244,7 @@ public sealed class ActorsFile
         {
             linkedFrame = clone.Name;
             frameHash = Hashing.Fnv64.Hash(clone.Name);
-            SceneReferences.Add(new ActorSceneReference
+            AddSceneReference(new ActorSceneReference
             {
                 FrameHash = frameHash,
                 Unk0 = sourceReference?.Unk0 ?? 0,
@@ -350,7 +350,7 @@ public sealed class ActorsFile
         }
         if (actor.FrameHash != 0 && !SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
         {
-            SceneReferences.Add(new ActorSceneReference
+            AddSceneReference(new ActorSceneReference
             {
                 FrameHash = actor.FrameHash,
                 Unk0 = 0,
@@ -362,6 +362,22 @@ public sealed class ActorsFile
             });
         }
         return true;
+    }
+
+    /// <summary>
+    /// Adds a scene reference and puts the table back in FRAME-HASH ORDER.
+    ///
+    /// That order is not cosmetic. Every one of the 668 shipped packs that carries more than one reference has
+    /// this table sorted by hash — measured, no exceptions — which is what a lookup by binary search needs. A
+    /// reference appended at the end reads back perfectly in the toolkit, which scans, and is invisible to the
+    /// game, which does not: the actor is there, its frame is there, the reference is there, and the object
+    /// still never appears. The whole table is re-sorted rather than the entry merely inserted in place, so a
+    /// pack an older build already appended to is repaired the next time it is edited.
+    /// </summary>
+    private void AddSceneReference(ActorSceneReference reference)
+    {
+        SceneReferences.Add(reference);
+        SceneReferences.Sort((a, b) => a.FrameHash.CompareTo(b.FrameHash));
     }
 
     // "name" → "name_copy", "name_copy2", … — unique within the pack, which is what the engine keys entities by.

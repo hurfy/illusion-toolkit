@@ -67,6 +67,34 @@ internal static partial class ActorProbes
             Check("an unedited pack re-emits byte for byte", fixpoint == files.Length && errors == 0,
                 $"{fixpoint}/{files.Length} {firstError}");
 
+            // The scene-reference table is sorted by frame hash in every shipped pack that has more than one
+            // entry — which is what a lookup by binary search needs. A reference appended at the end reads back
+            // perfectly here, where lookups scan, and is invisible to the game, where they do not. This is what
+            // caught that: an actor, a frame and a reference that all agree, and an object that never appears.
+            int ordered = 0, outOfOrder = 0;
+            var unsorted = new List<string>();
+            foreach (string file in files)
+            {
+                IReadOnlyList<ActorSceneReference> refs;
+                try { refs = ActorsFile.Load(file).SceneReferences; }
+                catch (Exception) { continue; }
+                if (refs.Count < 2) continue;
+                bool sorted = true;
+                for (int i = 1; i < refs.Count && sorted; i++) sorted = refs[i].FrameHash >= refs[i - 1].FrameHash;
+                if (sorted) ordered++;
+                else
+                {
+                    outOfOrder++;
+                    if (unsorted.Count < 5) unsorted.Add(Path.GetFileName(file));
+                }
+            }
+            Check("every pack's scene references are sorted by frame hash", outOfOrder == 0,
+                $"{ordered} sorted, {outOfOrder} not{(unsorted.Count > 0 ? " — " + string.Join(", ", unsorted) : "")}"
+                + (outOfOrder > 0
+                    ? ". A pack listed here was appended to by an older build; restore that archive from a "
+                      + "backup, or edit it again — adding a reference now re-sorts the whole table."
+                    : ""));
+
             // ── Growing and shrinking a name, on the packs that carry the most to disturb ──
             //
             // A pack with a cutscene lookup is the one that matters: its entries are addressed by offsets
@@ -176,6 +204,14 @@ internal static partial class ActorProbes
         check("the orphaned reference is gone",
             !pack.SceneReferences.Any(r => r.FrameHash == oldHash),
             $"{referencesBefore} → {pack.SceneReferences.Count} reference(s)");
+
+        bool stillSorted = true;
+        for (int i = 1; i < pack.SceneReferences.Count && stillSorted; i++)
+        {
+            stillSorted = pack.SceneReferences[i].FrameHash >= pack.SceneReferences[i - 1].FrameHash;
+        }
+        check("the table is still sorted by frame hash after the relink", stillSorted,
+            "a reference the game cannot binary-search for is a reference it never finds");
 
         ActorsFile back = ActorsFile.Read(new MemoryStream(pack.ToBytes(), writable: false));
         check("the relinked pack reads back",
