@@ -35,16 +35,14 @@ internal static class ActorHistoryProbes
                 : [];
 
             sb.AppendLine($"ACTOR HISTORY — {district}, {backups.Count} backup(s)\n");
-            if (backups.Count == 0)
-            {
-                sb.AppendLine("no backups for this district — nothing to compare against");
-                return;
-            }
 
-            // Oldest backup first: that is the closest thing to "before I started".
-            Dictionary<string, ActorEntry> oldest = ActorsOf(backups[0]);
+            // The axis measurement below needs only the live archive, so it runs even with no history at all —
+            // "which way is up" is worth answering for any district, not just an edited one.
+            Dictionary<string, ActorEntry> oldest = backups.Count > 0 ? ActorsOf(backups[0]) : [];
             Dictionary<string, ActorEntry> now = ActorsOf(live);
-            sb.AppendLine($"oldest backup: {Path.GetFileName(backups[0])} — {oldest.Count} actors");
+            sb.AppendLine(backups.Count == 0
+                ? "no backups for this district — nothing to compare against, axes only"
+                : $"oldest backup: {Path.GetFileName(backups[0])} — {oldest.Count} actors");
             sb.AppendLine($"live archive:  {Path.GetFileName(live)} — {now.Count} actors\n");
 
             int moved = 0, added = 0, removed = 0;
@@ -67,11 +65,35 @@ internal static class ActorHistoryProbes
             sb.AppendLine();
             sb.AppendLine($"{moved} actor(s) moved since the oldest backup, {added} added, {removed} gone");
 
+            // Which component of a position is the game's VERTICAL. Nothing in the file says so, but the world
+            // does: a district is roughly two kilometres across and a few dozen metres tall, so the axis whose
+            // actors span the least is up. Worth stating in numbers — an axis guessed from the gizmo's labels
+            // is how "I moved it along Z and it went sideways" happens.
+            if (now.Count > 0)
+            {
+                var min = new System.Numerics.Vector3(float.MaxValue);
+                var max = new System.Numerics.Vector3(float.MinValue);
+                foreach (ActorEntry actor in now.Values)
+                {
+                    min = System.Numerics.Vector3.Min(min, actor.Position);
+                    max = System.Numerics.Vector3.Max(max, actor.Position);
+                }
+                System.Numerics.Vector3 span = max - min;
+                string[] names = ["X (first)", "Y (second)", "Z (third)"];
+                float[] spans = [span.X, span.Y, span.Z];
+                int shortest = 0;
+                for (int i = 1; i < 3; i++) if (spans[i] < spans[shortest]) shortest = i;
+                sb.AppendLine();
+                sb.AppendLine($"actor position spread: X {span.X:0.0}, Y {span.Y:0.0}, Z {span.Z:0.0} "
+                    + $"→ the shortest is {names[shortest]}, so THAT is the vertical axis in the file");
+                sb.AppendLine($"    bounds: {Fmt(min)} .. {Fmt(max)}");
+            }
+
             // The other half of "did it move": the FRAME objects. An actor's position is only where its
             // prototype is put; what the eye finally sees is that prototype's own transform on top. An object
             // nobody edited whose local transform differs from the backup has been moved by the toolkit, and
             // that is a bug rather than a mis-drag — so it is worth knowing before blaming the hand.
-            CompareFrames(sb, backups[0], live);
+            if (backups.Count > 0) CompareFrames(sb, backups[0], live);
 
             if (nameFilter != null)
             {
