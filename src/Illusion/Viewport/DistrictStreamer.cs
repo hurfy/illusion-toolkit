@@ -635,6 +635,60 @@ internal sealed class DistrictStreamer
     /// for the edit commands.</summary>
     public CrashPlacements? CrashLayer => _crashSources.Count > 0 ? _crashSources[0].Placements : null;
 
+    /// <summary>
+    /// The prototype mesh rows a crash placement is a copy of. A copy is drawn by the hardware instancer from
+    /// its row's prototype, so the copy's own tree node carries no geometry — reaching the shape means going
+    /// back to the prototype, the same way an actor's does.
+    /// </summary>
+    public IReadOnlyList<SceneNode> CrashPrototypeRows(SceneNode placementNode)
+    {
+        if (placementNode.Source is not TranslokatorInstanceAdapter placement) return [];
+        var rows = new List<SceneNode>();
+        foreach (CrashSource src in _crashSources)
+        {
+            foreach (FrameObjectSingleMesh mesh in src.Placements.MeshesOf(placement.Owner))
+            {
+                if (src.Leaves.TryGetValue(mesh, out SceneNode? leaf)) rows.Add(leaf);
+            }
+        }
+        return rows;
+    }
+
+    /// <summary>How many copies of a crash prototype the city draws. Zero when the node is not one.</summary>
+    public int CrashCopyCount(SceneNode prototypeLeaf)
+    {
+        if (prototypeLeaf.Source is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh }) return 0;
+        int copies = 0;
+        foreach (CrashSource src in _crashSources)
+        {
+            if (src.Leaves.ContainsKey(mesh)) copies += src.Placements.CloudFor(mesh).Matrices.Length;
+        }
+        return copies;
+    }
+
+    /// <summary>
+    /// Re-uploads the instance cloud of a prototype whose GPU mesh was just replaced, and reports how many
+    /// copies now draw the new shape. A fresh mesh comes back with no instances at all, so without this an
+    /// edited prop would collapse from tens of thousands of copies to the one at the prototype's own
+    /// transform. Zero when the node is not a crash prototype.
+    /// </summary>
+    public int RefreshCrashInstances(SceneNode prototypeLeaf)
+    {
+        if (_host.Rnd == null || prototypeLeaf.Mesh == null) return 0;
+        if (prototypeLeaf.Source is not FrameNodeAdapter { Frame: FrameObjectSingleMesh mesh }) return 0;
+
+        int copies = 0;
+        foreach (CrashSource src in _crashSources)
+        {
+            if (!src.Leaves.ContainsKey(mesh)) continue;
+            CrashPlacements.Cloud cloud = src.Placements.CloudFor(mesh);
+            if (cloud.Matrices.Length == 0) continue;
+            _host.Rnd.UpdateInstances(prototypeLeaf.Mesh, cloud.Matrices, cloud.DrawDistances);
+            copies += cloud.Matrices.Length;
+        }
+        return copies;
+    }
+
     // Adds one .nav tree bucket labelled with its object count (summed over the given NavPoint type ids).
     // Empty buckets are skipped so a district only shows the categories it actually has.
     private static void AddNavBucket(SceneNode parent, string label, Dictionary<int, int> counts, params int[] types)

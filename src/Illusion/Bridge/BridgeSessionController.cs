@@ -144,7 +144,9 @@ internal sealed class BridgeSessionController : IDisposable
             foreach (SceneNode leaf in MeshLeavesOf(selected))
             {
                 if (!seen.Add(leaf)) continue;
-                if (leaf.Mesh is { Instanced: true }) { skips.Add(leaf.Name + " — instanced (city_crash)"); continue; }
+                // An instanced prototype is no longer refused: "instanced" describes how the viewport DRAWS it,
+                // not what it is. The frame underneath is an ordinary single mesh, the exporter reads it from
+                // the frame rather than from the GPU, and the cloud is re-uploaded after the push.
                 if (leaf.Source is not IFrameNode fn) { skips.Add(leaf.Name + " — not an editable frame"); continue; }
                 if (FindDocument(leaf) is not { } doc) { skips.Add(leaf.Name + " — no owning document"); continue; }
                 requests.Add(new ExportRequest(leaf, fn, doc));
@@ -201,6 +203,12 @@ internal sealed class BridgeSessionController : IDisposable
     /// </summary>
     private IEnumerable<SceneNode> MeshLeavesOf(SceneNode selected)
     {
+        // A crash copy is drawn by the instancer from its row's prototype, so its own node carries no geometry
+        // either. Editing any copy edits the prop — there are tens of thousands of them and one shape.
+        if (selected.Source is TranslokatorInstanceAdapter)
+        {
+            return _host.Streamer.CrashPrototypeRows(selected).SelectMany(r => r.DescendantMeshLeaves());
+        }
         if (selected.Source is not ActorNodeAdapter) return selected.DescendantMeshLeaves();
 
         SceneNode? row = _host.Streamer.Actors.PrototypeRow(selected);
@@ -680,6 +688,7 @@ internal sealed class BridgeSessionController : IDisposable
             int reshapedApplied = 0;
             int createdHulls = 0;
             var sharedHullNotes = new List<string>();
+            var crashCopyNotes = new List<(string Name, int Copies)>();
             _host.Dispatcher.Invoke(() =>
             {
                 geometry.RemoveAll(g => !_host.Tree.IsInScene(g.Node));
@@ -747,6 +756,16 @@ internal sealed class BridgeSessionController : IDisposable
                     createdHulls++;
                 }
 
+                // Counted before the apply: afterwards the prototype's cloud has been re-uploaded and the
+                // question "how far did this go" is the same either way, but the mesh that says it is
+                // instanced is the OLD one.
+                foreach (GeometryEditController.GeometryItem item in geometry)
+                {
+                    if (item.Node.Mesh is not { Instanced: true }) continue;
+                    int copies = _host.Streamer.CrashCopyCount(item.Node);
+                    if (copies > 1) crashCopyNotes.Add((item.Node.Name, copies));
+                }
+
                 List<GeometryEditController.CreationOutcome> outcomes =
                     _host.GeometryEditing.ApplyPushBatch(geometry, transforms, creations, delete, collisionEdits);
                 foreach (GeometryEditController.CreationOutcome outcome in outcomes)
@@ -782,6 +801,13 @@ internal sealed class BridgeSessionController : IDisposable
             // difference between "the other forty-nine did not take" and "the other forty-nine are untouched".
             foreach (string shared in sharedHullNotes) notes.Add(shared);
             foreach (string shared in sharedMeshNotes) notes.Add(shared);
+            // A crash prop has one shape and tens of thousands of copies, spread over the whole city by the
+            // .tra table. Reshaping it reshapes every one of them, in the season whose archive is open.
+            foreach ((string name, int copies) in crashCopyNotes)
+            {
+                notes.Add($"{name}: {copies} copies of this prop across the city took the new shape "
+                    + "(the other season's archive is a separate table and keeps its own)");
+            }
             if (createdApplied > 0) notes.Add($"{createdApplied} new object(s) created (anchored to the "
                 + "district's main scene, on the frame name table)");
             if (deletedApplied > 0) notes.Add($"{deletedApplied} object(s) deleted (undo restores them)");

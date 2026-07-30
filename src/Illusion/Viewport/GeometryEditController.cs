@@ -66,6 +66,10 @@ internal sealed class GeometryEditController
             GpuMesh newMesh = _host.Rnd!.CreateMeshGpu(item.Result.NewMesh!);
             newMesh.Owner = item.Node;
             SwapMesh(item.Node, oldMesh, newMesh);
+            // A crash prototype's copies live in the instance buffer, and a fresh GPU mesh comes back with
+            // none — without this the prop would collapse from tens of thousands of copies to the one at the
+            // prototype's own transform.
+            if (oldMesh is { Instanced: true }) _host.Streamer.RefreshCrashInstances(item.Node);
             children.Add(new GeometryEdit(this, item.Node, item.Result, oldMesh, newMesh));
             _host.Persistence.MarkFrameModified(item.Node);
 

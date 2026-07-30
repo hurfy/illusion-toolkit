@@ -215,6 +215,12 @@ internal static class ProbeRunner
                 return true;
             // How much of a district's geometry is shared between frame objects — whether editing one mesh
             // edits one object or several. Output: %TEMP%\illusion_mesh_sharing.txt
+            // Sending a city_crash prop's prototype to Blender: the exporter takes it despite the viewport
+            // drawing it instanced, the prototype's own transform rides with it, and the copy cloud rebuilds.
+            // Output: %TEMP%\illusion_bridge_crash.txt
+            case "--probe-bridge-crash":
+                ActorProbes.RunBridgeCrashProbe(args.Length >= 2 && args[1] == "winter");
+                return true;
             case "--probe-mesh-sharing":
                 ActorProbes.RunMeshSharingProbe(args.Length >= 2 ? args[1] : "italy",
                     args.Length >= 3 ? args[2] : null);
