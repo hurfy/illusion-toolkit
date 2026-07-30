@@ -8,15 +8,72 @@ public sealed class BufferPoolSource
 {
     internal readonly List<ulong> HashList;
 
-    internal BufferPoolSource(string filePath, List<ulong> hashes)
+    internal BufferPoolSource(string filePath, List<ulong> hashes, bool isNew = false)
     {
         FilePath = filePath;
         HashList = hashes;
+        IsNew = isNew;
     }
 
     public string FilePath { get; }
 
     public IReadOnlyList<ulong> Hashes => HashList;
+
+    /// <summary>
+    /// True for a pool file this session invented because every existing one was full. It does not exist on
+    /// disk yet AND it is not in the archive's SDSContent.xml — and packing goes by the manifest, not by the
+    /// folder, so a new pool that never gets registered is silently dropped and the archive then names a
+    /// buffer nothing carries. <see cref="MarkRegistered"/> is how the save side says it dealt with both.
+    /// </summary>
+    public bool IsNew { get; private set; }
+
+    public void MarkRegistered() => IsNew = false;
+}
+
+/// <summary>
+/// Names the pool file to open when every existing one is full — which is what the game itself does: no pool
+/// in the shipped install holds more than 128 buffers (measured over all 3268 of them; 1020 sit exactly
+/// there), and an archive needing more simply carries more pool files.
+/// </summary>
+internal static class BufferPoolNaming
+{
+    /// <summary>
+    /// A fresh source beside the existing pools, numbered past the highest they use. Null when there are no
+    /// pools at all — then there is no folder to write into and no archive to belong to, and inventing one
+    /// would be guessing.
+    /// </summary>
+    public static BufferPoolSource? NextPool(List<BufferPoolSource> sources, string stem, string extension)
+    {
+        if (sources.Count == 0) return null;
+        string folder = Path.GetDirectoryName(sources[0].FilePath) ?? "";
+
+        // The shipped archives number both kinds through one sequence (IndexBufferPool_0, VertexBufferPool_1,
+        // IndexBufferPool_2 …). Only this manager's own files are visible here, so the next number is taken
+        // past its own highest — the other kind's names differ by stem and extension, so they cannot collide.
+        int highest = -1;
+        foreach (BufferPoolSource source in sources)
+        {
+            string name = Path.GetFileNameWithoutExtension(source.FilePath);
+            int underscore = name.LastIndexOf('_');
+            if (underscore >= 0
+                && int.TryParse(name.AsSpan(underscore + 1), out int index)
+                && index > highest)
+            {
+                highest = index;
+            }
+        }
+
+        string path;
+        int next = highest + 1;
+        do
+        {
+            path = Path.Combine(folder, $"{stem}_{next}{extension}");
+            next++;
+        }
+        while (File.Exists(path)); // never take a name the folder already uses, whoever put it there
+
+        return new BufferPoolSource(path, [], isNew: true);
+    }
 }
 
 /// <summary>One index buffer: FNV64 name hash + 16- or 32-bit indices (format 1 / 2). Indices are
@@ -113,16 +170,21 @@ public sealed class IndexBufferManager
 
     public IndexBuffer? GetBuffer(ulong hash) => Buffers.GetValueOrDefault(hash);
 
-    /// <summary>Registers a brand-new buffer into a pool file with spare capacity (pools hold at
-    /// most <see cref="IndexBufferPool.MaxBuffersPerPool"/> buffers). False when every pool is full
-    /// or the hash already exists.</summary>
+    /// <summary>Registers a brand-new buffer into a pool file with spare capacity, opening another pool file
+    /// when every existing one is full. False only when the hash already exists, or when there is no pool to
+    /// take the name from.</summary>
     public bool TryAddToPool(IndexBuffer buffer)
     {
         if (Buffers.ContainsKey(buffer.Hash)) return false;
         BufferPoolSource? target = null;
         foreach (BufferPoolSource source in _sources)
             if (source.HashList.Count < IndexBufferPool.MaxBuffersPerPool) { target = source; break; }
-        if (target == null) return false;
+        if (target == null)
+        {
+            target = BufferPoolNaming.NextPool(_sources, "IndexBufferPool", ".ibp");
+            if (target == null) return false;
+            _sources.Add(target);
+        }
         target.HashList.Add(buffer.Hash);
         Buffers.Add(buffer.Hash, buffer);
         return true;

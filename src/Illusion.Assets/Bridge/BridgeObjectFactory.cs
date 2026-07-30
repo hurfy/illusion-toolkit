@@ -121,13 +121,13 @@ public static class BridgeObjectFactory
         indexBuffer.SetData(new uint[] { 0, 1, 2 });
         if (!resource.VertexBuffers.TryAddToPool(vertexBuffer))
         {
-            skipReason = "every vertex buffer pool of this archive is full";
+            skipReason = "the archive has no vertex buffer pool to add to";
             return null;
         }
         if (!resource.IndexBuffers.TryAddToPool(indexBuffer))
         {
             resource.VertexBuffers.Remove(vertexBuffer.Hash);
-            skipReason = "every index buffer pool of this archive is full";
+            skipReason = "the archive has no index buffer pool to add to";
             return null;
         }
 

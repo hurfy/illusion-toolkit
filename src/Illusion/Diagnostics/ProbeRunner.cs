@@ -221,6 +221,12 @@ internal static class ProbeRunner
             case "--probe-bridge-crash":
                 ActorProbes.RunBridgeCrashProbe(args.Length >= 2 && args[1] == "winter");
                 return true;
+            // Opening another buffer pool when every existing one is full — the manager's decision AND the
+            // manifest append that keeps Build from dropping the new file.
+            // Output: %TEMP%\illusion_pooloverflow.txt
+            case "--probe-pool-overflow":
+                PoolOverflowProbes.RunPoolOverflowProbe(args.Length >= 2 ? args[1] : "eastside");
+                return true;
             case "--probe-mesh-sharing":
                 ActorProbes.RunMeshSharingProbe(args.Length >= 2 ? args[1] : "italy",
                     args.Length >= 3 ? args[2] : null);

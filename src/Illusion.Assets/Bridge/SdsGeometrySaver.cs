@@ -1,3 +1,4 @@
+using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Geometry;
 
@@ -33,6 +34,7 @@ public static class SdsGeometrySaver
                             ?? throw new InvalidOperationException($"Vertex buffer 0x{hash:X16} vanished from its manager.");
                     pool.WriteToFile(stream);
                 });
+                Announce(source, "VertexBufferPool", redirect);
                 written++;
             }
         }
@@ -50,11 +52,29 @@ public static class SdsGeometrySaver
                             ?? throw new InvalidOperationException($"Index buffer 0x{hash:X16} vanished from its manager.");
                     pool.WriteToFile(stream);
                 });
+                Announce(source, "IndexBufferPool", redirect);
                 written++;
             }
         }
 
         return written;
+    }
+
+    /// <summary>
+    /// Puts a pool file the toolkit invented into the archive's SDSContent.xml. Packing goes by the manifest,
+    /// not by the folder, so without this the new pool is silently dropped at Build and the archive ends up
+    /// naming buffers nothing carries — a district that no longer loads. Redirected writes (the probes) are a
+    /// scratch copy that is never packed, so their manifest is left alone.
+    /// </summary>
+    private static void Announce(BufferPoolSource source, string typeName, Func<string, string>? redirect)
+    {
+        if (!source.IsNew || redirect != null) return;
+        string? folder = Path.GetDirectoryName(source.FilePath);
+        if (folder == null || !File.Exists(Path.Combine(folder, "SDSContent.xml"))) return;
+
+        // Version 2 is what every shipped pool entry carries.
+        SdsManifest.Load(folder).AddEntry(typeName, Path.GetFileName(source.FilePath), version: 2);
+        source.MarkRegistered();
     }
 
     private static void WritePool(BufferPoolSource source, Func<string, string>? redirect, Action<MemoryStream> serialize)

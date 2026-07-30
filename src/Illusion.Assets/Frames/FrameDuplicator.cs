@@ -146,7 +146,7 @@ public static class FrameDuplicator
         {
             foreach (VertexBuffer vb in added.VertexBuffers) resource.VertexBuffers.Remove(vb.Hash);
             foreach (IndexBuffer ib in added.IndexBuffers) resource.IndexBuffers.Remove(ib.Hash);
-            skipReason = "every buffer pool of this archive is full";
+            skipReason = "the archive has no buffer pool to copy the geometry into";
             return null;
         }
 

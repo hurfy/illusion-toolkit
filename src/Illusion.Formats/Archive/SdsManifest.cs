@@ -75,4 +75,55 @@ public sealed class SdsManifest
         }
         return files;
     }
+
+    /// <summary>Whether the manifest already lists this file name (any type).</summary>
+    public bool HasFile(string fileName)
+    {
+        foreach ((_, string file) in _entries)
+        {
+            if (string.Equals(file, fileName, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Appends a single-payload entry to the folder's SDSContent.xml and rewrites it.
+    ///
+    /// Packing builds an archive from the MANIFEST, never from the folder — a file added on disk and left out
+    /// of here is silently dropped, and an archive that then names a resource nothing carries does not load.
+    /// So a file the toolkit invents (a fresh buffer pool, say) has to be announced here or not written at all.
+    /// A name already listed is left alone, which makes this safe to call after every save.
+    /// </summary>
+    /// <returns>True when the manifest gained an entry.</returns>
+    public bool AddEntry(string typeName, string fileName, int version)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(typeName);
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        if (HasFile(fileName)) return false;
+
+        string path = Path.Combine(Folder, "SDSContent.xml");
+        var document = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        document.Load(path);
+        System.Xml.XmlNode root = document.DocumentElement
+            ?? throw new SdsFormatException($"SDSContent.xml in '{Folder}' has no root element");
+
+        System.Xml.XmlElement entry = document.CreateElement("ResourceEntry");
+        foreach ((string name, string value) in new[]
+                 { ("Type", typeName), ("File", fileName), ("Version", version.ToString(System.Globalization.CultureInfo.InvariantCulture)) })
+        {
+            System.Xml.XmlElement child = document.CreateElement(name);
+            child.InnerText = value;
+            entry.AppendChild(child);
+        }
+        root.AppendChild(entry);
+
+        // Through a temp file: a half-written manifest is an archive that can never be packed OR re-extracted,
+        // and it is the one file in the folder nothing else can reconstruct.
+        string temp = path + ".tmp";
+        document.Save(temp);
+        File.Move(temp, path, overwrite: true);
+
+        _entries.Add((typeName, fileName));
+        return true;
+    }
 }

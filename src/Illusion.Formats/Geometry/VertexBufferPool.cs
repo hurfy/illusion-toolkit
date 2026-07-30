@@ -81,15 +81,21 @@ public sealed class VertexBufferManager
 
     public VertexBuffer? GetBuffer(ulong hash) => Buffers.GetValueOrDefault(hash);
 
-    /// <summary>Registers a brand-new buffer into a pool file with spare capacity. False when every
-    /// pool is full or the hash already exists.</summary>
+    /// <summary>Registers a brand-new buffer into a pool file with spare capacity, opening another pool file
+    /// when every existing one is full. False only when the hash already exists, or when there is no pool to
+    /// take the name from.</summary>
     public bool TryAddToPool(VertexBuffer buffer)
     {
         if (Buffers.ContainsKey(buffer.Hash)) return false;
         BufferPoolSource? target = null;
         foreach (BufferPoolSource source in _sources)
             if (source.HashList.Count < IndexBufferPool.MaxBuffersPerPool) { target = source; break; }
-        if (target == null) return false;
+        if (target == null)
+        {
+            target = BufferPoolNaming.NextPool(_sources, "VertexBufferPool", ".vbp");
+            if (target == null) return false;
+            _sources.Add(target);
+        }
         target.HashList.Add(buffer.Hash);
         Buffers.Add(buffer.Hash, buffer);
         return true;
