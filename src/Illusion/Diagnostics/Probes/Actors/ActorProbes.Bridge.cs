@@ -46,7 +46,7 @@ internal static partial class ActorProbes
             string sds = Path.Combine(MafiaEnvironment.CityFolder, district + ".sds");
             if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
 
-            (_, _, ISceneDocument? loaded) = SdsMeshLoader.LoadHierarchy(new FileInfo(sds));
+            (List<SdsFrameNode> roots, _, ISceneDocument? loaded) = SdsMeshLoader.LoadHierarchy(new FileInfo(sds));
             if (loaded is not SceneDocumentAdapter document)
             {
                 sb.AppendLine("the district did not load");
@@ -158,6 +158,8 @@ internal static partial class ActorProbes
             BridgeMeshApplier.ApplyResult? result = BridgeMeshApplier.TryApply(fn, reread, out string? applyReason);
             Check("pushing it back unedited changes nothing", result != null && result.Unchanged,
                 result == null ? applyReason ?? "refused" : $"{result.TouchedVertices} vertices touched");
+
+            CheckSelectionAgreement(roots, placements, sb, Check);
         }
         catch (Exception ex)
         {
@@ -167,6 +169,75 @@ internal static partial class ActorProbes
 
         sb.Insert(0, $"BRIDGE ACTOR PROBE: {pass} passed, {fail} failed\n\n");
         File.WriteAllText(outFile, sb.ToString());
+    }
+
+    /// <summary>
+    /// Selecting the ACTOR and selecting its FRAME in the tree have to reach the same meshes.
+    ///
+    /// They are found two different ways. The tree is built from the loader's hierarchy; the actor path walks
+    /// <c>FrameObjectBase.Children</c> and looks each mesh up in the row map. If those two disagree — a mesh the
+    /// tree hangs under the prototype that the frame graph does not, or the other way round — then Tab on an
+    /// actor edits a different set of objects than Tab on its frame, and the one the game reads can be the one
+    /// that was left alone.
+    /// </summary>
+    private static void CheckSelectionAgreement(List<SdsFrameNode> roots, ActorPlacements placements,
+        StringBuilder sb, Action<string, bool, string> check)
+    {
+        // Frame → its node in the loader's hierarchy (what the scene tree is built from, one row per frame).
+        var rowOf = new Dictionary<FrameObjectBase, SdsFrameNode>();
+        foreach (SdsFrameNode root in roots) IndexRows(root, rowOf);
+
+        int compared = 0, disagreed = 0, missingRow = 0;
+        var examples = new List<string>();
+        foreach (ActorEntry actor in placements.All)
+        {
+            if (placements.TargetOf(actor) is not { } target) continue;
+            if (!rowOf.TryGetValue(target, out SdsFrameNode? row)) { missingRow++; continue; }
+
+            // What selecting the actor reaches: the frame graph walked by ParentIndex1 children.
+            var viaActor = new HashSet<FrameObjectBase>();
+            CollectMeshFrames(target, viaActor, new HashSet<FrameObjectBase>());
+            // What selecting the frame row reaches: the tree's own descendants.
+            var viaTree = new HashSet<FrameObjectBase>();
+            CollectRowMeshes(row, viaTree);
+            if (viaActor.Count == 0 && viaTree.Count == 0) continue;
+
+            compared++;
+            if (viaActor.SetEquals(viaTree)) continue;
+            disagreed++;
+            if (examples.Count < 6)
+            {
+                IEnumerable<string> onlyTree = viaTree.Except(viaActor).Select(f => f.Name?.ToString() ?? "?");
+                IEnumerable<string> onlyActor = viaActor.Except(viaTree).Select(f => f.Name?.ToString() ?? "?");
+                examples.Add($"{actor.EntityName} → '{target.Name}': tree {viaTree.Count} vs actor {viaActor.Count}"
+                    + $" | only in tree: {string.Join(", ", onlyTree.Take(4))}"
+                    + $" | only via actor: {string.Join(", ", onlyActor.Take(4))}");
+            }
+        }
+
+        check("selecting the actor reaches the same meshes as selecting its frame", disagreed == 0,
+            $"{compared} prototypes compared, {disagreed} disagree, {missingRow} target(s) have no row");
+        foreach (string line in examples) sb.AppendLine("    " + line);
+    }
+
+    private static void IndexRows(SdsFrameNode node, Dictionary<FrameObjectBase, SdsFrameNode> map)
+    {
+        if (node.Source is FrameNodeAdapter fna) map[fna.Frame] = node;
+        foreach (SdsFrameNode child in node.Children) IndexRows(child, map);
+    }
+
+    private static void CollectRowMeshes(SdsFrameNode node, HashSet<FrameObjectBase> found)
+    {
+        if (node.Mesh != null && node.Source is FrameNodeAdapter fna) found.Add(fna.Frame);
+        foreach (SdsFrameNode child in node.Children) CollectRowMeshes(child, found);
+    }
+
+    private static void CollectMeshFrames(FrameObjectBase frame, HashSet<FrameObjectBase> found,
+        HashSet<FrameObjectBase> seen)
+    {
+        if (!seen.Add(frame)) return;
+        if (frame is FrameObjectSingleMesh { Geometry: not null }) found.Add(frame);
+        foreach (FrameObjectBase child in frame.Children) CollectMeshFrames(child, found, seen);
     }
 
     // The mesh leaves under a prototype holder, guarded against the cycles a malformed hierarchy can carry.

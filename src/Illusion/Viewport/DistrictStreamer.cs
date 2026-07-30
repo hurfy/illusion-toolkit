@@ -128,6 +128,7 @@ internal sealed class DistrictStreamer
         public ActorPlacements? ActorPlacements;                          // which actor governs which frame
         public Dictionary<ActorEntry, SceneNode>? ActorNodes;             // actor → its tree node
         public Dictionary<FrameObjectBase, SceneNode>? MeshNodeByFrame;   // frame → its mesh leaf (outline lookup)
+        public Dictionary<FrameObjectBase, SceneNode>? FrameNodeByFrame;  // frame → its tree row, holders included
     }
 
     /// <summary>
@@ -1000,6 +1001,10 @@ internal sealed class DistrictStreamer
                 ActorPlacements = actorPlacements,
                 ActorNodes = actorNodes.Count > 0 ? actorNodes : null,
                 MeshNodeByFrame = ActorLayer.BuildMeshRows(meshLeaves),
+                // Every row, not just the ones with geometry: a prototype's root is a holder, and resolving an
+                // actor to the row a user would have clicked is what keeps Tab on an actor and Tab on its frame
+                // sending the same object.
+                FrameNodeByFrame = ActorLayer.BuildFrameRows(frNode),
             };
         }
         catch (Exception ex)
@@ -1092,7 +1097,7 @@ internal sealed class DistrictStreamer
         // Actor glyphs (sounds, lights, triggers…): own toggle (ShowActors), same per-district keying. The mesh
         // map goes in with them, since hiding an actor has to find the geometry it places.
         Actors.Install(load.Sds, load.ActorMarkers, load.ActorPickables, load.ActorPlacements, load.ActorNodes,
-            load.MeshNodeByFrame);
+            load.MeshNodeByFrame, load.FrameNodeByFrame);
 
         if (load.Meshes.Count == 0) { _building = false; _host.RaiseSceneChanged(); }
     }

@@ -604,8 +604,17 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     // Nearest node under the cursor across BOTH the frame-mesh pick and the collision-hull pick (the latter only
     // when its overlay is shown — hidden collision isn't pickable). A collision hull wins a tie so, with the
     // overlay up, a hull coincident with its visual mesh is the one selected.
+    /// <summary>
+    /// The mesh row the last viewport click resolved THROUGH on its way to an actor, or null when the click
+    /// did not go that way. Clicking a placed mesh selects the actor that stands there — which loses WHICH of
+    /// the prototype's meshes was under the cursor. Keeping it is what lets Tab send the part that was clicked
+    /// instead of every part the actor spawns, exactly as clicking a plain mesh sends that mesh.
+    /// </summary>
+    internal SceneNode? ClickedPrototypeRow { get; private set; }
+
     private SceneNode? PickNode(Point pos)
     {
+        ClickedPrototypeRow = null;
         GpuMesh? gm = PickMesh(pos, out float meshT);
         (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
         SceneNode? col = Streamer.PickCollision(origin, dir, out float colT);
@@ -626,7 +635,11 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         // frame itself is still reachable through the FrameResource branch of the tree.
         if (gm?.Owner is SceneNode meshNode)
         {
-            if (meshNode.Source is FrameNodeAdapter fna && Streamer.Actors.ActorRowFor(fna.Frame) is { } owner) return owner;
+            if (meshNode.Source is FrameNodeAdapter fna && Streamer.Actors.ActorRowFor(fna.Frame) is { } owner)
+            {
+                ClickedPrototypeRow = meshNode;
+                return owner;
+            }
             return meshNode;
         }
         return null;

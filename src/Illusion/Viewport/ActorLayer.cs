@@ -36,6 +36,11 @@ internal sealed class ActorLayer
     private readonly Dictionary<SceneNode, (ActorPlacements Placements, Dictionary<ActorEntry, SceneNode> Nodes)> _scenes = new();
     private readonly Dictionary<SceneNode, Dictionary<FrameObjectBase, SceneNode>> _meshRows = new();
 
+    // Every frame's tree row, not just the ones carrying a mesh — how an actor is resolved to the row a user
+    // would have clicked in the tree. The mesh map cannot answer that: a prototype's root is a holder with no
+    // geometry of its own, so it is not in there.
+    private readonly Dictionary<SceneNode, Dictionary<FrameObjectBase, SceneNode>> _frameRows = new();
+
     // Districts whose glyphs and pick entries no longer match their actor list: an eye was toggled, an actor
     // moved, or one was deleted, copied or restored. Rebuilding is a full buffer upload, so it is coalesced to
     // once per frame rather than done per node of a cascade.
@@ -46,11 +51,13 @@ internal sealed class ActorLayer
     /// <summary>Installs a freshly loaded district's actors.</summary>
     public void Install(SceneNode sdsNode, ActorMarkerRenderData? markers,
         List<(SceneNode Node, Vector3 Position)>? pickables, ActorPlacements? placements,
-        Dictionary<ActorEntry, SceneNode>? nodes, Dictionary<FrameObjectBase, SceneNode>? meshRows)
+        Dictionary<ActorEntry, SceneNode>? nodes, Dictionary<FrameObjectBase, SceneNode>? meshRows,
+        Dictionary<FrameObjectBase, SceneNode>? frameRows = null)
     {
         if (markers != null) _host.Rnd!.SetActorDistrict(sdsNode, markers);
         if (pickables is { Count: > 0 }) _pickables[sdsNode] = pickables;
         if (meshRows != null) _meshRows[sdsNode] = meshRows;
+        if (frameRows != null) _frameRows[sdsNode] = frameRows;
         if (placements == null || nodes == null) return;
 
         _scenes[sdsNode] = (placements, nodes);
@@ -64,6 +71,7 @@ internal sealed class ActorLayer
         _dirty.Remove(sdsNode);
         _scenes.Remove(sdsNode);
         _meshRows.Remove(sdsNode);
+        _frameRows.Remove(sdsNode);
     }
 
     /// <summary>Drops every district's actors (scene reset).</summary>
@@ -73,6 +81,7 @@ internal sealed class ActorLayer
         _dirty.Clear();
         _scenes.Clear();
         _meshRows.Clear();
+        _frameRows.Clear();
     }
 
     /// <summary>Mesh leaves keyed by the frame they render, so an actor's subtree can find its geometry.</summary>
@@ -231,16 +240,45 @@ internal sealed class ActorLayer
     }
 
     /// <summary>
-    /// The mesh rows of the subtree an actor places, or nothing when it places none. What a walk DOWN from an
-    /// actor row needs: that geometry hangs under the FrameResource branch and never under the actor, so the
-    /// tree's own descendant walk finds nothing there.
+    /// The tree row of the prototype an actor places — the row a user would have clicked in the tree to reach
+    /// the same object. That geometry hangs under the FrameResource branch and never under the actor, so a
+    /// walk down from the actor row itself finds nothing.
+    ///
+    /// It resolves through the ROW index rather than by walking the frame graph, because those two do not agree.
+    /// <c>FrameObjectBase.Children</c> is the union of both parent slots, so a frame reachable from two parents
+    /// appears under both; the tree gives it to whichever parent claims it first. Walking the graph therefore
+    /// pulls in objects the tree hangs elsewhere — a proxy or LOD twin of the very object being edited among
+    /// them. Editing that twin changes nothing the game draws, which is exactly how "I edited it and the game
+    /// looks the same" happens.
     /// </summary>
-    public IReadOnlyList<SceneNode> PlacedMeshRows(SceneNode actorRow)
+    public SceneNode? PrototypeRow(SceneNode actorRow)
     {
-        if (actorRow.Source is not ActorNodeAdapter actor || actor.Target is not { } target) return [];
-        var rows = new List<SceneNode>();
-        Walk(target, rows.Add);
-        return rows;
+        if (actorRow.Source is not ActorNodeAdapter actor || actor.Target is not { } target) return null;
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _frameRows.Values)
+        {
+            if (map.TryGetValue(target, out SceneNode? row)) return row;
+        }
+        // A district loaded before the row index existed, or a target the tree never placed: fall back to the
+        // mesh rows of the frame graph rather than refusing the export outright.
+        foreach (Dictionary<FrameObjectBase, SceneNode> map in _meshRows.Values)
+        {
+            if (map.TryGetValue(target, out SceneNode? row)) return row;
+        }
+        return null;
+    }
+
+    /// <summary>Every frame's tree row under a FrameResource node, keyed by the frame it shows.</summary>
+    public static Dictionary<FrameObjectBase, SceneNode> BuildFrameRows(SceneNode frameResourceNode)
+    {
+        var map = new Dictionary<FrameObjectBase, SceneNode>();
+        IndexRows(frameResourceNode, map);
+        return map;
+    }
+
+    private static void IndexRows(SceneNode node, Dictionary<FrameObjectBase, SceneNode> map)
+    {
+        if (node.Source is FrameNodeAdapter fna) map[fna.Frame] = node;
+        foreach (SceneNode child in node.Children) IndexRows(child, map);
     }
 
     /// <summary>GPU meshes to outline for the selected actors — an actor with geometry has no mesh of its own,

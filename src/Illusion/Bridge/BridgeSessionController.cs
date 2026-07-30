@@ -193,14 +193,26 @@ internal sealed class BridgeSessionController : IDisposable
     /// none: the prototype it places hangs under the FrameResource branch, and a viewport click on that mesh
     /// resolves to the actor, not to the mesh. Without this, Tab on anything an actor spawns (which is most of
     /// what a district shows) refused with "nothing in the selection can be edited".
+    ///
+    /// An actor stands in for its prototype's ROW, and the export is then literally what selecting that row
+    /// would send — same node, same document, same leaves. Anything less exact is a second way of finding the
+    /// geometry, and a second way can find a different object.
     /// </summary>
     private IEnumerable<SceneNode> MeshLeavesOf(SceneNode selected)
     {
-        foreach (SceneNode leaf in selected.DescendantMeshLeaves()) yield return leaf;
-        if (selected.Source is not ActorNodeAdapter) yield break;
-        foreach (SceneNode row in _host.Streamer.Actors.PlacedMeshRows(selected))
-            foreach (SceneNode leaf in row.DescendantMeshLeaves())
-                yield return leaf;
+        if (selected.Source is not ActorNodeAdapter) return selected.DescendantMeshLeaves();
+
+        SceneNode? row = _host.Streamer.Actors.PrototypeRow(selected);
+        if (row == null) return [];
+
+        // A viewport click on a placed mesh selects the ACTOR, which loses which of the prototype's meshes was
+        // under the cursor. Send that one when it is known and still belongs to this prototype: a click on one
+        // part of a many-part object should open that part, the way clicking a plain mesh does. Selecting the
+        // actor from the tree carries no click, and then the whole prototype goes.
+        SceneNode? clicked = _host.ClickedPrototypeRow;
+        return clicked != null && _host.Tree.IsInScene(clicked) && SceneTree.IsSelfOrDescendantOf(clicked, row)
+            ? clicked.DescendantMeshLeaves()
+            : row.DescendantMeshLeaves();
     }
 
     /// <summary>Yields the collision placements of a selected node: the node itself when it is one,
