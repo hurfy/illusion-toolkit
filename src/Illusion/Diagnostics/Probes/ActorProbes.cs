@@ -338,8 +338,15 @@ internal static partial class ActorProbes
                     && adapter.ParentWorldTransform.IsIdentity
                     && Approx(adapter.WorldTransform.Translation, sample.Position),
                     $"{adapter.Name} @ {sample.Position}");
+                // What the panel may write is exactly what is fixed-size: the flags word, the row the actor
+                // points at, and that row's behavior fields. The names and hashes are length-coupled to the
+                // pack's offset tables, so they stay read-only until the structural writer lands.
+                string[] writable = [.. groups.SelectMany(g => g.Properties).Where(p => p.Set != null).Select(p => p.Id)];
+                string[] identity = ["Actor.Entity", "Actor.Type", "Actor.TypeId", "Actor.Definition",
+                    "Actor.Sector", "Actor.Name1", "Actor.Frame", "Actor.FrameHash", "Actor.Index"];
                 Check("the actor's identity fields stay read-only",
-                    groups.SelectMany(g => g.Properties).All(p => p.IsReadOnly && p.Set == null));
+                    identity.All(id => !writable.Contains(id)),
+                    $"{writable.Length} writable: {string.Join(", ", writable.Take(6))}");
             }
 
             // ── Moving an actor: the subtree follows, the pack survives a round trip, nothing else shifts ──

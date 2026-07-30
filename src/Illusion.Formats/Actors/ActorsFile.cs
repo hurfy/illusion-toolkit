@@ -115,17 +115,24 @@ public sealed class ActorsFile
 
     private IReadOnlyList<ActorPropertyRow> BuildPropertyRows()
     {
-        var sharers = new int[Binary.PropRows.Count];
-        foreach (ActorEntry actor in ActorList)
-        {
-            if (actor.InitPropId >= 0 && actor.InitPropId < sharers.Length) sharers[actor.InitPropId]++;
-        }
         var rows = new List<ActorPropertyRow>(Binary.PropRows.Count);
         for (int i = 0; i < Binary.PropRows.Count; i++)
         {
-            rows.Add(new ActorPropertyRow(Binary.PropRows[i], i, sharers[i]));
+            rows.Add(new ActorPropertyRow(this, Binary.PropRows[i], i));
         }
         return rows;
+    }
+
+    /// <summary>How many actors of this pack point at a given property row (recounted per call — reassigning an
+    /// actor's row changes it).</summary>
+    internal int CountSharersOf(int rowIndex)
+    {
+        int count = 0;
+        foreach (ActorEntry actor in ActorList)
+        {
+            if (actor.InitPropId == rowIndex) count++;
+        }
+        return count;
     }
 
     public static ActorsFile Load(string path)
@@ -389,12 +396,18 @@ public sealed class ActorEntry
     public Quaternion Rotation { get; set; }
     public Vector3 Scale { get; set; }
 
-    public required ushort Flags { get; init; }
-    /// <summary>Whether the game activates this actor as soon as the pack loads.</summary>
-    public bool ActivateOnInit => (Flags & 1) != 0;
+    public required ushort Flags { get; set; }
+
+    /// <summary>Whether the game activates this actor as soon as the pack loads (bit 0 of <see cref="Flags"/>).</summary>
+    public bool ActivateOnInit
+    {
+        get => (Flags & 1) != 0;
+        set => Flags = (ushort)(value ? Flags | 1 : Flags & ~1);
+    }
+
     /// <summary>Row in the entity-init property table, or -1 when the actor has no property blob.
-    /// Several actors may share one row.</summary>
-    public required short InitPropId { get; init; }
+    /// Several actors may share one row — see <see cref="ActorPropertyRow.SharerCount"/>.</summary>
+    public required short InitPropId { get; set; }
 
     /// <summary>The spawn transform in the same rotation·scale convention frame matrices use.</summary>
     public Matrix4x4 Transform => MatrixExtensions.SetMatrix(Rotation, Scale, Position);

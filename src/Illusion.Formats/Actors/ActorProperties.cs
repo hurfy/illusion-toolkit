@@ -110,13 +110,14 @@ public sealed class ActorPropertyField
 /// </summary>
 public sealed class ActorPropertyRow
 {
+    private readonly ActorsFile owner;
     private readonly Native.Model.ActorPropRowW wire;
 
-    internal ActorPropertyRow(Native.Model.ActorPropRowW wire, int index, int sharerCount)
+    internal ActorPropertyRow(ActorsFile owner, Native.Model.ActorPropRowW wire, int index)
     {
+        this.owner = owner;
         this.wire = wire;
         Index = index;
-        SharerCount = sharerCount;
         var fields = new List<ActorPropertyField>(wire.Fields.Count);
         foreach (Native.Model.ActorPropFieldW field in wire.Fields)
         {
@@ -140,7 +141,7 @@ public sealed class ActorPropertyRow
     public int PayloadSize => wire.Payload.Length;
 
     /// <summary>How many actors of this pack point at this row. Above one, an edit is an edit for all of them.</summary>
-    public int SharerCount { get; }
+    public int SharerCount => owner.CountSharersOf(Index);
 
     /// <summary>The named fields, empty when the core has no layout for this entity type (the row still
     /// round-trips — it just has nothing to show).</summary>

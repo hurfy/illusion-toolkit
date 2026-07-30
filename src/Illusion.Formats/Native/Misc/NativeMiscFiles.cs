@@ -72,8 +72,9 @@ internal static class NativeMiscFiles
 
     internal static byte[] ActorsToBytes(ActorsFile file)
     {
-        // The transform is the only editable part of an actor, and it writes back into the same wire
-        // items the read produced — the untouched fields (and every offset) then re-emit as they were.
+        // The editable parts of an actor are all fixed-size, and they write back into the same wire items the
+        // read produced — the untouched fields (and every offset) then re-emit as they were. The behavior
+        // properties need no step here: their field views write straight into the wire rows.
         foreach (ActorEntry actor in file.ActorList)
         {
             if (!actor.IsTyped || actor.Index < 0 || actor.Index >= file.Binary.Items.Count)
@@ -81,6 +82,8 @@ internal static class NativeMiscFiles
                 continue;
             }
             Model.ActorItemW item = file.Binary.Items[actor.Index];
+            item.Flags = actor.Flags;
+            item.InitPropId = actor.InitPropId;
             item.Position = actor.Position;
             // Back into the pack's inverted convention (see ReadActors) — an untouched actor still re-saves
             // byte for byte, since conjugating twice restores the bits.

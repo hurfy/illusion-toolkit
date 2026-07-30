@@ -1,6 +1,10 @@
 using System.IO;
 using System.Text;
 using Illusion.Assets;
+using Illusion.Assets.Adapters;
+using Illusion.Assets.Sds;
+using Illusion.Domain;
+using Illusion.Domain.Properties;
 using Illusion.Formats.Actors;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
@@ -140,6 +144,8 @@ internal static partial class ActorProbes
                 f => f.Vector = new System.Numerics.Vector3(3, 4, 5), sb, Check);
             CheckPropertyEdit(files, "a text buffer", EntityType.ScriptEntity, "ScriptName",
                 f => f.Text = "probe/edited.lua", sb, Check);
+
+            CheckPanel(sb, Check);
         }
         catch (Exception ex)
         {
@@ -149,6 +155,104 @@ internal static partial class ActorProbes
 
         sb.Insert(0, $"ACTOR PROPERTIES PROBE: {pass} passed, {fail} failed\n\n");
         File.WriteAllText(outFile, sb.ToString());
+    }
+
+    // What the property panel actually offers on an actor: the behavior group and the two fixed-size item fields
+    // the panel can now write. Driven through the descriptors, not around them — a field that is editable in
+    // theory and read-only in the panel is the failure this catches.
+    private static void CheckPanel(StringBuilder sb, Action<string, bool, string> check)
+    {
+        string sds = Path.Combine(MafiaEnvironment.CityFolder, "eastside.sds");
+        if (!File.Exists(sds)) { check("the panel offers the behavior fields", false, "no eastside.sds"); return; }
+
+        (_, _, ISceneDocument? loaded) = SdsMeshLoader.LoadHierarchy(new FileInfo(sds));
+        if (loaded is not SceneDocumentAdapter document)
+        {
+            check("the panel offers the behavior fields", false, "the district did not load");
+            return;
+        }
+
+        ActorNodeAdapter? withRow = null;
+        foreach (ActorEntry actor in document.Placements.All)
+        {
+            ActorsFile? pack = document.Placements.PackOf(actor);
+            if (pack?.PropertiesOf(actor) is not { Fields.Count: > 0 }) continue;
+            withRow = document.ActorNode(actor);
+            break;
+        }
+        if (withRow == null)
+        {
+            check("the panel offers the behavior fields", false, "no actor of eastside has a decoded row");
+            return;
+        }
+
+        IReadOnlyList<PropertyGroup> groups = withRow.GetPropertyGroups();
+        PropertyGroup? behaviour = groups.FirstOrDefault(g =>
+            g.Title.StartsWith("Behaviour", StringComparison.Ordinal) && !g.IsUnknown);
+        PropertyDescriptor? writable = behaviour?.Properties.FirstOrDefault(p => p.Set != null);
+        check("the panel offers the behavior fields", behaviour != null && writable != null,
+            $"{withRow.Name} ({withRow.TypeName}): {behaviour?.Title ?? "no group"}, "
+            + $"{behaviour?.Properties.Count ?? 0} field(s), "
+            + $"{groups.Count(g => g.IsUnknown)} collapsed group(s)");
+
+        if (writable != null)
+        {
+            object? before = writable.Get();
+            object? after = before switch
+            {
+                bool b => !b,
+                long n => n + 1,
+                float f => f + 1f,
+                ulong h => h + 1,
+                string s => s + "!",
+                System.Numerics.Vector3 v => v + System.Numerics.Vector3.One,
+                _ => null,
+            };
+            if (after != null)
+            {
+                writable.Set!(after);
+                bool stuck = Equals(writable.Get(), after);
+                writable.Set(before);
+                check("a behavior field written through the panel sticks", stuck && Equals(writable.Get(), before),
+                    $"{writable.Label}: {before} → {after}");
+            }
+        }
+
+        // "Active on load" — bit 0 of the flags word, and the first .act field outside the transform the panel
+        // may write at all.
+        PropertyDescriptor? active = groups.SelectMany(g => g.Properties)
+            .FirstOrDefault(p => p.Id == "Actor.ActivateOnInit");
+        bool wasActive = withRow.Actor.ActivateOnInit;
+        ushort flagsBefore = withRow.Actor.Flags;
+        active?.Set?.Invoke(!wasActive);
+        bool flipped = withRow.Actor.ActivateOnInit == !wasActive
+                       && (withRow.Actor.Flags & ~1) == (flagsBefore & ~1);
+        active?.Set?.Invoke(wasActive);
+        check("'Active on load' flips only its own bit", active?.Set != null && flipped
+              && withRow.Actor.Flags == flagsBefore, $"flags {flagsBefore} untouched apart from bit 0");
+
+        // The row an actor points at is editable, but not at a row describing another entity type — that is a
+        // blob the engine would read as the wrong struct.
+        PropertyDescriptor? initProp = groups.SelectMany(g => g.Properties)
+            .FirstOrDefault(p => p.Id == "Actor.InitProp");
+        ActorsFile ownPack = document.Placements.PackOf(withRow.Actor)!;
+        short rowBefore = withRow.Actor.InitPropId;
+        int foreign = -1;
+        for (int i = 0; i < ownPack.PropertyRows.Count; i++)
+        {
+            if (ownPack.PropertyRows[i].TypeId != (int)withRow.Actor.TypeId) { foreign = i; break; }
+        }
+        initProp?.Set?.Invoke((long)foreign);
+        bool refused = withRow.Actor.InitPropId == rowBefore;
+        initProp?.Set?.Invoke(-1L);
+        bool cleared = withRow.Actor.InitPropId == -1;
+        withRow.Actor.InitPropId = rowBefore;
+        check("the init-props row refuses a row of another entity type", initProp?.Set != null && refused && cleared,
+              $"row {rowBefore} kept when offered {foreign} (a {(foreign >= 0 ? ownPack.PropertyRows[foreign].Type.ToString() : "-")} row), "
+              + "and -1 accepted");
+
+        sb.AppendLine($"    panel: {withRow.Name} of eastside, groups: "
+                      + string.Join(", ", groups.Select(g => $"{g.Title}({g.Properties.Count})")));
     }
 
     // Finds the first pack holding a row of `type` with a field called `name`, changes it, and requires the file
