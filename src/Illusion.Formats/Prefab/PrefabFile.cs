@@ -17,6 +17,9 @@ public sealed class PrefabFile
     /// <summary>Number of prefab entries in the container.</summary>
     public int PrefabCount => Wire.Prefabs.Count;
 
+    /// <summary>The name hashes the container is keyed by — how an entity finds its init data.</summary>
+    public IReadOnlyList<ulong> Hashes => [.. Wire.Prefabs.Select(p => p.Hash)];
+
     public static PrefabFile Load(string path)
     {
         using var stream = new MemoryStream(File.ReadAllBytes(path), writable: false);

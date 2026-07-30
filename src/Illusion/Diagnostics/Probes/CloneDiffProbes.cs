@@ -82,7 +82,7 @@ internal static class CloneDiffProbes
                 Compare(sb, fr, order, source, copy);
             }
 
-            CompareActors(sb, extracted, order, placements);
+            CompareActors(sb, extracted, fr, order, placements, copies);
         }
         catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
         finally { File.WriteAllText(outFile, sb.ToString()); }
@@ -90,8 +90,8 @@ internal static class CloneDiffProbes
 
     // The other half of a copied actor: its record in the pack, and whether the edited pack on disk still
     // says the same thing when it is read and written again.
-    private static void CompareActors(StringBuilder sb, string extracted, List<FrameObjectBase> order,
-        Assets.Actors.ActorPlacements placements)
+    private static void CompareActors(StringBuilder sb, string extracted, FrameResource fr,
+        List<FrameObjectBase> order, Assets.Actors.ActorPlacements placements, List<FrameObjectBase> copiedFrames)
     {
         foreach (string path in Directory.GetFiles(extracted, "*.act", SearchOption.AllDirectories))
         {
@@ -101,6 +101,68 @@ internal static class CloneDiffProbes
             sb.AppendLine();
             sb.AppendLine($"── {Path.GetFileName(path)}: {pack.Actors.Count} actors, " +
                           $"{pack.SceneReferences.Count} references, re-writes identically: {fixpoint}");
+
+            // Every copied FRAME, and whether anything actually spawns it. Keyed off the frame rather than off
+            // an actor named "_copy": the actor gets renamed the moment a modder gives their new object a real
+            // name, and then a search by that convention finds nothing and reports nothing — which reads as
+            // "all fine" for exactly the case that is not.
+            foreach (FrameObjectBase frame in copiedFrames)
+            {
+                ulong hash = Formats.Hashing.Fnv64.Hash(frame.Name.String);
+                Formats.Actors.ActorEntry? owner = pack.Actors.FirstOrDefault(a => a.FrameHash == hash);
+                Formats.Actors.ActorSceneReference? reference =
+                    pack.SceneReferences.FirstOrDefault(r => r.FrameHash == hash);
+                sb.AppendLine($"   frame '{frame.Name}' (row {order.IndexOf(frame)}): "
+                    + $"actor {(owner == null ? "NONE — nothing spawns it" : $"'{owner.EntityName}' (row {owner.Index})")}"
+                    + $", reference {(reference == null ? "NONE — the engine cannot resolve the link" : $"→ row {reference.FrameIndex}")}");
+                if (reference != null && reference.FrameIndex != order.IndexOf(frame))
+                {
+                    sb.AppendLine($"    ! the reference points at row {reference.FrameIndex}, but the frame is at "
+                        + $"{order.IndexOf(frame)} — the engine would spawn the wrong object");
+                }
+
+                // The holder is only the handle. What the eye sees hangs UNDER it, and a holder that matches
+                // its original in every field still shows nothing if its children do not.
+                int cut = frame.Name.String.LastIndexOf("_copy", StringComparison.Ordinal);
+                if (cut < 0) continue;
+                string origin = frame.Name.String[..cut];
+                FrameObjectBase? source = order.FirstOrDefault(f => f.Name.String == origin);
+                if (source == null) continue;
+
+                Formats.Actors.ActorEntry? sourceActor =
+                    pack.Actors.FirstOrDefault(a => a.FrameHash == Formats.Hashing.Fnv64.Hash(origin));
+                if (sourceActor != null && owner != null)
+                {
+                    Line(sb, "  actor type", $"{sourceActor.Type} ({sourceActor.TypeId})",
+                        $"{owner.Type} ({owner.TypeId})");
+                    Line(sb, "  actor flags", sourceActor.Flags.ToString(), owner.Flags.ToString());
+                    Line(sb, "  active on load", sourceActor.ActivateOnInit.ToString(), owner.ActivateOnInit.ToString());
+                    Line(sb, "  init prop row", sourceActor.InitPropId.ToString(), owner.InitPropId.ToString());
+                    Line(sb, "  definition", sourceActor.LinkedDefinition, owner.LinkedDefinition);
+                    Line(sb, "  scene sector", sourceActor.SceneSector, owner.SceneSector);
+                    Line(sb, "  position", Fmt(sourceActor.Position), Fmt(owner.Position));
+                }
+
+                // Which SCENE lists the object. A district's frame resource is split into scenes, and a scene
+                // owns its objects through its own child list — not through either parent slot, which is why
+                // both read -1 here and say nothing. The actor names its sector, so an object no scene lists is
+                // one the engine never streams in, however complete the record pointing at it.
+                Line(sb, "  listed by scene", SceneOf(fr, source), SceneOf(fr, frame));
+
+                // The archive's OTHER hash-keyed tables. An actor record is only half an entity: the engine
+                // also looks the thing up in the prefab table (its init data) and in the item descriptions
+                // (its physics shape), both keyed by hash. A copy the frame side and the actor side agree
+                // about is still an entity nothing can build if those tables have never heard of it.
+                LookUpTables(sb, extracted, sourceActor, owner, source, frame);
+
+                sb.AppendLine($"    children of '{origin}' vs '{frame.Name}':");
+                for (int i = 0; i < Math.Max(source.Children.Count, frame.Children.Count); i++)
+                {
+                    FrameObjectBase? a = i < source.Children.Count ? source.Children[i] : null;
+                    FrameObjectBase? b = i < frame.Children.Count ? frame.Children[i] : null;
+                    sb.AppendLine($"      [{i}] {Child(order, a)}   |   {Child(order, b)}");
+                }
+            }
 
             foreach (Formats.Actors.ActorEntry copy in pack.Actors)
             {
@@ -150,6 +212,70 @@ internal static class CloneDiffProbes
         return reference.FrameIndex < order.Count
             ? $"{reference.FrameIndex} → '{order[(int)reference.FrameIndex].Name}'"
             : $"{reference.FrameIndex} → OUT OF RANGE ({order.Count} objects)";
+    }
+
+    // Which of the archive's hash-keyed tables know each of the two objects. Names are hashed the way every
+    // resolver in this engine hashes them, and each candidate is tried: an entity is found by its own name in
+    // one table and by its definition or its frame in another, and which is which is what this reveals.
+    private static void LookUpTables(StringBuilder sb, string extracted,
+        Formats.Actors.ActorEntry? sourceActor, Formats.Actors.ActorEntry? copyActor,
+        FrameObjectBase sourceFrame, FrameObjectBase copyFrame)
+    {
+        var prefabs = new HashSet<ulong>();
+        foreach (string path in Directory.GetFiles(extracted, "*.prf", SearchOption.AllDirectories))
+        {
+            try
+            {
+                foreach (ulong hash in Formats.Prefab.PrefabFile.Load(path).Hashes) prefabs.Add(hash);
+            }
+            catch (Exception) { /* a table we cannot read simply reports nothing */ }
+        }
+
+        var shapes = new HashSet<ulong>();
+        foreach (string path in Directory.GetFiles(extracted, "*.ids", SearchOption.AllDirectories))
+        {
+            try { shapes.Add(Formats.ItemDesc.ItemDescFile.Load(path).Hash); }
+            catch (Exception) { }
+        }
+
+        sb.AppendLine($"    hash-keyed tables: {prefabs.Count} prefab entr(ies), {shapes.Count} item description(s)");
+        foreach ((string what, string? a, string? b) in new[]
+                 {
+                     ("entity name", sourceActor?.EntityName, copyActor?.EntityName),
+                     ("definition", sourceActor?.LinkedDefinition, copyActor?.LinkedDefinition),
+                     ("frame name", sourceFrame.Name?.String, copyFrame.Name?.String),
+                 })
+        {
+            if (a == null || b == null) continue;
+            Line(sb, $"  {what} in prefab", Found(prefabs, a), Found(prefabs, b));
+            Line(sb, $"  {what} in itemdesc", Found(shapes, a), Found(shapes, b));
+        }
+    }
+
+    private static string Found(HashSet<ulong> table, string name) =>
+        table.Contains(Formats.Hashing.Fnv64.Hash(name)) ? $"yes ('{name}')" : $"no ('{name}')";
+
+    // The scene whose child list names this object, or a plain "none".
+    private static string SceneOf(FrameResource fr, FrameObjectBase frame)
+    {
+        if (fr.FrameScenes == null) return "(no scenes in this archive)";
+        foreach (FrameHeaderScene scene in fr.FrameScenes.Values)
+        {
+            if (scene.Children.Contains(frame)) return scene.Name?.String ?? "(unnamed)";
+        }
+        return "NONE";
+    }
+
+    // One child of a placed holder, in the terms that decide whether the game draws it: what it is, whether the
+    // spawn list names it, and which mesh it points at.
+    private static string Child(List<FrameObjectBase> order, FrameObjectBase? frame)
+    {
+        if (frame == null) return "(missing)";
+        string mesh = frame is FrameObjectSingleMesh m
+            ? $" mesh={m.MeshIndex} mat={m.MaterialIndex} lods={m.Geometry?.LOD?.Length ?? -1}"
+            : "";
+        return $"row {order.IndexOf(frame)} {frame.GetType().Name} '{frame.Name}' "
+            + $"table={frame.IsOnFrameTable} flags={frame.FrameNameTableFlags}{mesh}";
     }
 
     private static void Compare(StringBuilder sb, FrameResource fr, List<FrameObjectBase> order,
