@@ -277,6 +277,26 @@ internal static partial class ActorProbes
                                   + (names.Count > 12 ? ", …" : ""));
                 }
                 if (shown == 0) sb.AppendLine("    (no frame of this district matches)");
+
+                // The same buffer hash in another archive is another COPY of the same bytes — the pools are
+                // content-addressed, so identical geometry lands on identical names. Whether editing one copy
+                // shows up in the district that owns the other is the engine's business (it resolves buffers by
+                // that name), but the toolkit rewrites only the archive it was told to. Say which archives hold
+                // a copy, so "I edited it here and it changed over there" has somewhere to be looked up.
+                var wanted = new HashSet<ulong>(byVertexBuffer
+                    .Where(p => p.Value.Any(n => n.Contains(nameFilter, StringComparison.OrdinalIgnoreCase)))
+                    .Select(p => p.Key));
+                if (wanted.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"archives carrying a copy of {(wanted.Count == 1 ? "that buffer" : "those buffers")}:");
+                    foreach (string other in Directory.GetFiles(MafiaEnvironment.CityFolder, "*.sds")
+                                 .OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+                    {
+                        int hits = CountBuffers(other, wanted);
+                        if (hits > 0) sb.AppendLine($"    {Path.GetFileName(other)}: {hits} frame(s)");
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -287,6 +307,33 @@ internal static partial class ActorProbes
 
         sb.Insert(0, $"MESH SHARING PROBE: {pass} passed, {fail} failed\n\n");
         File.WriteAllText(outFile, sb.ToString());
+    }
+
+    // How many of an archive's mesh frames draw one of the given LOD0 vertex buffers. An archive that cannot be
+    // opened (or carries no frames) simply contributes none — this is a survey, not an assertion.
+    private static int CountBuffers(string sds, HashSet<ulong> hashes)
+    {
+        try
+        {
+            string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
+            Formats.Frames.FrameResource? fr = SdsMeshLoader.OpenScene(extracted).FrameResource;
+            if (fr?.FrameObjects == null) return 0;
+            int hits = 0;
+            foreach (object? value in fr.FrameObjects.Values)
+            {
+                if (value is FrameObjectSingleMesh mesh
+                    && mesh.Geometry is { LOD.Length: > 0 } geometry
+                    && hashes.Contains(geometry.LOD[0].VertexBufferRef.Hash))
+                {
+                    hits++;
+                }
+            }
+            return hits;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
     }
 
     /// <summary>
