@@ -521,6 +521,7 @@ internal sealed class BridgeSessionController : IDisposable
             int collisionSeen = 0, collisionMoved = 0;
             var notesEarly = new List<string>();
             var sharedMeshNotes = new List<string>();
+            var editedBuffers = new List<(string Name, ulong Hash, string Archive)>();
             var geometry = new List<GeometryEditController.GeometryItem>();
             var transforms = new List<GeometryEditController.TransformItem>();
             var reshapes = new List<ReshapedHull>();
@@ -605,12 +606,23 @@ internal sealed class BridgeSessionController : IDisposable
                         // geometry blocks heavily. Reshaping one is reshaping every frame on that block — the
                         // intended meaning (a poster is one poster; a taller pole is a new object, not a
                         // per-instance edit). The viewport now follows suit, so this only says how far it went.
-                        if (fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh single }
-                            && FindDocument(node) is SceneDocumentAdapter sceneDoc
-                            && sceneDoc.GeometrySharers(single).Count is > 0 and int sharers)
+                        if (fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh single })
                         {
-                            sharedMeshNotes.Add(
-                                $"{node.Name}: {sharers} other frame(s) draw this same mesh and changed with it");
+                            if (FindDocument(node) is SceneDocumentAdapter sceneDoc
+                                && sceneDoc.GeometrySharers(single).Count is > 0 and int sharers)
+                            {
+                                sharedMeshNotes.Add(
+                                    $"{node.Name}: {sharers} other frame(s) draw this same mesh and changed with it");
+                            }
+                            // The same bytes live under the same name in every archive that shows this mesh, and
+                            // only this one is being rewritten — surveyed after the ack, since it walks the
+                            // install.
+                            if (single.Geometry is { LOD.Length: > 0 } block
+                                && FindDocument(node) is { } owner)
+                            {
+                                editedBuffers.Add((node.Name, block.LOD[0].VertexBufferRef.Hash,
+                                    owner.SourceArchive.Name));
+                            }
                         }
                     }
 
@@ -784,6 +796,8 @@ internal sealed class BridgeSessionController : IDisposable
                     + (touchedTotal > 0 ? $", {touchedTotal} vertices changed" : "")
                     + ".\n" + string.Join("\n", notes), false);
             }
+
+            WarnAboutOtherArchives(editedBuffers);
         }
         catch (Exception ex)
         {
@@ -802,6 +816,33 @@ internal sealed class BridgeSessionController : IDisposable
     {
         int bar = id.IndexOf('|');
         return bar >= 0 ? id[(bar + 1)..] : id;
+    }
+
+    /// <summary>
+    /// Says when an edited mesh also exists, byte for byte and under the same name, in archives this push did
+    /// not touch — so the modder knows the result is not yet consistent across the city.
+    /// <para>
+    /// Off the push's own thread and after the ack: the survey walks every unpacked district, and the first one
+    /// pays for parsing them. Blender is not kept waiting for a warning.
+    /// </para>
+    /// </summary>
+    private void WarnAboutOtherArchives(List<(string Name, ulong Hash, string Archive)> edited)
+    {
+        if (edited.Count == 0) return;
+        Task.Run(() =>
+        {
+            var lines = new List<string>();
+            foreach ((string name, ulong hash, string archive) in edited)
+            {
+                IReadOnlyList<string> others = SharedBufferIndex.OtherArchivesWith(hash, archive);
+                if (others.Count == 0) continue;
+                lines.Add($"{name}: the same mesh is in {others.Count} other archive(s) under the same name "
+                    + $"({string.Join(", ", others.Take(4))}{(others.Count > 4 ? ", …" : "")}). Only {archive} was "
+                    + "changed, so the game may draw either shape depending on what streamed first — repeat the "
+                    + "edit there to make it consistent.");
+            }
+            if (lines.Count > 0) Notice?.Invoke(string.Join("\n", lines), false);
+        });
     }
 
     // Element-wise matrix comparison with a tolerance covering the f32 round-trip through Blender.
