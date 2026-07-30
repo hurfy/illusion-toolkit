@@ -338,15 +338,18 @@ internal static partial class ActorProbes
                     && adapter.ParentWorldTransform.IsIdentity
                     && Approx(adapter.WorldTransform.Translation, sample.Position),
                     $"{adapter.Name} @ {sample.Position}");
-                // What the panel may write is exactly what is fixed-size: the flags word, the row the actor
-                // points at, and that row's behavior fields. The names and hashes are length-coupled to the
-                // pack's offset tables, so they stay read-only until the structural writer lands.
+                // What the panel may write: the flags word, the row the actor points at, that row's behavior
+                // fields — and, since the structural writer landed, the entity name (the pack rebuilds its
+                // offset tables, so a name may change length). What stays read-only is what the panel has no
+                // safe story for yet: the type, the definition and sector strings, and the frame link, whose
+                // change has to move the scene reference AND re-resolve the placements.
                 string[] writable = [.. groups.SelectMany(g => g.Properties).Where(p => p.Set != null).Select(p => p.Id)];
-                string[] identity = ["Actor.Entity", "Actor.Type", "Actor.TypeId", "Actor.Definition",
+                string[] frozen = ["Actor.Type", "Actor.TypeId", "Actor.Definition",
                     "Actor.Sector", "Actor.Name1", "Actor.Frame", "Actor.FrameHash", "Actor.Index"];
-                Check("the actor's identity fields stay read-only",
-                    identity.All(id => !writable.Contains(id)),
+                Check("the fields with no safe edit story stay read-only",
+                    frozen.All(id => !writable.Contains(id)),
                     $"{writable.Length} writable: {string.Join(", ", writable.Take(6))}");
+                Check("the entity name is editable", writable.Contains("Actor.Entity"));
             }
 
             // ── Moving an actor: the subtree follows, the pack survives a round trip, nothing else shifts ──

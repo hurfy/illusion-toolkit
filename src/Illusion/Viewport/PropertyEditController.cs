@@ -46,6 +46,11 @@ internal sealed class PropertyEditController
             node.Name = hn.Name;
         if (descriptor.Id is "Base.Name" or "Base.IsOnFrameTable")
             _host.Persistence.MarkNameTableDirty(node);
+        // An actor's row is titled by its entity name, and a rename the pack REFUSED (empty, or already taken
+        // by another actor) must not retitle the row either — so the row takes whatever the actor ended up
+        // with, not what was typed.
+        if (descriptor.Id == "Actor.Entity" && descriptor.Get() is string entity && entity.Length > 0)
+            node.Name = entity;
     }
 
     // Prunable by the streamer (INodeEdit) like a transform edit, so unloading a district drops its edits.

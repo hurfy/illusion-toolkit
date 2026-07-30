@@ -251,6 +251,28 @@ internal static partial class ActorProbes
               $"row {rowBefore} kept when offered {foreign} (a {(foreign >= 0 ? ownPack.PropertyRows[foreign].Type.ToString() : "-")} row), "
               + "and -1 accepted");
 
+        // Renaming from the panel. The name is an identity — the engine keys the entity by its hash — so the
+        // descriptor has to re-derive that hash, and it has to refuse a name another actor of the pack already
+        // uses rather than let the two collide.
+        PropertyDescriptor? entityName = groups.SelectMany(g => g.Properties)
+            .FirstOrDefault(p => p.Id == "Actor.Entity");
+        ActorsFile namePack = document.Placements.PackOf(withRow.Actor)!;
+        string nameBefore = withRow.Actor.EntityName;
+        ulong hashBefore = withRow.Actor.EntityHash;
+        entityName?.Set?.Invoke("probe_renamed_actor");
+        bool renamed = withRow.Actor.EntityName == "probe_renamed_actor"
+                       && withRow.Actor.EntityHash == Formats.Hashing.Fnv64.Hash("probe_renamed_actor");
+
+        string taken = namePack.Actors.First(a => !ReferenceEquals(a, withRow.Actor)).EntityName;
+        entityName?.Set?.Invoke(taken);
+        bool nameRefused = withRow.Actor.EntityName == "probe_renamed_actor";
+
+        entityName?.Set?.Invoke(nameBefore);
+        check("the panel renames an actor and re-derives its hash",
+            entityName?.Set != null && renamed && nameRefused
+            && withRow.Actor.EntityName == nameBefore && withRow.Actor.EntityHash == hashBefore,
+            $"'{nameBefore}' → 'probe_renamed_actor' → refused '{taken}' → back");
+
         sb.AppendLine($"    panel: {withRow.Name} of eastside, groups: "
                       + string.Join(", ", groups.Select(g => $"{g.Title}({g.Properties.Count})")));
     }

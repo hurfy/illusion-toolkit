@@ -82,6 +82,18 @@ internal static class NativeMiscFiles
                 continue;
             }
             Model.ActorItemW item = file.Binary.Items[actor.Index];
+            // The names may have changed length. That used to be forbidden — the pack addresses its items
+            // through an offset table — but the writer rebuilds that table and both region boundaries from
+            // what the entries weigh, so a longer name is simply a longer entry.
+            item.TypeId = actor.TypeId;
+            item.TypeName = actor.TypeName;
+            item.EntityName = actor.EntityName;
+            item.Name1 = actor.Name1;
+            item.SceneSector = actor.SceneSector;
+            item.LinkedDefinition = actor.LinkedDefinition;
+            item.LinkedFrame = actor.LinkedFrame;
+            item.EntityHash = actor.EntityHash;
+            item.FrameHash = actor.FrameHash;
             item.Flags = actor.Flags;
             item.InitPropId = actor.InitPropId;
             item.Position = actor.Position;

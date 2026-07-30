@@ -31,7 +31,7 @@ internal static class ActorPropertyCatalog
                 IsTypeSpecific = true,
                 Properties = new[]
                 {
-                    ReadOnlyText("Actor.Entity", "Entity name", () => actor.EntityName),
+                    EntityNameDescriptor(actor, pack),
                     ReadOnlyText("Actor.Type", "Entity type", () => node.TypeName),
                     IntDesc("Actor.TypeId", "Type id", () => (int)actor.TypeId,
                         tip: "The engine's E_EntityType value. A compressed pack stores this number; an "
@@ -242,6 +242,29 @@ internal static class ActorPropertyCatalog
                 if (index >= rows.Count) return;
                 if (rows[(int)index].TypeId != (int)actor.TypeId) return;
                 actor.InitPropId = (short)index;
+            },
+        };
+    }
+
+    // The actor's own name. Editable since the pack's writer rebuilds its offset tables from what the entries
+    // weigh — a longer name is simply a longer entry. It is an identity, not a label: the engine keys the
+    // entity by the hash of this string, so a script naming the old one stops finding it. A name another actor
+    // of the pack already uses is refused rather than silently accepted, since the two would then collide.
+    private static PropertyDescriptor EntityNameDescriptor(ActorEntry actor, ActorsFile? pack)
+    {
+        string tip = "What the engine keys this entity by — through the hash of the name, which is re-derived "
+                   + "when you change it. Scripts and other actors naming the old one stop finding it.";
+        if (pack == null) return ReadOnlyText("Actor.Entity", "Entity name", () => actor.EntityName);
+        return new PropertyDescriptor
+        {
+            Id = "Actor.Entity",
+            Label = "Entity name",
+            Kind = PropertyKind.Text,
+            Tooltip = tip,
+            Get = () => actor.EntityName,
+            Set = v =>
+            {
+                if (v is string name) pack.Rename(actor, name);
             },
         };
     }

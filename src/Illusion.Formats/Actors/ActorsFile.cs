@@ -310,6 +310,60 @@ public sealed class ActorsFile
     /// under a different name, leaving the tree pointing at one the pack never got.</summary>
     public ActorRemoval RemoveCopy(ActorEntry copy) => Remove(copy);
 
+    /// <summary>
+    /// Renames an actor. The name is what the engine keys the entity by — through its hash, which is re-derived
+    /// — so this is a change of identity, not a label: a script naming the old one stops finding it.
+    /// </summary>
+    /// <returns>False when the name is empty or already taken by another actor of this pack.</returns>
+    public bool Rename(ActorEntry actor, string name)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        if (string.IsNullOrEmpty(name) || !ActorList.Contains(actor)) return false;
+        if (ActorList.Any(a => !ReferenceEquals(a, actor) && a.EntityName == name)) return false;
+        actor.EntityName = name;
+        return true;
+    }
+
+    /// <summary>
+    /// Points an actor at a different frame object, by name.
+    ///
+    /// The link the engine follows is the HASH, and the scene-reference table is what turns that hash into a
+    /// position in the frame resource. So the reference has to move with the actor: the old one is dropped when
+    /// nothing else uses it, and a new one is minted unless the target already has one. The frame INDEX is left
+    /// for <c>ActorPlacements.RefreshFrameIndices</c>, which recomputes every one of them at save time from the
+    /// object order — which is the only moment it can be right.
+    /// </summary>
+    /// <param name="frameName">The frame's own name, or empty to unlink the actor entirely.</param>
+    /// <returns>False when the actor does not belong to this pack.</returns>
+    public bool Relink(ActorEntry actor, string frameName)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        if (!ActorList.Contains(actor)) return false;
+
+        ulong oldHash = actor.FrameHash;
+        actor.LinkedFrame = frameName ?? "";
+
+        if (oldHash != actor.FrameHash && oldHash != 0 && !ActorList.Any(a => a.FrameHash == oldHash))
+        {
+            int stale = SceneReferences.FindIndex(r => r.FrameHash == oldHash);
+            if (stale >= 0) SceneReferences.RemoveAt(stale);
+        }
+        if (actor.FrameHash != 0 && !SceneReferences.Any(r => r.FrameHash == actor.FrameHash))
+        {
+            SceneReferences.Add(new ActorSceneReference
+            {
+                FrameHash = actor.FrameHash,
+                Unk0 = 0,
+                // The shipped packs give every reference of an archive the same name string, so it names
+                // nothing and only the hash resolves — reuse whatever the pack already points at.
+                NamePos = SceneReferences.Count > 0 ? SceneReferences[0].NamePos : (ushort)0,
+                Name = SceneReferences.Count > 0 ? SceneReferences[0].Name : string.Empty,
+                FrameIndex = 0,
+            });
+        }
+        return true;
+    }
+
     // "name" → "name_copy", "name_copy2", … — unique within the pack, which is what the engine keys entities by.
     private string UniqueName(string baseName)
     {
@@ -359,12 +413,18 @@ public sealed class ActorsFile
 
 /// <summary>
 /// One placed actor: what it is, the names that tie it to a scene object and to its definition, and the
-/// transform the game spawns it with. The transform is the editable part — its wire size is fixed, so a
-/// change cannot shift the pack's offset tables. Everything else is read-only: the strings are
-/// length-coupled to those offsets, and moving them is a separate slice of work.
+/// transform the game spawns it with.
+///
+/// The names are editable. They were not always: the pack addresses its items through an offset table, so a
+/// name that changes length moves everything after it — but the writer rebuilds that table and both region
+/// boundaries from what the entries actually weigh, so a longer name is just a longer entry. What a rename
+/// must not do is leave the HASH behind, since that is what the engine resolves by; the setters re-derive it.
 /// </summary>
 public sealed class ActorEntry
 {
+    private string entityName = "";
+    private string linkedFrame = "";
+
     /// <summary>Row in the pack's item table.</summary>
     public int Index { get; internal set; }
 
@@ -372,25 +432,49 @@ public sealed class ActorEntry
     /// and its fields below are unset. Such an actor cannot be placed or edited.</summary>
     public required bool IsTyped { get; init; }
 
-    public required uint TypeId { get; init; }
+    public required uint TypeId { get; set; }
     /// <summary><see cref="TypeId"/> as the known entity enum (an unmapped id keeps its numeric value).</summary>
     public EntityType Type => (EntityType)TypeId;
     /// <summary>The engine class name ("C_Door"). Empty in a compressed pack, which stores only the id.</summary>
-    public required string TypeName { get; init; }
+    public required string TypeName { get; set; }
 
-    public required string EntityName { get; init; }
-    public required string Name1 { get; init; }
-    public required string SceneSector { get; init; }
+    /// <summary>The actor's own name — what the engine keys the entity by, through <see cref="EntityHash"/>.
+    /// Setting it re-derives that hash; a name left out of step with its hash resolves to nothing.</summary>
+    public required string EntityName
+    {
+        get => entityName;
+        set
+        {
+            entityName = value ?? "";
+            EntityHash = Hashing.Fnv64.Hash(entityName);
+        }
+    }
+
+    public required string Name1 { get; set; }
+    public required string SceneSector { get; set; }
     /// <summary>The definition (prototype) this actor was instanced from.</summary>
-    public required string LinkedDefinition { get; init; }
-    /// <summary>Name of the frame object this actor places — resolve it through <see cref="ActorsFile.SceneReferences"/>
-    /// by <see cref="FrameHash"/>, not by name: many actors name a frame that lives in another archive.</summary>
-    public required string LinkedFrame { get; init; }
+    public required string LinkedDefinition { get; set; }
 
-    public required ulong EntityHash { get; init; }
+    /// <summary>Name of the frame object this actor places — resolve it through <see cref="ActorsFile.SceneReferences"/>
+    /// by <see cref="FrameHash"/>, not by name: many actors name a frame that lives in another archive.
+    /// Setting it re-derives that hash, which is the link the engine actually follows.</summary>
+    public required string LinkedFrame
+    {
+        get => linkedFrame;
+        set
+        {
+            linkedFrame = value ?? "";
+            FrameHash = Hashing.Fnv64.Hash(linkedFrame);
+        }
+    }
+
+    /// <summary>Hash of <see cref="EntityName"/>. Assigned from the file on load and re-derived on rename —
+    /// a handful of shipped records carry one that does not match their name, and reading must not "fix" that.</summary>
+    public required ulong EntityHash { get; set; }
+
     /// <summary>Hash of <see cref="LinkedFrame"/> — the key a scene reference is found by. Zero in an
     /// uncompressed pack, which stores no hashes.</summary>
-    public required ulong FrameHash { get; init; }
+    public required ulong FrameHash { get; set; }
 
     public Vector3 Position { get; set; }
     public Quaternion Rotation { get; set; }

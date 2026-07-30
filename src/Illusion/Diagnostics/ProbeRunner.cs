@@ -204,6 +204,11 @@ internal static class ProbeRunner
             // The entity-data storages (.eds): the same behavior catalog applied to what no district places.
             // Every table splits out of its blob and decodes, and editing the player's own table lands in
             // exactly that field. Output: %TEMP%\illusion_eds_tables.txt
+            // The structural writer: item names that change LENGTH move every entry after them and the
+            // cutscene lookup's own offsets with them. Output: %TEMP%\illusion_act_relayout.txt
+            case "--probe-act-relayout":
+                ActorProbes.RunActRelayoutProbe();
+                return true;
             case "--probe-eds-tables":
                 ActorProbes.RunEdsTablesProbe();
                 return true;
