@@ -10,6 +10,7 @@ using Illusion.Bridge.Payload;
 using Illusion.Bridge.Protocol;
 using Illusion.Domain;
 using Illusion.Formats.Collisions;
+using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Scene;
 using Illusion.Settings;
 using Illusion.Viewport;
@@ -519,6 +520,7 @@ internal sealed class BridgeSessionController : IDisposable
             int touchedTotal = 0;
             int collisionSeen = 0, collisionMoved = 0;
             var notesEarly = new List<string>();
+            var sharedMeshNotes = new List<string>();
             var geometry = new List<GeometryEditController.GeometryItem>();
             var transforms = new List<GeometryEditController.TransformItem>();
             var reshapes = new List<ReshapedHull>();
@@ -598,6 +600,19 @@ internal sealed class BridgeSessionController : IDisposable
                     {
                         geometry.Add(new GeometryEditController.GeometryItem(node, result));
                         touchedTotal += result.TouchedVertices;
+
+                        // A frame references its mesh rather than owning it, and the shipped districts reuse
+                        // geometry blocks heavily. Reshaping one is reshaping every frame on that block — which
+                        // is the intended meaning (a poster is one poster; a taller pole is a new object, not a
+                        // per-instance edit) but is invisible in the viewport, since only the edited node's GPU
+                        // mesh is swapped. Say it out loud instead.
+                        if (fn is FrameNodeAdapter { Frame: FrameObjectSingleMesh single }
+                            && FindDocument(node) is SceneDocumentAdapter sceneDoc
+                            && sceneDoc.CountGeometrySharers(single) is > 0 and int sharers)
+                        {
+                            sharedMeshNotes.Add($"{node.Name}: {sharers} other frame(s) draw this same mesh — "
+                                + "they changed with it (the viewport only redraws the one that was edited)");
+                        }
                     }
 
                     // Object moved in Blender's Object Mode → re-localize against the CURRENT
@@ -755,6 +770,7 @@ internal sealed class BridgeSessionController : IDisposable
             // placements — and a reshape only ever moves THIS placement onto the new hull. Saying so is the
             // difference between "the other forty-nine did not take" and "the other forty-nine are untouched".
             foreach (string shared in sharedHullNotes) notes.Add(shared);
+            foreach (string shared in sharedMeshNotes) notes.Add(shared);
             if (createdApplied > 0) notes.Add($"{createdApplied} new object(s) created (anchored to the "
                 + "district's main scene, on the frame name table)");
             if (deletedApplied > 0) notes.Add($"{deletedApplied} object(s) deleted (undo restores them)");

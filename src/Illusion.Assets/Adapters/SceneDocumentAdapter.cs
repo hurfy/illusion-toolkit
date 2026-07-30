@@ -179,6 +179,30 @@ public sealed class SceneDocumentAdapter : ISceneDocument
         catch (Exception) { /* tracing must never break an edit */ }
     }
 
+    /// <summary>
+    /// How many OTHER frame objects of this resource draw the same geometry block.
+    ///
+    /// A frame references its mesh, it does not own it, and the shipped districts reuse blocks heavily — 62% of
+    /// italy's mesh frames sit on a block another frame also uses, and its three wanted posters share one
+    /// between them. An edit to such a mesh is an edit to all of them: there is one buffer in the file, and the
+    /// viewport only looks otherwise because it swaps the edited node's GPU mesh alone.
+    /// </summary>
+    public int CountGeometrySharers(FrameObjectSingleMesh mesh)
+    {
+        if (mesh.Geometry is not { } geometry) return 0;
+        int sharers = 0;
+        foreach (object? value in _frame.FrameObjects.Values)
+        {
+            if (value is FrameObjectSingleMesh other
+                && !ReferenceEquals(other, mesh)
+                && ReferenceEquals(other.Geometry, geometry))
+            {
+                sharers++;
+            }
+        }
+        return sharers;
+    }
+
     /// <summary>The canonical <see cref="IFrameNode"/> adapter for a frame object of this document.</summary>
     public FrameNodeAdapter Node(FrameObjectBase frame)
     {

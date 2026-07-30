@@ -237,10 +237,18 @@ internal static partial class ActorProbes
 
             sb.AppendLine($"MESH SHARING PROBE — district={district}\n");
             Check("the district has meshes", meshes > 0, $"{meshes} single-mesh frames");
-            Check("editing a mesh edits exactly one frame", framesOnSharedBuffer == 0,
-                $"{framesOnSharedBuffer}/{meshes} frames sit on a LOD0 vertex buffer another frame also uses "
-                + $"({sharedBuffers} such buffers); {framesOnSharedBlock} share a whole geometry block "
-                + $"({sharedBlocks} such blocks)");
+
+            // Sharing is how the game is BUILT, not a defect — so this reports rather than asserts. What is
+            // checked is that the census is sound: every mesh lands in exactly one group of each kind, and a
+            // group never has fewer members than one.
+            Check("the census accounts for every mesh",
+                byGeometry.Values.Sum(g => g.Count) == meshes
+                && byVertexBuffer.Values.Sum(g => g.Count) == meshes
+                && byGeometry.Count <= meshes && byVertexBuffer.Count <= meshes,
+                $"{byGeometry.Count} geometry blocks and {byVertexBuffer.Count} LOD0 vertex buffers for {meshes} meshes");
+            sb.AppendLine($"       SHARED: {framesOnSharedBuffer}/{meshes} frames sit on a LOD0 vertex buffer "
+                + $"another frame also uses ({sharedBuffers} such buffers); {framesOnSharedBlock} share a whole "
+                + $"geometry block ({sharedBlocks} such blocks). Editing any of those edits all of them.");
 
             sb.AppendLine();
             sb.AppendLine($"geometry blocks: {byGeometry.Count} for {meshes} meshes");
