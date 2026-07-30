@@ -6122,12 +6122,60 @@ internal sealed class AnimTexFileW
     }
 }
 
+internal sealed class EdsTableW
+{
+    public List<ActorPropFieldW> Fields { get; set; } = [];
+    public byte[] Payload { get; set; } = [];
+
+    internal static EdsTableW ReadFrom(BinaryReader reader)
+    {
+        var value = new EdsTableW();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Fields.Add(ActorPropFieldW.ReadFrom(reader));
+            }
+        }
+        value.Payload = Wire.ReadBytes(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteCount(writer, Fields.Count);
+        foreach (ActorPropFieldW item in Fields)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteBytes(writer, Payload);
+    }
+
+    internal static void Diff(string path, EdsTableW a, EdsTableW b, List<string> diffs)
+    {
+        if (a.Fields.Count != b.Fields.Count)
+        {
+            diffs.Add($"{path}.Fields: count {a.Fields.Count} vs {b.Fields.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Fields.Count; i++)
+            {
+                ActorPropFieldW.Diff($"{path}.Fields[{i}]", a.Fields[i], b.Fields[i], diffs);
+            }
+        }
+        Wire.DiffBytes($"{path}.Payload", a.Payload, b.Payload, diffs);
+    }
+}
+
 internal sealed class EdsFileW
 {
     public int EntityType { get; set; }
     public ulong Hash { get; set; }
     public int TableSize { get; set; }
     public List<ulong> TableHashes { get; set; } = [];
+    public byte TablesTyped { get; set; }
+    public List<EdsTableW> Tables { get; set; } = [];
     public byte[] TablesBlob { get; set; } = [];
 
     internal static EdsFileW ReadFrom(BinaryReader reader)
@@ -6143,6 +6191,14 @@ internal sealed class EdsFileW
                 value.TableHashes.Add(reader.ReadUInt64());
             }
         }
+        value.TablesTyped = reader.ReadByte();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Tables.Add(EdsTableW.ReadFrom(reader));
+            }
+        }
         value.TablesBlob = Wire.ReadBytes(reader);
         return value;
     }
@@ -6156,6 +6212,12 @@ internal sealed class EdsFileW
         foreach (ulong item in TableHashes)
         {
             writer.Write(item);
+        }
+        writer.Write(TablesTyped);
+        Wire.WriteCount(writer, Tables.Count);
+        foreach (EdsTableW item in Tables)
+        {
+            item.WriteTo(writer);
         }
         Wire.WriteBytes(writer, TablesBlob);
     }
@@ -6174,6 +6236,18 @@ internal sealed class EdsFileW
             for (int i = 0; i < a.TableHashes.Count; i++)
             {
                 if (a.TableHashes[i] != b.TableHashes[i]) diffs.Add($"{path}.TableHashes[{i}]: {a.TableHashes[i]} vs {b.TableHashes[i]}");
+            }
+        }
+        if (a.TablesTyped != b.TablesTyped) diffs.Add($"{path}.TablesTyped: {a.TablesTyped} vs {b.TablesTyped}");
+        if (a.Tables.Count != b.Tables.Count)
+        {
+            diffs.Add($"{path}.Tables: count {a.Tables.Count} vs {b.Tables.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Tables.Count; i++)
+            {
+                EdsTableW.Diff($"{path}.Tables[{i}]", a.Tables[i], b.Tables[i], diffs);
             }
         }
         Wire.DiffBytes($"{path}.TablesBlob", a.TablesBlob, b.TablesBlob, diffs);

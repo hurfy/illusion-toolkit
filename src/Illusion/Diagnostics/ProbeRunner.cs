@@ -201,6 +201,12 @@ internal static class ProbeRunner
             case "--probe-actor-props":
                 ActorProbes.RunActorPropertiesProbe();
                 return true;
+            // The entity-data storages (.eds): the same behavior catalog applied to what no district places.
+            // Every table splits out of its blob and decodes, and editing the player's own table lands in
+            // exactly that field. Output: %TEMP%\illusion_eds_tables.txt
+            case "--probe-eds-tables":
+                ActorProbes.RunEdsTablesProbe();
+                return true;
             // Which way an actor turns the thing it places, measured against the district's .col — the game
             // collides with the hull, so its placement IS the object's real orientation, independent of the
             // actor pack. Optional second argument filters actors by name. Output: %TEMP%\illusion_actor_orient.txt

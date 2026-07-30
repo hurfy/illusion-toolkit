@@ -11,7 +11,7 @@ internal static class NativeFormats
 {
     /// <summary>The boundary revision this facade was written against; must equal the DLL's
     /// <c>mf_abi_rev()</c> (mirrors <c>MF_ABI_REV</c>).</summary>
-    internal const uint ExpectedAbiRev = 31;
+    internal const uint ExpectedAbiRev = 32;
 
     /// <summary>The native core version this tree builds (mirrors the CMake project version).</summary>
     internal const string ExpectedVersion = "0.1.0";
