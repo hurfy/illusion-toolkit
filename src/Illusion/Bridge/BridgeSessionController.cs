@@ -140,7 +140,7 @@ internal sealed class BridgeSessionController : IDisposable
         var seen = new HashSet<SceneNode>();
         foreach (SceneNode selected in _host.SelectedNodes)
         {
-            foreach (SceneNode leaf in selected.DescendantMeshLeaves())
+            foreach (SceneNode leaf in MeshLeavesOf(selected))
             {
                 if (!seen.Add(leaf)) continue;
                 if (leaf.Mesh is { Instanced: true }) { skips.Add(leaf.Name + " — instanced (city_crash)"); continue; }
@@ -187,6 +187,21 @@ internal sealed class BridgeSessionController : IDisposable
     }
 
     private bool _sweptExchange;
+
+    /// <summary>
+    /// The mesh rows a selected node contributes. Normally that is its own descendants — but an ACTOR row has
+    /// none: the prototype it places hangs under the FrameResource branch, and a viewport click on that mesh
+    /// resolves to the actor, not to the mesh. Without this, Tab on anything an actor spawns (which is most of
+    /// what a district shows) refused with "nothing in the selection can be edited".
+    /// </summary>
+    private IEnumerable<SceneNode> MeshLeavesOf(SceneNode selected)
+    {
+        foreach (SceneNode leaf in selected.DescendantMeshLeaves()) yield return leaf;
+        if (selected.Source is not ActorNodeAdapter) yield break;
+        foreach (SceneNode row in _host.Streamer.Actors.PlacedMeshRows(selected))
+            foreach (SceneNode leaf in row.DescendantMeshLeaves())
+                yield return leaf;
+    }
 
     /// <summary>Yields the collision placements of a selected node: the node itself when it is one,
     /// otherwise every placement beneath it (so selecting the "Collisions" layer exports its hulls).</summary>

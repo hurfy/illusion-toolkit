@@ -74,7 +74,13 @@ public static class BridgeMeshExporter
         {
             Id = MakeId(frame, document),
             Name = frame.Name?.ToString() ?? "mesh",
-            World = frame.WorldTransform,
+            // The NODE's world, not the frame's: an actor-placed object is a prototype parked at the origin,
+            // and its spawn matrix lives in the .act. Sending the frame's own world would drop it at (0,0,0)
+            // in Blender while the viewport shows it in the street — and, worse, the push-back compares the
+            // returned matrix against this same placement-aware world, so every untouched prototype would
+            // read as moved and have the inverse placement baked into its local transform. The two are the
+            // same matrix for every frame no actor places.
+            World = adapter.WorldTransform,
             Local = frame.LocalTransform,
             Positions = welded.Positions,
             LoopVertexIndices = welded.LoopVertexIndices,

@@ -230,6 +230,19 @@ internal sealed class ActorLayer
         });
     }
 
+    /// <summary>
+    /// The mesh rows of the subtree an actor places, or nothing when it places none. What a walk DOWN from an
+    /// actor row needs: that geometry hangs under the FrameResource branch and never under the actor, so the
+    /// tree's own descendant walk finds nothing there.
+    /// </summary>
+    public IReadOnlyList<SceneNode> PlacedMeshRows(SceneNode actorRow)
+    {
+        if (actorRow.Source is not ActorNodeAdapter actor || actor.Target is not { } target) return [];
+        var rows = new List<SceneNode>();
+        Walk(target, rows.Add);
+        return rows;
+    }
+
     /// <summary>GPU meshes to outline for the selected actors — an actor with geometry has no mesh of its own,
     /// so the highlight is the meshes of the subtree it places.</summary>
     public IReadOnlyList<GpuMesh> SelectionOutlines(IReadOnlyList<SceneNode> selected)

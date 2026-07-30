@@ -207,6 +207,12 @@ internal static class ProbeRunner
             case "--probe-eds-tables":
                 ActorProbes.RunEdsTablesProbe();
                 return true;
+            // Sending an actor's prototype geometry to Blender, without Blender in the loop: which world the
+            // payload carries, and what the push path would make of it coming home unedited.
+            // Output: %TEMP%\illusion_bridge_actor.txt
+            case "--probe-bridge-actor":
+                ActorProbes.RunBridgeActorProbe(args.Length >= 2 ? args[1] : "eastside");
+                return true;
             // Which way an actor turns the thing it places, measured against the district's .col — the game
             // collides with the hull, so its placement IS the object's real orientation, independent of the
             // actor pack. Optional second argument filters actors by name. Output: %TEMP%\illusion_actor_orient.txt
