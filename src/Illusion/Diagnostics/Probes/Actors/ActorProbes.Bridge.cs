@@ -172,6 +172,116 @@ internal static partial class ActorProbes
     }
 
     /// <summary>
+    /// How much of a district's geometry is SHARED between frame objects — the thing that decides whether
+    /// editing one object edits one object.
+    ///
+    /// A frame does not own its mesh: it references a geometry block, and that block's LOD references a vertex
+    /// and an index buffer BY HASH. Nothing stops two frames from naming the same block, or two blocks from
+    /// naming the same buffer. When they do, an edit is global: the toolkit swaps only the edited node's GPU
+    /// mesh, so the viewport shows one object changed — but the file has one buffer, so the game shows every
+    /// frame that references it changed. "Different in the editor, identical in the game" is exactly that.
+    /// Output: %TEMP%\illusion_mesh_sharing.txt
+    /// </summary>
+    internal static void RunMeshSharingProbe(string district, string? nameFilter = null)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_mesh_sharing.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+            string sds = Path.Combine(MafiaEnvironment.CityFolder, district + ".sds");
+            if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
+
+            string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
+            Formats.Frames.FrameResource? fr = SdsMeshLoader.OpenScene(extracted).FrameResource;
+            if (fr?.FrameObjects == null) { sb.AppendLine("the district carries no frame objects"); return; }
+
+            var byGeometry = new Dictionary<int, List<string>>();
+            var byVertexBuffer = new Dictionary<ulong, List<string>>();
+            int meshes = 0;
+            foreach (object? value in fr.FrameObjects.Values)
+            {
+                if (value is not FrameObjectSingleMesh mesh || mesh.Geometry is not { LOD.Length: > 0 } geometry)
+                {
+                    continue;
+                }
+                meshes++;
+                string name = mesh.Name?.ToString() ?? "?";
+
+                if (!byGeometry.TryGetValue(geometry.RefID, out List<string>? sameBlock))
+                {
+                    byGeometry[geometry.RefID] = sameBlock = [];
+                }
+                sameBlock.Add(name);
+
+                ulong hash = geometry.LOD[0].VertexBufferRef.Hash;
+                if (!byVertexBuffer.TryGetValue(hash, out List<string>? sameBuffer))
+                {
+                    byVertexBuffer[hash] = sameBuffer = [];
+                }
+                sameBuffer.Add(name);
+            }
+
+            int sharedBlocks = byGeometry.Values.Count(g => g.Count > 1);
+            int framesOnSharedBlock = byGeometry.Values.Where(g => g.Count > 1).Sum(g => g.Count);
+            int sharedBuffers = byVertexBuffer.Values.Count(g => g.Count > 1);
+            int framesOnSharedBuffer = byVertexBuffer.Values.Where(g => g.Count > 1).Sum(g => g.Count);
+
+            sb.AppendLine($"MESH SHARING PROBE — district={district}\n");
+            Check("the district has meshes", meshes > 0, $"{meshes} single-mesh frames");
+            Check("editing a mesh edits exactly one frame", framesOnSharedBuffer == 0,
+                $"{framesOnSharedBuffer}/{meshes} frames sit on a LOD0 vertex buffer another frame also uses "
+                + $"({sharedBuffers} such buffers); {framesOnSharedBlock} share a whole geometry block "
+                + $"({sharedBlocks} such blocks)");
+
+            sb.AppendLine();
+            sb.AppendLine($"geometry blocks: {byGeometry.Count} for {meshes} meshes");
+            sb.AppendLine($"LOD0 vertex buffers: {byVertexBuffer.Count} for {meshes} meshes");
+            sb.AppendLine();
+            sb.AppendLine("largest groups sharing one LOD0 vertex buffer:");
+            foreach ((ulong hash, List<string> names) in byVertexBuffer
+                         .Where(p => p.Value.Count > 1)
+                         .OrderByDescending(p => p.Value.Count)
+                         .Take(15))
+            {
+                sb.AppendLine($"    {hash:X16} ×{names.Count}: {string.Join(", ", names.Take(8))}"
+                              + (names.Count > 8 ? ", …" : ""));
+            }
+
+            if (!string.IsNullOrEmpty(nameFilter))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"groups holding a frame whose name contains '{nameFilter}':");
+                int shown = 0;
+                foreach ((ulong hash, List<string> names) in byVertexBuffer.OrderByDescending(p => p.Value.Count))
+                {
+                    if (!names.Any(n => n.Contains(nameFilter, StringComparison.OrdinalIgnoreCase))) continue;
+                    shown++;
+                    sb.AppendLine($"    {hash:X16} ×{names.Count}: {string.Join(", ", names.Take(12))}"
+                                  + (names.Count > 12 ? ", …" : ""));
+                }
+                if (shown == 0) sb.AppendLine("    (no frame of this district matches)");
+            }
+        }
+        catch (Exception ex)
+        {
+            fail++;
+            sb.AppendLine("[FAIL] unexpected exception — " + ex);
+        }
+
+        sb.Insert(0, $"MESH SHARING PROBE: {pass} passed, {fail} failed\n\n");
+        File.WriteAllText(outFile, sb.ToString());
+    }
+
+    /// <summary>
     /// Selecting the ACTOR and selecting its FRAME in the tree have to reach the same meshes.
     ///
     /// They are found two different ways. The tree is built from the loader's hierarchy; the actor path walks

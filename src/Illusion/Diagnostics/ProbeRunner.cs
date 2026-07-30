@@ -213,6 +213,12 @@ internal static class ProbeRunner
             case "--probe-bridge-actor":
                 ActorProbes.RunBridgeActorProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // How much of a district's geometry is shared between frame objects — whether editing one mesh
+            // edits one object or several. Output: %TEMP%\illusion_mesh_sharing.txt
+            case "--probe-mesh-sharing":
+                ActorProbes.RunMeshSharingProbe(args.Length >= 2 ? args[1] : "italy",
+                    args.Length >= 3 ? args[2] : null);
+                return true;
             // Which way an actor turns the thing it places, measured against the district's .col — the game
             // collides with the hull, so its placement IS the object's real orientation, independent of the
             // actor pack. Optional second argument filters actors by name. Output: %TEMP%\illusion_actor_orient.txt
