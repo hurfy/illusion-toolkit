@@ -20,6 +20,10 @@ public sealed class SdsManifest
 
     public string Folder { get; }
 
+    /// <summary>Every single-payload entry, in manifest order — what the archive announces it carries.
+    /// Container types (Script/Table) list their pieces under their own elements and are not here.</summary>
+    public IReadOnlyList<(string Type, string File)> Entries => _entries;
+
     public static SdsManifest Load(string folder)
     {
         string path = Path.Combine(folder, "SDSContent.xml");

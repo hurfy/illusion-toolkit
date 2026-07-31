@@ -209,7 +209,7 @@ internal sealed class MaterialEditController
         if (node.Mesh is { } gm)
         {
             MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(hash);
-            gm.SetPartMaterial(slotIndex, hash, tex.Diffuse, tex.Normal, tex.Specular);
+            gm.SetPartMaterial(slotIndex, hash, tex.Diffuse, tex.Normal, tex.Specular, tex.Tint);
         }
         _host.RaiseMaterialsChanged();
         _host.RaiseSelectionPropertiesChanged();
@@ -220,7 +220,7 @@ internal sealed class MaterialEditController
         if (_host.Rnd is not { } renderer) return;
         MafiaMaterials.MaterialTextures tex = MafiaMaterials.GetMaterialTextures(hash);
         foreach (GpuMesh gm in renderer.Meshes)
-            gm.RebindPartTextures(hash, tex.Diffuse, tex.Normal, tex.Specular);
+            gm.RebindPartTextures(hash, tex.Diffuse, tex.Normal, tex.Specular, tex.Tint);
     }
 
     // ── Edits ──

@@ -23,6 +23,7 @@ public struct GpuPart
     public uint StartIndex;
     public uint IndexCount;
     public ulong MaterialHash;                          // source game material (0 = none) — for live re-resolve
+    public Vector4 Tint;                                // multiplies the albedo; white unless the material paints itself
     public ComPtr<ID3D11ShaderResourceView> Srv;        // diffuse t0
     public ComPtr<ID3D11ShaderResourceView> NormalSrv;  // normal t1 (flat-normal when absent)
     public ComPtr<ID3D11ShaderResourceView> SpecSrv;    // specular-level t2 (white when absent → full level)
@@ -164,6 +165,7 @@ public sealed unsafe class GpuMesh : IDisposable
                 StartIndex = (uint)part.StartIndex,
                 IndexCount = (uint)part.IndexCount,
                 MaterialHash = part.MaterialHash,
+                Tint = part.Tint,
                 Srv = textures.Acquire(part.DiffuseTexture, result._textureLeases),
                 NormalSrv = textures.AcquireNormalOrFlat(part.NormalTexture, result._textureLeases), // flat-normal when absent
                 SpecSrv = textures.Acquire(part.SpecularTexture, result._textureLeases),             // white when absent → spec level ×1
@@ -186,7 +188,8 @@ public sealed unsafe class GpuMesh : IDisposable
     /// until the mesh is disposed — a few stale leases per edit is bounded, and releasing them early would need
     /// per-part lease bookkeeping. Returns the number of parts rebound.
     /// </summary>
-    public int RebindPartTextures(ulong materialHash, string? diffuse, string? normal, string? specular)
+    public int RebindPartTextures(ulong materialHash, string? diffuse, string? normal, string? specular,
+        Vector4 tint)
     {
         if (_disposed || _textures == null || materialHash == 0) return 0;
         int rebound = 0;
@@ -197,6 +200,7 @@ public sealed unsafe class GpuMesh : IDisposable
             p.Srv = _textures.Acquire(diffuse, _textureLeases);
             p.NormalSrv = _textures.AcquireNormalOrFlat(normal, _textureLeases);
             p.SpecSrv = _textures.Acquire(specular, _textureLeases);
+            p.Tint = tint;   // a material's colour is as editable as its textures — see MafiaMaterials
             Parts[i] = p;
             rebound++;
         }
@@ -205,7 +209,8 @@ public sealed unsafe class GpuMesh : IDisposable
 
     /// <summary>Repoints one part at a different material (a mesh-slot reassignment): swaps the recorded hash
     /// and re-resolves the three texture SRVs. Same lease policy as <see cref="RebindPartTextures"/>.</summary>
-    public bool SetPartMaterial(int index, ulong materialHash, string? diffuse, string? normal, string? specular)
+    public bool SetPartMaterial(int index, ulong materialHash, string? diffuse, string? normal, string? specular,
+        Vector4 tint)
     {
         if (_disposed || _textures == null || index < 0 || index >= Parts.Count) return false;
         GpuPart p = Parts[index];
@@ -213,6 +218,7 @@ public sealed unsafe class GpuMesh : IDisposable
         p.Srv = _textures.Acquire(diffuse, _textureLeases);
         p.NormalSrv = _textures.AcquireNormalOrFlat(normal, _textureLeases);
         p.SpecSrv = _textures.Acquire(specular, _textureLeases);
+        p.Tint = tint;
         Parts[index] = p;
         return true;
     }

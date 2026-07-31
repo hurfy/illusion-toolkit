@@ -15,6 +15,13 @@ public struct FrameConstants
     public Matrix4x4 World;  // — likewise
     public Vector4 LightDir;
     public Vector4 BaseColor;
+
+    /// <summary>Multiplies the sampled albedo, per material part. White for anything with a diffuse map; a
+    /// car body has none and paints itself with a colour instead — see <c>MafiaMaterials.GetMaterialTextures</c>.
+    /// Unlike the fields above this one changes WITHIN a mesh, so the draw pass rewrites the buffer whenever a
+    /// part's tint differs from the last.</summary>
+    public Vector4 Tint;
+
     public LightingConstants Lighting;  // shared Mafia-look block; HLSL side = ShaderCompiler.LightingCbufferTail
 }
 
@@ -28,7 +35,8 @@ cbuffer CB : register(b0)
     float4x4 WVP;
     float4x4 World;
     float4   LightDir;
-    float4   BaseColor;" + ShaderCompiler.LightingCbufferTail + @"
+    float4   BaseColor;
+    float4   Tint;" + ShaderCompiler.LightingCbufferTail + @"
 };
 struct VSIn  { float3 pos : POSITION; float3 nrm : NORMAL; float2 uv : TEXCOORD; float3 tan : TANGENT; float3 bin : BINORMAL; };" + ShaderCompiler.PsInStruct + @"
 PSIn VSMain(VSIn i)

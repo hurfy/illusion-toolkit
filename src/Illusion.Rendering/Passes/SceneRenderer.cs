@@ -478,9 +478,11 @@ public sealed unsafe class SceneRenderer : IDisposable
                 World = mesh.World,
                 LightDir = new Vector4(lightDir, 0f),
                 BaseColor = baseColor,
+                Tint = Vector4.One,
                 Lighting = lighting,
             };
             _shader.UpdateConstants(ctx, ref consts);
+            Vector4 boundTint = Vector4.One;
 
             var vb = mesh.VertexBuffer.Handle;
             ctx.IASetVertexBuffers(0, 1, &vb, &stride, &offset);
@@ -495,6 +497,15 @@ public sealed unsafe class SceneRenderer : IDisposable
                 {
                     ctx.PSSetShaderResources(0, 3, srvs);
                     last0 = srvs[0]; last1 = srvs[1]; last2 = srvs[2];
+                }
+                // Almost every part is untinted, so this rewrite costs nothing on a district: the buffer is
+                // touched again only where a material paints itself (a car body) and once more to put white
+                // back for the parts after it.
+                if (part.Tint != boundTint)
+                {
+                    consts.Tint = part.Tint;
+                    _shader.UpdateConstants(ctx, ref consts);
+                    boundTint = part.Tint;
                 }
                 ctx.DrawIndexed(part.IndexCount, part.StartIndex, 0);
                 DrawCalls++;

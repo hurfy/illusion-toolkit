@@ -546,6 +546,7 @@ public sealed class ParamEditRow
     {
         ParamId = p.ParamId;
         Label = p.FriendlyName == p.ParamId ? p.ParamId : $"{p.FriendlyName} · {p.ParamId}";
+        IsColor = LooksLikeColour(p.FriendlyName, p.Values.Count);
         _text = string.Join(", ", p.Values.Select(v => v.ToString("0.####", CultureInfo.InvariantCulture)));
         _commit = commit;
     }
@@ -554,6 +555,7 @@ public sealed class ParamEditRow
     {
         ParamId = d.Id;
         Label = d.Display == d.Id ? d.Id : $"{d.Display} · {d.Id}";
+        IsColor = LooksLikeColour(d.Display, d.Length ?? 0);
         IsNew = true;
         Hint = d.Length is int n
             ? $"Not on this material yet — enter {n} float(s) to add it"
@@ -564,8 +566,17 @@ public sealed class ParamEditRow
 
     public string ParamId { get; }
     public string Label { get; }
+
+    /// <summary>Whether this parameter is a colour, and so gets a swatch and a picker instead of three bare
+    /// numbers. Decided by the friendly name the material catalog gives it (MaterialColor, MaterialColor1, …)
+    /// — the format itself does not say what a float triple means.</summary>
+    public bool IsColor { get; }
+
     public bool IsNew { get; }
     public string? Hint { get; }
+
+    private static bool LooksLikeColour(string display, int length) =>
+        length >= 3 && display.Contains("Color", StringComparison.OrdinalIgnoreCase);
 
     public string Text
     {
@@ -577,4 +588,15 @@ public sealed class ParamEditRow
             _commit(this, value);
         }
     }
+}
+
+/// <summary>Picks the row template per parameter: bare numbers, or a swatch and a picker beside them.</summary>
+public sealed class ParamTemplateSelector : System.Windows.Controls.DataTemplateSelector
+{
+    public DataTemplate? Plain { get; set; }
+
+    public DataTemplate? Colour { get; set; }
+
+    public override DataTemplate? SelectTemplate(object? item, DependencyObject container) =>
+        item is ParamEditRow { IsColor: true } ? Colour : Plain;
 }

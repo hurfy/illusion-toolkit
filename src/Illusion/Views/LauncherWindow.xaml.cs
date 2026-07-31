@@ -169,6 +169,7 @@ public partial class LauncherWindow : Window
         BrowseBtn.IsEnabled = true;
         UnpackBtn.IsEnabled = validPath && !unpacked;
         MapEditorBtn.IsEnabled = unpacked;
+        ResourcesEditorBtn.IsEnabled = unpacked;
 
         // Idle: the progress panel is always hidden here.
         WorkPanel.Visibility = Visibility.Collapsed;
@@ -320,6 +321,7 @@ public partial class LauncherWindow : Window
             BrowseBtn.IsEnabled = false;
             UnpackBtn.IsEnabled = false;
             MapEditorBtn.IsEnabled = false;
+            ResourcesEditorBtn.IsEnabled = false;
         }
     }
 
@@ -450,7 +452,15 @@ public partial class LauncherWindow : Window
         }
     }
 
-    private void MapEditor_Click(object sender, RoutedEventArgs e)
+    private void MapEditor_Click(object sender, RoutedEventArgs e) => OpenEditor(() => new MainWindow());
+
+    private void ResourcesEditor_Click(object sender, RoutedEventArgs e) =>
+        OpenEditor(() => new ResourceEditorWindow());
+
+    // Both tiles do the same thing: make sure the environment is ready, hand the app over to the chosen
+    // editor and step out of the way. Whichever one is opened becomes the application's main window — the
+    // launcher is the way IN, not a window that stays around behind the editor.
+    private void OpenEditor(Func<Window> create)
     {
         // Initialize with the chosen path BEFORE opening the viewport (it calls TryInitialize again
         // and reuses the ready environment).
@@ -460,7 +470,7 @@ public partial class LauncherWindow : Window
             return;
         }
 
-        var editor = new MainWindow();
+        Window editor = create();
         Application.Current.MainWindow = editor;
         editor.Show();
         Close();

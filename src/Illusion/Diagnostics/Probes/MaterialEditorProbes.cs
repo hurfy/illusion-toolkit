@@ -649,6 +649,47 @@ internal static class MaterialEditorProbes
             Check("two concurrent GPU stacks both draw the sphere", lit1 > 500 && lit2 > 500,
                 $"{lit1} / {lit2} lit px");
 
+            // A material's COLOUR is as editable as its textures, and an edit has to reach the meshes already
+            // on screen — the same live path a texture swap takes. This is the check that was missing when the
+            // colour reached a mesh at load time and never again: a repaint left the viewport on the old one.
+            const ulong probeHash = 0xC0FFEE01UL;
+            GpuMesh tinted = r1.CreateMeshGpu(SphereMesh.Create(
+                new MeshPart(0, 0, null, null, null, probeHash, new Vector4(0.25f, 0.5f, 0.75f, 1f))));
+            Check("a mesh part carries the colour it was built with",
+                tinted.Parts[0].Tint == new Vector4(0.25f, 0.5f, 0.75f, 1f), tinted.Parts[0].Tint.ToString());
+
+            var repainted = new Vector4(0.9f, 0.1f, 0.1f, 1f);
+            int rebound = tinted.RebindPartTextures(probeHash, null, null, null, repainted);
+            Check("re-resolving a material carries its colour with it",
+                rebound == 1 && tinted.Parts[0].Tint == repainted,
+                $"{rebound} part(s) rebound, tint {tinted.Parts[0].Tint}");
+
+            Check("reassigning a slot's material carries its colour too",
+                tinted.SetPartMaterial(0, probeHash, null, null, null, Vector4.One)
+                && tinted.Parts[0].Tint == Vector4.One, tinted.Parts[0].Tint.ToString());
+            tinted.Dispose();
+
+            // The colour field: a paint parameter is edited as a colour, and what it stores stays linear.
+            // 0.27 linear is a muted dark red once gamma-corrected — a swatch showing 0.27 of full red
+            // would be almost black and would not match what the viewport draws.
+            var field = new ColorField { Value = "0.27, 0.02, 0.02, 1" };
+            var swatch = field.Swatch as SolidColorBrush;
+            Check("a colour parameter shows the colour the viewport shows",
+                swatch != null && swatch.Color.R is > 130 and < 155 && swatch.Color.G is > 30 and < 55,
+                swatch?.Color.ToString() ?? "no swatch");
+
+            field.Value = "not, a, colour";
+            Check("a parameter that is not a colour shows no swatch rather than a wrong one",
+                field.Swatch is not SolidColorBrush { Color.A: > 0 }, field.Swatch.ToString() ?? "");
+
+            // Picking through the hex box writes linear floats back and leaves the fourth channel alone.
+            field.Value = "0.27, 0.02, 0.02, 1";
+            field.HexBox.Text = "#FFFFFF";
+            field.HexBox.RaiseEvent(new RoutedEventArgs(System.Windows.UIElement.LostFocusEvent));
+            Check("picking a colour writes linear values back, keeping the channels it has no opinion about",
+                field.Value.StartsWith("1, 1, 1", StringComparison.Ordinal) && field.Value.EndsWith(", 1", StringComparison.Ordinal),
+                field.Value);
+
             // Thumbnail renderer against real textures.
             if (!InitEnv(out string? err))
             {

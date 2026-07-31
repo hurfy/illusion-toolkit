@@ -581,6 +581,35 @@ internal static class ProbeRunner
             case "--probe-material-gpu":
                 MaterialEditorProbes.RunMaterialGpuProbe(args.Length >= 2 ? args[1] : "eastside");
                 return true;
+            // Resource library, catalog half: the folder walk over pc\sds, the curated categories, and our own
+            // working folders staying out of the content. Output: %TEMP%\illusion_library_browser.txt
+            case "--probe-library-browser":
+                LibraryProbes.RunBrowserProbe();
+                return true;
+            // Resource library, stage half: one stand-alone archive through the district loader — geometry,
+            // materials and a finite box, for an .sds that is no city district. Optional arg = path under
+            // pc\sds. Output: %TEMP%\illusion_library_stage.txt
+            case "--probe-library-stage":
+                LibraryProbes.RunStageProbe(args.Length >= 2 ? args[1] : "cars/shubert_38.sds");
+                return true;
+            // What a car is made of: a census of every archive in sds\cars (resources it announces, frame
+            // kinds, geometry, how deep the rig goes) plus one archive dumped in full, bone names included.
+            // Optional arg = the archive to dump. Output: %TEMP%\illusion_cars.txt
+            case "--probe-cars":
+                CarProbes.RunCarsProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // The Cars half of the resource library: a car staged with the shared car library, every car's
+            // materials resolved against it, the paint that is a colour rather than a texture, and an edit
+            // through save + pack. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_library_cars.txt
+            // Book-keeping that used to lose edits: which window holds which archive (there is one extracted
+            // working copy per archive, shared). Output: %TEMP%\illusion_pending.txt
+            case "--probe-pending":
+                PendingBuildProbes.RunPendingProbe();
+                return true;
+            case "--probe-library-cars":
+                CarLibraryProbes.RunCarsLibraryProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             default:
                 return false;
         }

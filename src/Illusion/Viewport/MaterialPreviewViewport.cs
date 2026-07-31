@@ -68,7 +68,10 @@ public sealed class MaterialPreviewViewport : ViewportControl
     /// <summary>Shows a material: its three maps on the sphere + its own specular/fresnel response.</summary>
     public void SetMaterial(ulong hash, string? diffuse, string? normal, string? specular, LightingConstants lighting)
     {
-        _part = new MeshPart(0, 0, diffuse, normal, specular, hash);
+        // The tint is part of the material's look, not a decoration: a car body has no albedo at all and
+        // shows nothing but its colour, so a preview without it is a white ball whatever the paint says.
+        _part = new MeshPart(0, 0, diffuse, normal, specular, hash,
+            Assets.MafiaMaterials.GetMaterialTextures(hash).Tint);
         _materialLighting = lighting;
         Lighting = lighting;
         Rebuild();

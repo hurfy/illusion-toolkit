@@ -14,6 +14,11 @@ public struct InstancedConstants
     public Matrix4x4 ViewProj;   // row-major (like in System.Numerics); in HLSL — row_major
     public Vector4 LightDir;
     public Vector4 BaseColor;    // shared MafiaLitPs: .a=1 → texture, .a=0 → flat .rgb (Solid/Wireframe)
+
+    /// <summary>Albedo tint, declared only because the pixel shader is shared with <see cref="MeshShader"/>.
+    /// Instanced content is crash props, which all carry a diffuse map, so this stays white.</summary>
+    public Vector4 Tint;
+
     public LightingConstants Lighting;  // shared Mafia-look block; HLSL side = ShaderCompiler.LightingCbufferTail
 }
 
@@ -29,7 +34,8 @@ cbuffer CB : register(b0)
 {
     row_major float4x4 ViewProj;
     float4   LightDir;
-    float4   BaseColor;" + ShaderCompiler.LightingCbufferTail + @"
+    float4   BaseColor;
+    float4   Tint;" + ShaderCompiler.LightingCbufferTail + @"
 };
 struct VSIn
 {

@@ -119,7 +119,7 @@ internal static class LayoutProbes
                 // measured on the shelf's host grid, not on the render surface — that one is an Image whose
                 // rendered size is zero until a D3D source exists, which never happens in a headless pass.
                 var viewportArea = (FrameworkElement)window.ToolShelf.Parent;
-                double panel = window.PropertyTabs.ActualWidth;
+                double panel = window.Scene.PropertyTabs.ActualWidth;
                 Check($"{screen}: scene panel leaves the viewport its share", panel <= width * 0.4,
                     $"panel={panel:F0} of {width:F0} ({panel / width:P0})");
                 Check($"{screen}: tool shelf fits the viewport height",
@@ -131,6 +131,8 @@ internal static class LayoutProbes
                         $"viewport={viewportArea.ActualWidth:F0}x{viewportArea.ActualHeight:F0}");
                 }
             }
+
+            CheckResourceEditor(Check, sb);
 
             CheckLauncher(Check, sb);
 
@@ -161,6 +163,84 @@ internal static class LayoutProbes
         }
         catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
         finally { File.WriteAllText(outTxt, sb.ToString()); }
+    }
+
+    /// <summary>
+    /// The resource editor, whose extra piece of chrome is the content browser docked under its stage — the
+    /// one panel that eats the render surface's HEIGHT, which on the 1280x720 floor is the scarce dimension.
+    /// Laid out at every screen we support: the browser must never out-grow the stage, both of its panes have
+    /// to be there, and folding it away has to give the height back. A picture goes out beside the editor's.
+    /// </summary>
+    private static void CheckResourceEditor(Action<string, bool, string> check, StringBuilder sb)
+    {
+        var window = new ResourceEditorWindow();
+        var content = (FrameworkElement)window.Content;
+        var stageArea = (FrameworkElement)window.Stage.Parent;
+
+        foreach ((string screen, double width, double height) in Layouts)
+        {
+            // Twice: the browser's height cap follows the column's, which is only known after an arrange —
+            // the same second pass the live window gets for free from its SizeChanged.
+            for (int i = 0; i < 2; i++)
+            {
+                content.Measure(new Size(width, height));
+                content.Arrange(new Rect(0, 0, width, height));
+                content.UpdateLayout();
+            }
+
+            double browser = window.Browser.ActualHeight;
+            double stage = stageArea.ActualHeight;
+            double panel = window.Scene.ActualWidth;
+            sb.AppendLine($"— {screen} resource editor: browser h={browser:F0}, " +
+                          $"stage {stageArea.ActualWidth:F0}x{stage:F0}, panel w={panel:F0}");
+
+            check($"{screen}: the browser never out-grows the stage", browser <= stage,
+                $"browser={browser:F0}, stage={stage:F0}");
+            check($"{screen}: the stage keeps a workable height", stage >= 140, $"stage={stage:F0}");
+            check($"{screen}: both browser panes are laid out",
+                window.Browser.FolderTree.ActualWidth > 60 && window.Browser.Contents.ActualWidth > 100,
+                $"tree={window.Browser.FolderTree.ActualWidth:F0}, " +
+                $"contents={window.Browser.Contents.ActualWidth:F0}");
+            check($"{screen}: the scene panel leaves the stage its share", panel <= width * 0.4,
+                $"panel={panel:F0} of {width:F0}");
+            check($"{screen}: the shading modes are all there",
+                window.ModeStrip.Items.Count == 4, $"{window.ModeStrip.Items.Count} buttons");
+            // The same action bar as the map editor: trying an edit means starting the game, and which
+            // editor you made it in is not a reason to go looking for another window.
+            // The same tools as the map editor, and they have to fit the stage the same way — without them
+            // there is no walking around a resource, which is what the shelf was added for.
+            check($"{screen}: the tool shelf fits the stage",
+                window.ToolShelf.ActualHeight > 0 && window.ToolShelf.ActualHeight + 24 <= stage,
+                $"shelf={window.ToolShelf.ActualHeight:F0}+24, stage={stage:F0}");
+            check($"{screen}: Play and Build are laid out",
+                window.PlayBtn.ActualWidth > 0 && window.BuildBtn.ActualWidth > 0
+                && window.MultiplayerBtn.ActualWidth > 0,
+                $"play={window.PlayBtn.ActualWidth:F0}, mp={window.MultiplayerBtn.ActualWidth:F0}, " +
+                $"build={window.BuildBtn.ActualWidth:F0}");
+        }
+
+        // Folded away, the browser is a strip and nothing more — this is what makes it affordable at 720p.
+        window.Browser.IsCollapsed = true;
+        content.Measure(new Size(Layouts[0].Width, Layouts[0].Height));
+        content.Arrange(new Rect(0, 0, Layouts[0].Width, Layouts[0].Height));
+        content.UpdateLayout();
+        check("resource editor: folded, the browser is only its strip", window.Browser.ActualHeight <= 30,
+            $"{window.Browser.ActualHeight:F0}px");
+        check("resource editor: folded, the browser's splitter is gone too",
+            window.BrowserSplitter.Visibility == Visibility.Collapsed,
+            window.BrowserSplitter.Visibility.ToString());
+        check("resource editor: folding gives the height back to the stage",
+            stageArea.ActualHeight > 400, $"stage={stageArea.ActualHeight:F0}");
+
+        // The city-only scene filters are gone: a resource has no neighbouring districts and no winter twin.
+        // IsVisible is false in a window that was never shown — the flag to read here is the one the code sets.
+        check("resource editor: the city-only render filters are hidden, the actor one is not",
+            window.Scene.ProxyScenesRow.Visibility == Visibility.Collapsed
+            && window.Scene.ProxyMeshesRow.Visibility == Visibility.Collapsed
+            && window.Scene.SnowScenesRow.Visibility == Visibility.Collapsed
+            && window.Scene.ActorsToggle.Visibility == Visibility.Visible,
+            $"proxy={window.Scene.ProxyScenesRow.Visibility}, snow={window.Scene.SnowScenesRow.Visibility}, " +
+            $"actors={window.Scene.ActorsToggle.Visibility}");
     }
 
     /// <summary>
@@ -196,6 +276,12 @@ internal static class LayoutProbes
             $"browse={launcher.BrowseBtn.ActualWidth:F0}, unpack={launcher.UnpackBtn.ActualWidth:F0}");
         check("launcher: the path box keeps the rest of the row",
             launcher.PathBox.ActualWidth > width / 2, $"{launcher.PathBox.ActualWidth:F0} of {width:F0}");
+        // Two ways in, side by side and the same size — neither editor is the one the launcher is "really"
+        // for, and a tile that is only ever disabled is a promise, not a door.
+        check("launcher: both editor tiles are laid out, equally wide",
+            launcher.MapEditorBtn.ActualWidth > 0
+            && Math.Abs(launcher.MapEditorBtn.ActualWidth - launcher.ResourcesEditorBtn.ActualWidth) < 1,
+            $"map={launcher.MapEditorBtn.ActualWidth:F0}, resources={launcher.ResourcesEditorBtn.ActualWidth:F0}");
 
         try
         {

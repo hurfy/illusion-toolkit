@@ -70,7 +70,10 @@ float4 PSMain(PSIn i) : SV_TARGET
     {
         float4 tex = DiffuseTex.Sample(Samp, i.uv);
         clip(tex.a - 0.5);                                         // alpha-test: transparent texels (fences/grates/foliage)
-        albedo = tex.rgb;
+        // Tint is white for every material that HAS an albedo, so this is a no-op almost everywhere. It earns
+        // its keep on the ones that do not: a car body's paint is a material colour, not a texture, and
+        // sampling its missing albedo returns the cache's white placeholder — 1 × paint is the paint.
+        albedo = tex.rgb * Tint.rgb;
     }
     else
     {

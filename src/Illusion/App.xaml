@@ -6,6 +6,9 @@
             <ResourceDictionary.MergedDictionaries>
                 <!-- Shared dark editor styles for secondary windows (Import, Material Editor). -->
                 <ResourceDictionary Source="Views/EditorStyles.xaml" />
+                <!-- Chrome shared by the editor windows and the scene panel: tree icons, toolbar and shelf
+                     buttons, property-panel cards. -->
+                <ResourceDictionary Source="Views/EditorChrome.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <!-- Two-column StatusBar layout (content left, engine label right), shared by both windows. -->

@@ -188,8 +188,8 @@
                 </Button>
                 <Button x:Name="ResourcesEditorBtn" Height="140" Margin="5,0,0,0"
                         HorizontalAlignment="Stretch"
-                        IsEnabled="False"
-                        ToolTip="Resource editor (coming soon)">
+                        IsEnabled="False" Click="ResourcesEditor_Click"
+                        ToolTip="Open the resource editor — every archive in the game, one at a time on a stage">
                     <StackPanel>
                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8F1;" FontSize="42"
                                    HorizontalAlignment="Center" />

@@ -71,8 +71,11 @@ public static class SphereMesh
             Indices = idx,
             Parts = new[]
             {
+                // The caller's part describes a MATERIAL; only its index range belongs to the sphere. Its
+                // colour travels with it — a material that paints itself rather than carrying an albedo
+                // (a car body) would otherwise preview as a white ball.
                 new MeshPart(0, idx.Length, part.DiffuseTexture, part.NormalTexture, part.SpecularTexture,
-                    part.MaterialHash),
+                    part.MaterialHash, part.Tint),
             },
         };
     }

@@ -153,6 +153,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="DistrictStreamer.LoadArea"/>
     public void LoadArea(MapArea? area, bool winter, bool wholeMap) => Streamer.LoadArea(area, winter, wholeMap);
 
+    /// <inheritdoc cref="DistrictStreamer.LoadStage"/>
+    public void LoadStage(FileInfo sds, string label) => Streamer.LoadStage(sds, label);
+
     // ── Facade: selection ──
 
     /// <summary>The active selected node (last clicked) — drives the property panel; null when nothing is selected.</summary>
@@ -572,10 +575,24 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="DistrictStreamer.ResetForExternalChange"/>
     public void PrepareForArchiveRestore() => Streamer.ResetForExternalChange();
 
+    /// <summary>
+    /// Forgets an archive's pending build after it has been rolled back to a backup: its extracted folder has
+    /// just been deleted and an older .sds put in its place, so whatever was queued for packing no longer
+    /// exists. Without this the Build button would keep offering to repack a working copy that is gone.
+    /// </summary>
+    public void ForgetPendingBuild(FileInfo sds) => Persistence.ForgetArchive(sds);
+
     // ── ViewportControl hooks ──
 
     // Environment (sky) + map catalogs, once the renderer exists. Content arrives via LoadArea, not here.
-    protected override void OnSceneInitialized() => Catalogs.InitAsync();
+    /// <summary>
+    /// Whether this viewport is a MAP: it offers districts and can stream them by camera position. The
+    /// resource editor's stage is not — it is handed one archive at a time, so the city catalogs would be
+    /// built for nobody. Set before the control loads; changing it afterwards does nothing.
+    /// </summary>
+    public bool IsMapViewport { get; set; } = true;
+
+    protected override void OnSceneInitialized() => Catalogs.InitAsync(IsMapViewport);
 
     // Per-frame scene advancement (before the base moves the camera) — the streamer's pipeline.
     protected override void OnFrameUpdate(float dt) => Streamer.Tick(dt);

@@ -38,7 +38,11 @@ internal sealed class ViewportCatalogs
     // zone parse, sky extraction, first .mtl load) runs in the background so the first launch doesn't
     // freeze the window; results marshal back to the UI thread. Nothing can load before the catalogs
     // land: LoadArea/EnqueueCrashLayer bail while Map is null, and CatalogReady re-populates the UI.
-    public void InitAsync()
+    /// <param name="withMap">Whether this viewport needs the CITY catalogs — the district list and the
+    /// streaming zones. The resource editor's stage does not: it is handed one archive by path and never
+    /// streams, so reading <c>cityareas.bin</c> for it would be work with no reader. The sky and the shared
+    /// materials table are loaded either way; both are about looking at geometry, not about the city.</param>
+    public void InitAsync(bool withMap = true)
     {
         Task.Run(() =>
         {
@@ -70,27 +74,35 @@ internal sealed class ViewportCatalogs
                 Assets.Textures.TextureSearchIndex.WarmUp();
 
                 // Main catalog: map areas from cityareas.bin (city_univers), resolve names to files.
-                MapCatalog map = MapCatalog.Build(MafiaEnvironment.CityFolder, f => SdsMeshLoader.EnsureExtracted(f));
+                MapCatalog? map = withMap
+                    ? MapCatalog.Build(MafiaEnvironment.CityFolder, f => SdsMeshLoader.EnsureExtracted(f))
+                    : null;
 
                 // Streaming zones (AREA boxes city_univers ⋈ cityareas) for Whole map mode.
-                List<AreaZone> zones;
-                try
+                var zones = new List<AreaZone>();
+                if (map != null)
                 {
-                    zones = AreaZones.Load(f => SdsMeshLoader.EnsureExtracted(f),
-                        map.Areas.Select(a => a.BaseName).ToList());
+                    try
+                    {
+                        zones = AreaZones.Load(f => SdsMeshLoader.EnsureExtracted(f),
+                            map.Areas.Select(a => a.BaseName).ToList());
+                    }
+                    catch { zones = new List<AreaZone>(); }
                 }
-                catch { zones = new List<AreaZone>(); }
 
                 _host.Dispatcher.Invoke(() =>
                 {
                     if (_host.Rnd == null) return; // disposed while initializing
-                    Map = map;
-                    Areas = map.Areas;
-                    DistrictNames = Areas.Select(a => a.BaseName).ToList();
-                    Zones = zones;
+                    if (map != null)
+                    {
+                        Map = map;
+                        Areas = map.Areas;
+                        DistrictNames = Areas.Select(a => a.BaseName).ToList();
+                        Zones = zones;
+                        BuildZoneBoxes();
+                    }
                     SkyTexturePath = skyTex;
                     if (skyTex != null) _host.LoadSky(skyTex);
-                    BuildZoneBoxes();
                     _host.RaiseCatalogReady();
                 });
             }

@@ -5,6 +5,7 @@ using Illusion.Assets;
 using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Collisions;
+using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
 using Illusion.Domain;
@@ -94,6 +95,7 @@ internal sealed class DistrictStreamer
     // .sds load queue (single area / city_univers when streaming). One item at a time.
     private readonly Queue<(FileInfo File, string Label, string? District)> _loadQueue = new();
     private bool _hasFramedOnce; // frame the camera ONCE (first load), don't reset afterwards
+    private bool _frameNextLoad; // …except on the library stage, where each resource put on it is framed
 
     // Camera streaming (Whole map mode): zones from city_univers → districts by camera position.
     private bool _streaming;
@@ -105,6 +107,7 @@ internal sealed class DistrictStreamer
         public SceneNode? SdsNode;   // SDS node in the tree (under the folder)
         public SceneNode? Folder;    // parent folder (to remove when empty)
         public List<GpuMesh>? Meshes;
+        public FileInfo? Archive;    // what to hand back to OpenArchives when this district goes
     }
 
     // Background-prepared load of one .sds: extraction, parsing, the detached SceneNode tree AND all
@@ -139,13 +142,13 @@ internal sealed class DistrictStreamer
     public ActorLayer Actors { get; }
 
     private Task<PreparedLoad?>? _loadTask;
-    private (string label, string? district, string folder, int gen) _loadCtx;
+    private (string label, string? district, string folder, int gen, FileInfo file) _loadCtx;
     private int _loadGen; // scene generation: discard the result of a stale (post-reset) load
     private CancellationTokenSource? _loadCts; // cancels the in-flight background load
 
     private bool _building;
     private Queue<(SceneNode Leaf, GpuMesh Mesh)> _buildQueue = null!; // prepared meshes awaiting attach
-    private (string label, string? district, string folder, int gen) _buildCtx;
+    private (string label, string? district, string folder, int gen, FileInfo file) _buildCtx;
     private List<GpuMesh> _buildMeshes = null!;
 
     // Per-frame scene advancement (before the base moves the camera): finish a background load into a
@@ -335,6 +338,26 @@ internal sealed class DistrictStreamer
         AddCrashItem(items, winter);
 
         LoadSet(items);
+    }
+
+    /// <summary>
+    /// Puts ONE archive on the viewport on its own — the resource library's stage. The district pipeline is
+    /// reused whole (extract → parse → GPU prepare → budgeted attach, plus the collision and actor layers and
+    /// the persistence bookkeeping); what is left out is everything that is about the CITY: no season ground,
+    /// no crash layer, no <c>cityareas</c> row, no camera streaming. The archive needs no entry in any catalog,
+    /// which is the point — the library reaches content the map selector never offered.
+    /// <para>
+    /// Unlike a district, every resource that lands frames the camera: the stage is looked at one thing at a
+    /// time, and a car left off-screen because a district was framed an hour ago is not a stage.
+    /// </para>
+    /// </summary>
+    public void LoadStage(FileInfo sds, string label)
+    {
+        _streaming = false;
+        _winter = false;          // seasons are a city thing; the toggle stays for the map to read again
+        _loadedDistricts.Clear(); // the stage holds one archive, replaced whole — nothing to unload piecemeal
+        _frameNextLoad = true;
+        LoadSet(new[] { (sds, label, (string?)null) });
     }
 
     // Adds city_crash to the load set (by season: _z — winter), if the layer is enabled. The layer is
@@ -813,7 +836,7 @@ internal sealed class DistrictStreamer
     {
         if (district != null) _loadedDistricts[district] = new DistrictLoad();
         string folder = file.Directory?.Name ?? "sds"; // source folder of SDS (city / ground / …)
-        _loadCtx = (label, district, folder, _loadGen);
+        _loadCtx = (label, district, folder, _loadGen, file);
         // Load city_crash with a special loader: prototypes from frame_resource + instances from Translokator.
         bool crash = file.Name.StartsWith("city_crash", StringComparison.OrdinalIgnoreCase);
         bool collision = CollisionEnabled && !crash; // decode this district's collision in the background load
@@ -842,6 +865,17 @@ internal sealed class DistrictStreamer
             // guarantee the old UI-thread code had).
             string extracted = SdsMeshLoader.EnsureExtracted(file);
             renderer.Textures.AddFolder(extracted);
+
+            // Some archives cannot be looked at alone: a car takes its chrome, glass, wheels and headlight
+            // textures from the shared car library, and without it two thirds of what its materials name is
+            // missing — which the texture cache answers with white. Registering the companion's folder is
+            // enough for the TEXTURES; its shared PARTS are geometry the car does not reference and cannot
+            // be mounted without the wheel table in its EDS record (still untyped — see the plan's P5).
+            foreach (FileInfo companion in StageCompanions.For(file))
+            {
+                try { renderer.Textures.AddFolder(SdsMeshLoader.EnsureExtracted(companion)); }
+                catch (Exception) { /* a missing or unreadable library is a duller car, not a failed load */ }
+            }
             ct.ThrowIfCancellationRequested();
 
             List<SdsFrameNode> roots;
@@ -1094,6 +1128,10 @@ internal sealed class DistrictStreamer
         SceneNode folder = _host.Tree.GetOrCreateFolder(_buildCtx.folder);
         folder.AddChild(load.Sds);
 
+        // On screen now, so on the register: there is one extracted working copy per archive, and a second
+        // editor opening the same one would be editing the same folder from a different picture of it.
+        OpenArchives.Acquire(_buildCtx.file, _host);
+
         // Scene filter: hide BEFORE attach (descendant leaves inherit _visible=false, so their meshes
         // arrive hidden). On the UI thread so it never races a filter toggle.
         foreach (SceneNode frameRes in load.Sds.Children)
@@ -1105,8 +1143,10 @@ internal sealed class DistrictStreamer
         _building = true;
 
         if (_buildCtx.district != null)
-            _loadedDistricts[_buildCtx.district] =
-                new DistrictLoad { SdsNode = load.Sds, Folder = folder, Meshes = _buildMeshes };
+            _loadedDistricts[_buildCtx.district] = new DistrictLoad
+            {
+                SdsNode = load.Sds, Folder = folder, Meshes = _buildMeshes, Archive = _buildCtx.file,
+            };
 
         // Register this district's collision layer (built for any district with a .col; the crash prop layer has
         // none) and, when the overlay toggle is on, upload its hulls — pre-decoded in the background load, or
@@ -1189,11 +1229,13 @@ internal sealed class DistrictStreamer
         {
             _building = false;
             // Frame the camera only in single-area mode (in streaming we do NOT frame — the camera isn't reset,
-            // and the first city_univers load wouldn't drive it beyond all zones).
-            if (!_hasFramedOnce && !_streaming && _buildMeshes.Count > 0)
+            // and the first city_univers load wouldn't drive it beyond all zones). The stage asks for it on
+            // every load: there the camera is meant to follow what was just put in front of it.
+            if ((!_hasFramedOnce || _frameNextLoad) && !_streaming && _buildMeshes.Count > 0)
             {
                 _host.FrameCameraOver(_buildMeshes);
                 _hasFramedOnce = true;
+                _frameNextLoad = false;
             }
             _host.RaiseSceneChanged();
         }
@@ -1268,6 +1310,7 @@ internal sealed class DistrictStreamer
         {
             _host.Tree.RemoveSds(load.SdsNode, load.Folder);
         }
+        if (load.Archive is { } archive) OpenArchives.Release(archive, _host);
         _loadedDistricts.Remove(name);
     }
 
@@ -1298,6 +1341,7 @@ internal sealed class DistrictStreamer
         _crashSources.Clear();
         _host.Tree.Clear();
         _loadedDistricts.Clear();
+        OpenArchives.ReleaseAll(_host); // nothing of ours is loaded any more
     }
 
     /// <summary>

@@ -38,10 +38,19 @@
 
         <!-- One editable shader parameter: copyable field, floats comma-separated (count is fixed).
              Codes the material does not carry yet render empty — committing floats adds the parameter. -->
-        <DataTemplate x:Key="ParamEditor">
+        <!-- A parameter is edited as numbers, except the ones that are colours: those get a swatch and a
+             picker beside the same numbers (see ColorField). Which is which is decided per row. -->
+        <DataTemplate x:Key="ParamEditorPlain">
             <v:CopyableTextField Label="{Binding Label}" Value="{Binding Text, Mode=TwoWay}"
                                  ToolTip="{Binding Hint}" Margin="0,0,0,10" />
         </DataTemplate>
+        <DataTemplate x:Key="ParamEditorColor">
+            <v:ColorField Label="{Binding Label}" Value="{Binding Text, Mode=TwoWay}"
+                          ToolTip="{Binding Hint}" Margin="0,0,0,10" />
+        </DataTemplate>
+        <v:ParamTemplateSelector x:Key="ParamEditor"
+                                 Plain="{StaticResource ParamEditorPlain}"
+                                 Colour="{StaticResource ParamEditorColor}" />
     </Window.Resources>
 
     <Grid Margin="12">
@@ -159,7 +168,7 @@
 
                 <TextBlock x:Name="ParamsCaption" Text="PARAMETERS" Style="{StaticResource Caption}"
                            Margin="0,20,0,8" />
-                <ItemsControl x:Name="ParamsList" ItemTemplate="{StaticResource ParamEditor}" />
+                <ItemsControl x:Name="ParamsList" ItemTemplateSelector="{StaticResource ParamEditor}" />
                 <TextBlock x:Name="NoParamsText" Text="No shader parameters." Style="{StaticResource DimLabel}"
                            Visibility="Collapsed" />
             </StackPanel>

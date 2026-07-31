@@ -95,6 +95,28 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     /// <summary>Camera view matrix — the gizmo projects world axes through it. Identity until the renderer exists.</summary>
     public Matrix4x4 CameraView => Renderer?.Camera.View ?? Matrix4x4.Identity;
 
+    /// <summary>
+    /// Everything needed to put the view back exactly where it was — where the camera stands, where it looks,
+    /// and how far ahead the point it orbits sits. The pivot distance belongs here too: restoring position and
+    /// angles alone would leave the next orbit turning around whatever the PREVIOUS content was framed at.
+    /// Reading it before the renderer exists gives the default pose, and writing it then is ignored.
+    /// </summary>
+    public CameraPose CameraPose
+    {
+        get => Renderer is { } r
+            ? new CameraPose(r.Camera.Position, r.Camera.Yaw, r.Camera.Pitch, _orbitDistance)
+            : default;
+        set
+        {
+            if (Renderer is not { } r) return;
+            _tweening = false; // a pose is an absolute answer; an animation in flight would overwrite it
+            r.Camera.Position = value.Position;
+            r.Camera.Yaw = value.Yaw;
+            r.Camera.Pitch = Math.Clamp(value.Pitch, -PitchLimit, PitchLimit);
+            if (value.OrbitDistance > 0f) _orbitDistance = value.OrbitDistance;
+        }
+    }
+
     // Pitch limit shared with the fly camera so preset views never hit the degenerate straight-up/down look-at.
     protected const float PitchLimit = Camera.MaxPitch;
 

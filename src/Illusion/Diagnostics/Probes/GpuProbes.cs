@@ -128,7 +128,9 @@ internal static class GpuProbes
         return changed;
     }
 
-    private static void SavePng(byte[] bgra, int w, int h, string path)
+    /// <summary>Internal so the library probe can put its staged archive on the same kind of picture — the S1
+    /// gate ("does a car actually look like a car") is answered by eye, off a rendered frame.</summary>
+    internal static void SavePng(byte[] bgra, int w, int h, string path)
     {
         var bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, bgra, w * 4);
         var encoder = new PngBitmapEncoder();

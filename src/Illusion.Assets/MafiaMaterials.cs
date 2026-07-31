@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using Illusion.Domain.Materials;
 using Illusion.Formats.Hashing;
 using Illusion.Formats.Materials;
@@ -64,19 +65,47 @@ public static class MafiaMaterials
     }
 
     /// <summary>The texture .dds names of one material: diffuse (S000), normal (S001), specular-level (S002).
-    /// Any slot the material doesn't define is null.</summary>
-    public readonly record struct MaterialTextures(string? Diffuse, string? Normal, string? Specular);
+    /// Any slot the material doesn't define is null. <paramref name="Tint"/> multiplies the sampled albedo and
+    /// is white unless the material paints itself with a colour instead of a texture — see
+    /// <see cref="GetMaterialTextures"/>.</summary>
+    public readonly record struct MaterialTextures(string? Diffuse, string? Normal, string? Specular, Vector4 Tint)
+    {
+        public MaterialTextures(string? diffuse, string? normal, string? specular)
+            : this(diffuse, normal, specular, Vector4.One) { }
+    }
 
-    /// <summary>Resolves a material by hash to its diffuse/normal/specular texture names (all null if unknown).</summary>
+    /// <summary>
+    /// Resolves a material by hash to its diffuse/normal/specular texture names (all null if unknown).
+    /// <para>
+    /// A car body has no albedo at all: its paint is the shader parameter <c>C002 MaterialColor</c>, and the
+    /// texture slots it does carry are the reflection map, the crash-plate normals and a mask. Sampling the
+    /// missing albedo gives the cache's white placeholder, which is why an untinted car renders white
+    /// whatever its paint says. So a material with no S000 hands its colour over as a tint instead; anything
+    /// that HAS an albedo keeps a white tint and is unaffected, because the colour then belongs to the
+    /// texture and multiplying by it a second time would darken what already looks right.
+    /// </para>
+    /// </summary>
     public static MaterialTextures GetMaterialTextures(ulong materialHash)
     {
         IMaterial? mat = _materials?.FindByHash(materialHash);
-        if (mat == null) return default;
+        // Not `default`: that would hand back a BLACK tint (0,0,0,0) and paint every part whose material is
+        // unknown black instead of leaving it on the white placeholder it has always had.
+        if (mat == null) return new MaterialTextures(null, null, null);
 
+        string? diffuse = Clean(mat.GetTextureByID("S000"));   // S000 = diffuse/albedo
         return new MaterialTextures(
-            Clean(mat.GetTextureByID("S000")),   // S000 = diffuse/albedo
-            Clean(mat.GetTextureByID("S001")),   // S001 = tangent-space normal map
-            Clean(mat.GetTextureByID("S002")));  // S002 = specular-level map
+            diffuse,
+            Clean(mat.GetTextureByID("S001")),                 // S001 = tangent-space normal map
+            Clean(mat.GetTextureByID("S002")),                 // S002 = specular-level map
+            diffuse == null ? PaintColour(mat) : Vector4.One);
+    }
+
+    // C002 MaterialColor, the paint. Four floats (rgba); anything shorter or absent means "no colour of its
+    // own", which renders as it did before.
+    private static Vector4 PaintColour(IMaterial mat)
+    {
+        float[]? c = mat.GetParameterByKey("C002")?.Paramaters;
+        return c is { Length: >= 3 } ? new Vector4(c[0], c[1], c[2], 1f) : Vector4.One;
     }
 
     private static string? Clean(HashName? tex)
