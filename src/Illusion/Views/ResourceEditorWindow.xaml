@@ -69,9 +69,57 @@
                 </Grid.RowDefinitions>
 
                 <v:ToolbarRowPanel x:Name="ToolbarRow" Grid.Row="0" Background="#2D2D2D">
-                    <!-- Left: what is on the stage right now. The browser below is what CHANGES it, so this
-                         says rather than asks. -->
+                    <!-- Left group: the Layers button, then what is on the stage right now. The browser below
+                         is what CHANGES the stage, so the text says rather than asks.
+                         ToolbarRowPanel lays out exactly THREE groups (left · centre · right), so everything
+                         on this side has to live inside this one panel — a fourth child is never arranged. -->
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <!-- Layers: the same button and the same list as the map editor, because the answer to
+                         "where do I switch what the viewport draws" must not depend on which window you are
+                         in. The list is shorter here on purpose — zones, crash instances and AI navigation
+                         are district things and mean nothing on a staged resource. -->
+                    <Grid VerticalAlignment="Center" Margin="0,0,12,0">
+                        <ToggleButton x:Name="LayersBtn" Width="30" Height="30" Padding="0"
+                                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                      ToolTip="Layers — what the viewport draws">
+                            <Path Width="16" Height="16" Stretch="Uniform" Fill="Transparent"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"
+                                  StrokeThickness="1.15" StrokeLineJoin="Round"
+                                  Data="{StaticResource IconLayers}" />
+                        </ToggleButton>
+                        <Popup x:Name="LayersPopup" IsOpen="{Binding IsChecked, ElementName=LayersBtn}"
+                               Placement="Bottom" PlacementTarget="{Binding ElementName=LayersBtn}"
+                               AllowsTransparency="True" PopupAnimation="Fade" Closed="LayersPopup_Closed">
+                            <Border Background="{StaticResource PopupSurface}"
+                                    BorderBrush="{StaticResource PopupEdge}" BorderThickness="1"
+                                    CornerRadius="6" Padding="10,8" Margin="0,3,8,8" Width="264">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2"
+                                                      Opacity="0.5" />
+                                </Border.Effect>
+                                <StackPanel x:Name="LayerRows">
+                                    <Grid Margin="0,4"
+                                          ToolTip="Part collision — the physics shapes of the SELECTED part, which is what bullets actually hit (the mesh never is)">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
+                                              VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                              Stroke="#FF7340" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                              Data="{StaticResource IconCollision}" />
+                                        <TextBlock Grid.Column="1" Text="Part collision" Foreground="White"
+                                                   FontSize="12" VerticalAlignment="Center" />
+                                        <ToggleButton Grid.Column="2" x:Name="PartShapesToggle"
+                                                      Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                                      Checked="PartShapes_Changed" Unchecked="PartShapes_Changed" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
+
                         <TextBlock Text="Stage" Foreground="#80FFFFFF" FontSize="11" FontWeight="SemiBold"
                                    VerticalAlignment="Center" Margin="0,0,8,0" />
                         <TextBlock x:Name="StagedText" Text="nothing loaded" Foreground="White" FontSize="12.5"

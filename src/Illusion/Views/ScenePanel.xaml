@@ -64,6 +64,12 @@
                               Click="DuplicateMenuItem_Click" />
                     <MenuItem x:Name="TreeDeleteItem" Header="Delete" Click="DeleteMenuItem_Click" />
                     <Separator />
+                    <!-- Only on a bone: a car's collision hangs off its parts, and geometry added in Blender
+                         has none — which is why bullets go through it. Header names the part when one is
+                         selected, so it is clear what would get the box. -->
+                    <MenuItem x:Name="TreeAddCollisionBoxItem" Header="Add Collision Box…"
+                              Click="AddCollisionBox_Click" />
+                    <Separator />
                     <MenuItem x:Name="TreeRemoveUnusedHullsItem" Header="Remove unused hulls"
                               Click="RemoveUnusedHulls_Click" />
                     <Separator />

@@ -183,6 +183,18 @@ public partial class ScenePanel : UserControl
         FileInfo? sds = ArchiveOf(_viewport.SelectedNode);
         TreeRestoreBackupItem.Header = sds != null ? $"Restore Backup… ({sds.Name})" : "Restore Backup…";
         TreeRestoreBackupItem.IsEnabled = sds != null && _viewport.BridgeEditedCount == 0;
+
+        // A collision box hangs off a PART, so the item only lights up on a bone and says which one.
+        string? bone = _viewport.SelectedBoneName;
+        TreeAddCollisionBoxItem.Header = bone != null ? $"Add Collision Box… ({bone})" : "Add Collision Box…";
+        TreeAddCollisionBoxItem.IsEnabled = _viewport.CanAddCollisionBox;
+    }
+
+    private void AddCollisionBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewport.SelectedBoneName is not { } bone) return;
+        var dialog = new CollisionBoxWindow(bone) { Owner = Window.GetWindow(this) };
+        if (dialog.ShowDialog() == true && dialog.Dimensions is { } size) _viewport.AddCollisionBox(size);
     }
 
     private void DeleteMenuItem_Click(object sender, RoutedEventArgs e) => _viewport.DeleteSelected();

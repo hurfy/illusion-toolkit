@@ -205,6 +205,27 @@
                                                               Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
                                                               Checked="AiNav_Changed" Unchecked="AiNav_Changed" />
                                             </Grid>
+                                            <!-- Scoped to the SELECTION on purpose: a car's shapes are what
+                                                 bullets hit rather than what it looks like, so they earn their
+                                                 place on screen only while a part is being worked on. -->
+                                            <Grid Margin="0,4"
+                                                  ToolTip="Part collision — the physics shapes of the SELECTED part, which is what bullets actually hit">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
+                                                      VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
+                                                      Stroke="#FF7340" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Data="{StaticResource IconCollision}" />
+                                                <TextBlock Grid.Column="1" Text="Part collision" Foreground="White"
+                                                           FontSize="12" VerticalAlignment="Center" />
+                                                <ToggleButton Grid.Column="2" x:Name="PartShapesToggle"
+                                                              Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                                              Checked="PartShapes_Changed"
+                                                              Unchecked="PartShapes_Changed" />
+                                            </Grid>
                                         </StackPanel>
                                     </Border>
                                 </Popup>

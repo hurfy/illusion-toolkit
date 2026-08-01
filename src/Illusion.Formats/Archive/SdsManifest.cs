@@ -99,6 +99,45 @@ public sealed class SdsManifest
     /// A name already listed is left alone, which makes this safe to call after every save.
     /// </summary>
     /// <returns>True when the manifest gained an entry.</returns>
+    /// <summary>
+    /// Drops a single-payload entry from the folder's SDSContent.xml and rewrites it.
+    ///
+    /// The counterpart of <see cref="AddEntry"/>, and not optional: packing builds the archive from this file,
+    /// and an entry naming a file that is no longer on disk does not get skipped — it fails the whole Build.
+    /// So whatever removes a file the toolkit invented has to unsay it here as well.
+    /// </summary>
+    /// <returns>True when the manifest lost an entry.</returns>
+    public bool RemoveEntry(string fileName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+        if (!HasFile(fileName)) return false;
+
+        string path = Path.Combine(Folder, "SDSContent.xml");
+        var document = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        document.Load(path);
+
+        var dropped = new List<System.Xml.XmlNode>();
+        foreach (System.Xml.XmlNode entry in document.DocumentElement?.ChildNodes
+                 ?? (System.Xml.XmlNodeList)document.CreateDocumentFragment().ChildNodes)
+        {
+            foreach (System.Xml.XmlNode child in entry.ChildNodes)
+            {
+                if (child.Name == "File"
+                    && string.Equals(child.InnerText, fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    dropped.Add(entry);
+                    break;
+                }
+            }
+        }
+        if (dropped.Count == 0) return false;
+        foreach (System.Xml.XmlNode entry in dropped) entry.ParentNode?.RemoveChild(entry);
+        document.Save(path);
+
+        _entries.RemoveAll(e => string.Equals(e.File, fileName, StringComparison.OrdinalIgnoreCase));
+        return true;
+    }
+
     public bool AddEntry(string typeName, string fileName, int version)
     {
         ArgumentException.ThrowIfNullOrEmpty(typeName);

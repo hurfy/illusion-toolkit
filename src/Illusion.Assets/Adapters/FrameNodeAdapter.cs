@@ -29,7 +29,8 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
 
     /// <summary>The owning document adapter — the asset layer's route from a node to its dirty
     /// tracking and save unit.</summary>
-    internal SceneDocumentAdapter Document => _document;
+    /// <summary>The document this frame belongs to — which archive it will be written back into.</summary>
+    public SceneDocumentAdapter Document => _document;
 
     /// <summary>Setting cascades world transforms through the frame subtree (vendor setter behavior).</summary>
     public Matrix4x4 LocalTransform

@@ -1,9 +1,11 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Collisions;
 using Illusion.Domain.Properties;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Hashing;
+using Illusion.Formats.ItemDesc;
 
 namespace Illusion.Assets.Properties;
 
@@ -36,7 +38,7 @@ internal static class FramePropertyCatalog
         if (o is FrameObjectSector s) AddSector(s, c);
         if (o is FrameObjectTarget t) AddTarget(t, c);
         if (o is FrameObjectComponent_U005 u) AddComponentU005(u, c);
-        if (o is FrameObjectCollision col) AddCollision(col, c);
+        if (o is FrameObjectCollision col) AddCollision(col, node, c);
 
         return c.Build();
     }
@@ -252,10 +254,73 @@ internal static class FramePropertyCatalog
         c.AddTypeUnknown(IntDesc("Component_U005.Unk01", "Unk01", () => u.Unk01, v => u.Unk01 = v));
     }
 
-    private static void AddCollision(FrameObjectCollision col, GroupCollector c)
+    private static void AddCollision(FrameObjectCollision col, FrameNodeAdapter node, GroupCollector c)
     {
         c.AddType("Collision", ULongHexDesc("Collision.Hash", "Collision hash", () => col.Hash, v => col.Hash = v,
-            "FNV64 of the collision mesh in the streamed collisions resource."));
+            "Names the physics shape this frame places — a mesh in the district's .col, or (for a car, which "
+                + "ships none) an ItemDesc record in its own archive."));
+
+        // The SHAPE itself, when the archive carries it. This is what a bullet hits, and a car's shapes are its
+        // own ItemDesc records — so a hull can be resized here without going anywhere near a .col.
+        ResolvedCollisionShape? resolved = ResolveShape(col, node);
+        if (resolved?.Shape.Element is not RigidBodyElement rigid) return;
+
+        c.AddType("Physics shape", ReadOnlyText("Shape.Kind", "Kind", () => rigid.Shape.ToString()));
+        switch (rigid.Shape)
+        {
+            case RigidBodyShape.Box:
+                c.AddType("Physics shape", Vec3Desc("Shape.Box", "Half-size",
+                    () => rigid.BoxDimensions,
+                    v => { rigid.BoxDimensions = v; Save(resolved); },
+                    "How far the box reaches from its centre on each axis."));
+                break;
+            case RigidBodyShape.Sphere:
+                c.AddType("Physics shape", FloatDesc("Shape.Radius", "Radius",
+                    () => rigid.Radius, v => { rigid.Radius = v; Save(resolved); }));
+                break;
+            case RigidBodyShape.Capsule:
+            case RigidBodyShape.Cylinder:
+                c.AddType("Physics shape", FloatDesc("Shape.Radius", "Radius",
+                    () => rigid.Radius, v => { rigid.Radius = v; Save(resolved); }));
+                c.AddType("Physics shape", FloatDesc("Shape.Height", "Height",
+                    () => rigid.Height, v => { rigid.Height = v; Save(resolved); },
+                    "Length of the straight section; the round caps add the radius at each end."));
+                break;
+            default:
+                // A cooked hull is a PhysX blob with no numbers to offer, and the vendored cooker cannot make
+                // a new one — saying so beats an empty section that looks like a missing feature.
+                c.AddType("Physics shape", ReadOnlyText("Shape.Cooked", "Geometry",
+                    () => $"{rigid.CookedMesh?.Length ?? 0} cooked bytes — not editable"));
+                break;
+        }
+    }
+
+    /// <summary>The physics shape a collision frame names, from its own archive. Null when it has none.</summary>
+    private static ResolvedCollisionShape? ResolveShape(FrameObjectCollision col, FrameNodeAdapter node)
+    {
+        try
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(node.Document.SourceArchive);
+            return CarCollisionShapes.Load(extracted, [col]).GetValueOrDefault(col.Hash);
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes a shape back to its own file. Every edit lands on disk straight away, and undo goes through the
+    /// same setter with the old value — so there is no half-state where the panel shows one size and the file
+    /// holds another.
+    /// </summary>
+    private static void Save(ResolvedCollisionShape resolved)
+    {
+        try { File.WriteAllBytes(resolved.File, resolved.Shape.ToBytes()); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Nothing to tell the user from this layer; the next read shows the file's own value again.
+        }
     }
 
     private static void AddPlanes(string id, Vector4[]? planes, GroupCollector c, string group)
@@ -293,6 +358,18 @@ internal static class FramePropertyCatalog
             Max = 255,
             Get = () => (long)get(),
             Set = set == null ? null : v => set((byte)(long)v!),
+        };
+
+    private static PropertyDescriptor FloatDesc(string id, string label, Func<float> get, Action<float>? set,
+        string? tip = null) => new()
+        {
+            Id = id,
+            Label = label,
+            Kind = PropertyKind.Float,
+            IsReadOnly = set == null,
+            Tooltip = tip,
+            Get = () => get(),
+            Set = set == null ? null : v => set((float)v!),
         };
 
     private static PropertyDescriptor UIntDesc(string id, string label, Func<uint> get, Action<uint>? set,

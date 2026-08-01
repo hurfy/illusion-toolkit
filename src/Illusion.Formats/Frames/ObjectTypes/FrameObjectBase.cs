@@ -40,11 +40,19 @@ public class FrameObjectBase : FrameEntry
     /// <summary>Joint index within <see cref="AttachedTo"/>; meaningless while that is null.</summary>
     public byte AttachedJoint { get; private set; }
 
-    /// <summary>Records the joint this frame hangs off. Called only while resolving the frame hierarchy.</summary>
+    /// <summary>Records the joint this frame hangs off. Set while resolving the frame hierarchy, and by
+    /// <see cref="FrameObjectModel.AttachToJoint"/>, which keeps it in step with the saved reference list.</summary>
     internal void SetAttachedJoint(FrameObjectModel model, byte joint)
     {
         AttachedTo = model;
         AttachedJoint = joint;
+    }
+
+    /// <summary>Forgets the joint — the counterpart of <see cref="SetAttachedJoint"/>.</summary>
+    internal void ClearAttachedJoint()
+    {
+        AttachedTo = null;
+        AttachedJoint = 0;
     }
 
     public FrameObjectBase? Parent

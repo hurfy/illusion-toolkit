@@ -23,7 +23,8 @@ internal sealed class PropertyEditController
         PropagateNameEdit(node, descriptor);
         _host.Editing.History.Push(new PropertyEdit(this, node, descriptor, before, after));
         _host.Persistence.MarkFrameModified(node);
-        _host.RaiseSelectionPropertiesChanged(); // refresh the panel values + the header title
+        _host.CarCollisionEditing.RefreshOverlay(); // a resized shape has to redraw at its new size
+        _host.RaiseSelectionPropertiesChanged();    // refresh the panel values + the header title
     }
 
     // Undo/redo re-applies the recorded value. Skips a node that left the scene (streaming unload) — a defensive
@@ -35,6 +36,7 @@ internal sealed class PropertyEditController
         PropagateNameEdit(node, descriptor);       // update the tree row/name BEFORE re-select so the rebuilt panel is correct
         _host.Persistence.MarkFrameModified(node); // undo/redo re-dirties the frame vs. the last save
         _host.Selection.SetSelection(new[] { node }, node);
+        _host.CarCollisionEditing.RefreshOverlay();
         _host.RaiseSelectionPropertiesChanged();
     }
 

@@ -38,6 +38,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly SelectionController Selection;
     internal readonly TransformEditController Editing;
     internal readonly CollisionEditController CollisionEditing;
+    internal readonly CarCollisionController CarCollisionEditing;
     internal readonly TranslokatorEditController CrashEditing;
     internal readonly ActorEditController ActorEditing;
     internal readonly PropertyEditController PropertyEditing;
@@ -55,6 +56,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         Selection = new SelectionController(this);
         Editing = new TransformEditController(this);
         CollisionEditing = new CollisionEditController(this);
+        CarCollisionEditing = new CarCollisionController(this);
         CrashEditing = new TranslokatorEditController(this);
         ActorEditing = new ActorEditController(this);
         PropertyEditing = new PropertyEditController(this);
@@ -251,6 +253,25 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// materialised up front — the shipped city has 57 652 of them, and holding a node for every one costs
     /// memory and every later garbage collection for a branch nobody opened.</summary>
     public void ExpandCrashRow(SceneNode rowNode) => Streamer.ExpandCrashRow(rowNode);
+
+    /// <summary>Whether to draw the physics shapes of the SELECTED part — scoped to the selection because a
+    /// car's shapes are what bullets hit, not what it looks like.</summary>
+    public bool ShowPartShapes
+    {
+        get => CarCollisionEditing.ShowShapes;
+        set => CarCollisionEditing.ShowShapes = value;
+    }
+
+    /// <summary>Whether the selection is a bone, which is the only thing a collision box can hang off.</summary>
+    public bool CanAddCollisionBox => CarCollisionEditing.CanAddBox;
+
+    /// <summary>Name of the selected bone, for the menu to say what the box would be attached to.</summary>
+    public string? SelectedBoneName => CarCollisionEditing.SelectedBone?.BoneName;
+
+    /// <summary>Gives the selected bone a box for bullets to hit — undoable, and selected on the way out so
+    /// the gizmo can place it.</summary>
+    public void AddCollisionBox(System.Numerics.Vector3 dimensions) =>
+        CarCollisionEditing.AddBoxToSelectedBone(dimensions);
 
     /// <summary>Whether a city_crash archive is loaded, so props can be placed into it.</summary>
     public bool CanPlaceCrashObject => Streamer.CrashLayer != null;
@@ -752,8 +773,19 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     internal void RaiseSceneChanged() => SceneChanged?.Invoke();
     internal void RaiseCatalogReady() => CatalogReady?.Invoke();
-    internal void RaiseSelectionChanged() => SelectionChanged?.Invoke();
-    internal void RaiseSelectionTransformChanged() => SelectionTransformChanged?.Invoke();
+    // The part-shape overlay follows the selection and the gizmo: it draws one part's shapes, so it is stale
+    // the moment either changes. Cheap — a handful of stubs and a dozen small files.
+    internal void RaiseSelectionChanged()
+    {
+        CarCollisionEditing.RefreshOverlay();
+        SelectionChanged?.Invoke();
+    }
+
+    internal void RaiseSelectionTransformChanged()
+    {
+        CarCollisionEditing.RefreshOverlay();
+        SelectionTransformChanged?.Invoke();
+    }
     internal void RaiseGizmoEdited(GizmoMode mode) => GizmoEdited?.Invoke(mode);
     internal void RaiseDirtyChanged() => DirtyChanged?.Invoke();
 }

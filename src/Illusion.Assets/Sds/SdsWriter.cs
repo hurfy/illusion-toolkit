@@ -33,6 +33,27 @@ public static class SdsWriter
     public readonly record struct PackResult(string Archive, string? Backup);
 
     /// <summary>
+    /// Drops manifest entries whose file is not on disk. Such an entry can only fail packing — the archive
+    /// would name a resource nothing carries — and it is unrecoverable from the folder's side, so removing it
+    /// is the only thing that lets a Build succeed at all.
+    /// </summary>
+    /// <returns>The file names that were unsaid.</returns>
+    private static List<string> PruneMissingEntries(string extracted)
+    {
+        var dropped = new List<string>();
+        SdsManifest manifest;
+        try { manifest = SdsManifest.Load(extracted); }
+        catch (Exception ex) when (ex is IOException or SdsFormatException) { return dropped; }
+
+        foreach ((string _, string file) in manifest.Entries.ToArray())
+        {
+            if (File.Exists(Path.Combine(extracted, file))) continue;
+            if (manifest.RemoveEntry(file)) dropped.Add(file);
+        }
+        return dropped;
+    }
+
+    /// <summary>
     /// Re-serializes <paramref name="frame"/> (with the user's transform edits) over the <c>FrameResource</c>
     /// file inside <paramref name="sds"/>'s extracted folder. Returns the file written.
     /// </summary>
@@ -240,6 +261,12 @@ public static class SdsWriter
             throw new FileNotFoundException(
                 $"Extracted SDS content not found for {sds.Name} — nothing to pack.",
                 Path.Combine(extracted, "SDSContent.xml"));
+
+        // A manifest line naming a file that is not there fails the whole Build, and the toolkit is what puts
+        // such lines in — an added collision shape that was then undone used to leave one behind. Nothing on
+        // disk can rescue such an entry, so drop it here rather than let it block every future Build; the
+        // resource is already gone either way, and this is the only place that sees the pair.
+        PruneMissingEntries(extracted);
 
         // Pack to a temp archive beside the target, so a mid-write failure never touches the live game file.
         // SdsArchive.Pack/Save throw on failure (missing files, bad manifest), which propagates to the

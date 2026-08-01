@@ -706,10 +706,140 @@ internal static class BoneProbes
                         rigidOf[owner] = (rigid, blended, partners);
                     }
 
+                    // ── The HIT BOXES ──
+                    // A car's ItemDesc shapes are its physics body; what a BULLET resolves against looks like
+                    // this instead — one box per split piece, sitting in the model's own quantized space.
+                    // Measured rather than assumed: if the reading is right, each box lands inside the model's
+                    // own bounds and near the geometry of the bone whose piece owns it.
+                    FrameObjectModel.HitBoxInfo[] boxes = body.HitBoxes ?? [];
+                    int pieces = (body.BlendMeshSplits ?? []).Sum(s => s.Data?.Length ?? 0);
+                    Check("there is exactly one hit box per split piece", boxes.Length == pieces,
+                        $"{boxes.Length} boxes, {pieces} pieces");
+
+                    Vector3 origin = body.Geometry.DecompressionOffset;
+                    float scale = body.Geometry.DecompressionFactor;
+                    (Vector3 meshMin, Vector3 meshMax) = MeshBounds(verts);
+                    int inside = 0;
+                    var sizes = new List<float>();
+                    foreach (FrameObjectModel.HitBoxInfo box in boxes)
+                    {
+                        Vector3 at = Dequantize(box.Position, origin, scale);
+                        Vector3 span = Dequantize(box.Size, Vector3.Zero, scale);
+                        sizes.Add(span.Length());
+                        const float slack = 0.5f;
+                        if (at.X >= meshMin.X - slack && at.X <= meshMax.X + slack
+                            && at.Y >= meshMin.Y - slack && at.Y <= meshMax.Y + slack
+                            && at.Z >= meshMin.Z - slack && at.Z <= meshMax.Z + slack)
+                        {
+                            inside++;
+                        }
+                    }
+                    // Solving the encoding rather than guessing it: a hit box belongs to a PIECE, and a piece
+                    // owns named faces — so the answer is known independently. Compute the box each piece's
+                    // own vertices occupy, then see which reading of the stored 16 bytes reproduces it.
+                    List<(Vector3 Centre, Vector3 Half)> truth =
+                        SdsMeshLoader.DecodeLod0(body) is { } lod0
+                            ? PieceBounds(body, lod0)
+                            : [];
+                    int haveTruth = truth.Count(t => t.Half.LengthSquared() > 0f);
+                    int posHits = 0, sizeHits = 0;
+                    for (int i = 0; i < boxes.Length && i < truth.Count; i++)
+                    {
+                        if (truth[i].Half.LengthSquared() <= 0f) continue;
+                        if ((HitBoxCentre(boxes[i]) - truth[i].Centre).Length() < 0.08f) posHits++;
+                        // Per-axis the size does NOT match, which is the tell that the box is turned: its
+                        // extents are along its own axes, not the world's. What can be checked without
+                        // decoding that orientation is the SCALE — a turned box of the same quantum still
+                        // has a comparable diagonal.
+                        float stored = HitBoxHalfSize(boxes[i]).Length();
+                        float actual = truth[i].Half.Length();
+                        if (actual > 0f && stored / actual is > 0.55f and < 1.8f) sizeHits++;
+                    }
+                    // Fixed point over ±10 m: signed for the centre, unsigned for the size, both times
+                    // 10/32768. Solved against the pieces' own geometry rather than guessed — the mesh's
+                    // quantization and a half-float reading both matched 0 of 192.
+                    Check("a hit box's centre is signed fixed point at 10/32768 m",
+                        haveTruth > 0 && posHits >= haveTruth * 0.85,
+                        $"{posHits} of {haveTruth} pieces");
+                    Check("…and its size is in the same quantum, unsigned",
+                        haveTruth > 0 && sizeHits >= haveTruth * 0.85,
+                        $"{sizeHits} of {haveTruth} within a comparable diagonal — per AXIS it does not "
+                            + "match, so the box is turned and its orientation is what the unk word holds");
+                    sb.AppendLine($"\nhit boxes: {inside} of {boxes.Length} land inside the body when read with "
+                        + "the mesh's quantization");
+                    // ── The orientation word ──
+                    // The size is in the right quantum but not on world axes, so the box is turned. Which
+                    // reading of the unknown word is the turn gets decided the same way everything else here
+                    // did: by how much of the piece's own geometry each candidate actually encloses.
+                    if (SdsMeshLoader.DecodeLod0(body) is { } fitLod)
+                    {
+                        List<Vector3>[] pieceVerts = PieceVertices(body, fitLod);
+                        (string Name, Func<uint, Quaternion> Decode)[] candidates =
+                        [
+                            ("no turn at all", _ => Quaternion.Identity),
+                            ("smallest-three quaternion, unsigned 10-bit", w => SmallestThree(w, false)),
+                            ("smallest-three quaternion, signed 10-bit", w => SmallestThree(w, true)),
+                            ("three 10-bit Euler angles", EulerTenBit),
+                        ];
+                        sb.AppendLine("\n  which reading of the unknown word turns the box onto its geometry:");
+                        foreach ((string name, Func<uint, Quaternion> decode) in candidates)
+                        {
+                            sb.AppendLine($"    {Coverage(boxes, pieceVerts, decode):P1}  {name}");
+                        }
+
+                        // The ceiling: if the turn is one of the 24 axis-aligned ones, picking the best per
+                        // piece says so — and whether the unknown word PREDICTS which one says whether it is
+                        // the field that carries it.
+                        var bestOf = new int[boxes.Length];
+                        float ceiling = BestAxisAligned(boxes, pieceVerts, bestOf);
+                        var byWord = new Dictionary<uint, HashSet<int>>();
+                        for (int i = 0; i < boxes.Length && i < pieceVerts.Length; i++)
+                        {
+                            if (pieceVerts[i].Count == 0) continue;
+                            if (!byWord.TryGetValue(boxes[i].Unk, out HashSet<int>? seen))
+                                byWord[boxes[i].Unk] = seen = [];
+                            seen.Add(bestOf[i]);
+                        }
+                        // Only words used by MORE THAN ONE piece can say anything: a value seen once agrees
+                        // with itself for free, and 132 of 192 pieces carry a word nothing else carries.
+                        var repeated = byWord.Where(p => CountPieces(boxes, pieceVerts, p.Key) > 1).ToArray();
+                        int consistent = repeated.Count(p => p.Value.Count == 1);
+                        sb.AppendLine($"    {ceiling:P1}  best of the 24 axis-aligned turns, chosen per piece");
+                        sb.AppendLine($"           the word takes {byWord.Count} distinct values over "
+                            + $"{pieceVerts.Count(v => v.Count > 0)} pieces; only {repeated.Length} are used "
+                            + $"more than once, and {consistent} of those always want the same turn");
+                    }
+
+                    sb.AppendLine("  raw words beside the box the piece's own vertices occupy:");
+                    for (int i = 0; i < boxes.Length && i < 12; i++)
+                    {
+                        if (i >= truth.Count) break;
+                        FrameObjectModel.HitBoxInfo b = boxes[i];
+                        sb.AppendLine($"    [{i,3}] p({b.Position.S1,6},{b.Position.S2,6},{b.Position.S3,6}) "
+                            + $"s({b.Size.S1,6},{b.Size.S2,6},{b.Size.S3,6}) unk {b.Unk,11}"
+                            + $"   truth centre ({truth[i].Centre.X,6:F2},{truth[i].Centre.Y,6:F2},"
+                            + $"{truth[i].Centre.Z,6:F2}) half ({truth[i].Half.X,5:F2},{truth[i].Half.Y,5:F2},"
+                            + $"{truth[i].Half.Z,5:F2})");
+                    }
+                    sb.AppendLine($"hit boxes: {boxes.Length}, positions decoded with the mesh's own "
+                        + $"quantization (offset {origin.X:F2},{origin.Y:F2},{origin.Z:F2} scale {scale:E2}); "
+                        + $"median span {(sizes.Count > 0 ? sizes.Order().ElementAt(sizes.Count / 2) : 0f):F2} m");
+                    foreach (FrameObjectModel.HitBoxInfo box in boxes.Take(6))
+                    {
+                        Vector3 at = Dequantize(box.Position, origin, scale);
+                        Vector3 span = Dequantize(box.Size, Vector3.Zero, scale);
+                        sb.AppendLine($"    unk {box.Unk,10}  at ({at.X,7:F2},{at.Y,7:F2},{at.Z,7:F2})  "
+                            + $"size ({span.X,6:F2},{span.Y,6:F2},{span.Z,6:F2})");
+                    }
+
                     int rigidTotal = rigidOf.Values.Sum(p => p.Rigid);
                     int blendedTotal = rigidOf.Values.Sum(p => p.Blended);
-                    Check("panels hold most of their geometry rigidly — one bone at full weight",
-                        rigidTotal > blendedTotal, $"{rigidTotal} rigid vs {blendedTotal} blended");
+                    // How much a car rigs rigidly is the MODELLER's choice, not a rule: shubert_38 comes out
+                    // 6327 rigid to 1074 blended, berkley_kingfisher_pha the other way round at 4076 to 7812.
+                    // So this only asserts that both kinds are used — the split itself is reported.
+                    Check("panels use both rigid and blended weighting",
+                        rigidTotal > 0 && blendedTotal > 0,
+                        $"{rigidTotal} rigid vs {blendedTotal} blended");
                     sb.AppendLine($"\nhow firmly each part holds its vertices "
                         + $"({rigidTotal} rigid, {blendedTotal} blended):");
                     foreach ((string owner, (int rigid, int blended, string partners)) in
@@ -736,6 +866,251 @@ internal static class BoneProbes
             sb.Insert(0, "DAMAGE PROBE: FAIL\n\n");
         }
         finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    /// <summary>
+    /// How much of each piece's own geometry the boxes actually enclose under a candidate orientation — the
+    /// score every reading of the unknown word is judged by. A turn that is right encloses nearly everything;
+    /// a wrong one leaves vertices sticking out of their own box.
+    /// </summary>
+    private static float Coverage(
+        FrameObjectModel.HitBoxInfo[] boxes, List<Vector3>[] pieces, Func<uint, Quaternion> decode)
+    {
+        long inside = 0, total = 0;
+        for (int i = 0; i < boxes.Length && i < pieces.Length; i++)
+        {
+            if (pieces[i].Count == 0) continue;
+            Vector3 centre = HitBoxCentre(boxes[i]);
+            Vector3 half = HitBoxHalfSize(boxes[i]);
+            Quaternion turn = decode(boxes[i].Unk);
+            Quaternion back = Quaternion.Conjugate(turn);
+            foreach (Vector3 v in pieces[i])
+            {
+                total++;
+                Vector3 local = Vector3.Transform(v - centre, back);
+                const float slack = 0.02f;
+                if (Math.Abs(local.X) <= half.X + slack && Math.Abs(local.Y) <= half.Y + slack
+                    && Math.Abs(local.Z) <= half.Z + slack)
+                {
+                    inside++;
+                }
+            }
+        }
+        return total == 0 ? 0f : (float)inside / total;
+    }
+
+    /// <summary>How many pieces with geometry carry a given unknown word.</summary>
+    private static int CountPieces(
+        FrameObjectModel.HitBoxInfo[] boxes, List<Vector3>[] pieces, uint word)
+    {
+        int n = 0;
+        for (int i = 0; i < boxes.Length && i < pieces.Length; i++)
+        {
+            if (pieces[i].Count > 0 && boxes[i].Unk == word) n++;
+        }
+        return n;
+    }
+
+    /// <summary>The 24 turns that map the axes onto themselves — every way a box can sit squarely.</summary>
+    private static readonly Quaternion[] AxisAligned = BuildAxisAligned();
+
+    private static Quaternion[] BuildAxisAligned()
+    {
+        var all = new List<Quaternion>();
+        float[] quarters = [0f, MathF.PI / 2f, MathF.PI, 3f * MathF.PI / 2f];
+        foreach (float x in quarters)
+        {
+            foreach (float y in quarters)
+            {
+                foreach (float z in quarters)
+                {
+                    Quaternion q = Quaternion.CreateFromYawPitchRoll(y, x, z);
+                    if (!all.Any(e => MathF.Abs(Quaternion.Dot(e, q)) > 0.999f)) all.Add(q);
+                }
+            }
+        }
+        return [.. all];
+    }
+
+    /// <summary>
+    /// The best each piece can do with a squarely-sitting box, and which turn that was. This is the ceiling:
+    /// if it is high, the boxes really are axis-aligned and only the mapping is missing.
+    /// </summary>
+    private static float BestAxisAligned(
+        FrameObjectModel.HitBoxInfo[] boxes, List<Vector3>[] pieces, int[] chosen)
+    {
+        long inside = 0, total = 0;
+        for (int i = 0; i < boxes.Length && i < pieces.Length; i++)
+        {
+            if (pieces[i].Count == 0) continue;
+            int best = 0;
+            long bestIn = -1;
+            for (int t = 0; t < AxisAligned.Length; t++)
+            {
+                int turn = t;
+                long got = CountInside(boxes[i], pieces[i], AxisAligned[turn]);
+                if (got > bestIn) { bestIn = got; best = turn; }
+            }
+            chosen[i] = best;
+            inside += bestIn;
+            total += pieces[i].Count;
+        }
+        return total == 0 ? 0f : (float)inside / total;
+    }
+
+    private static long CountInside(
+        FrameObjectModel.HitBoxInfo box, List<Vector3> verts, Quaternion turn)
+    {
+        Vector3 centre = HitBoxCentre(box);
+        Vector3 half = HitBoxHalfSize(box);
+        Quaternion back = Quaternion.Conjugate(turn);
+        long inside = 0;
+        foreach (Vector3 v in verts)
+        {
+            Vector3 local = Vector3.Transform(v - centre, back);
+            const float slack = 0.02f;
+            if (Math.Abs(local.X) <= half.X + slack && Math.Abs(local.Y) <= half.Y + slack
+                && Math.Abs(local.Z) <= half.Z + slack)
+            {
+                inside++;
+            }
+        }
+        return inside;
+    }
+
+    /// <summary>The "smallest three" packing: two bits say which component was dropped, three ten-bit fields
+    /// carry the rest over ±1/√2, and the dropped one is whatever makes the quaternion unit-length.</summary>
+    private static Quaternion SmallestThree(uint word, bool signedFields)
+    {
+        const float limit = 0.70710678f;
+        float Field(uint raw) => signedFields
+            ? ((int)raw - 512) / 511f * limit
+            : (((raw / 1023f) * 2f) - 1f) * limit;
+
+        int dropped = (int)(word >> 30);
+        float a = Field((word >> 20) & 0x3FF);
+        float b = Field((word >> 10) & 0x3FF);
+        float c = Field(word & 0x3FF);
+        float rest = MathF.Sqrt(Math.Max(0f, 1f - (a * a) - (b * b) - (c * c)));
+
+        return dropped switch
+        {
+            0 => new Quaternion(rest, a, b, c),
+            1 => new Quaternion(a, rest, b, c),
+            2 => new Quaternion(a, b, rest, c),
+            _ => new Quaternion(a, b, c, rest),
+        };
+    }
+
+    /// <summary>Three ten-bit fields read as yaw/pitch/roll over a full turn.</summary>
+    private static Quaternion EulerTenBit(uint word)
+    {
+        float Angle(uint raw) => raw / 1024f * MathF.Tau;
+        return Quaternion.CreateFromYawPitchRoll(
+            Angle((word >> 20) & 0x3FF), Angle((word >> 10) & 0x3FF), Angle(word & 0x3FF));
+    }
+
+    /// <summary>The vertices each split piece owns, in piece order.</summary>
+    private static List<Vector3>[] PieceVertices(FrameObjectModel model, DecodedMesh decoded)
+    {
+        var all = new List<List<Vector3>>();
+        foreach (FrameObjectModel.WeightedByMeshSplit split in model.BlendMeshSplits ?? [])
+        {
+            foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+            {
+                var seen = new HashSet<int>();
+                var verts = new List<Vector3>();
+                foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        int from = range.StartIndex;
+                        int to = Math.Min(from + (range.NumFaces * 3), decoded.Indices.Length);
+                        for (int i = from; i < to; i++)
+                        {
+                            int v = (int)decoded.Indices[i];
+                            if (v >= 0 && v < decoded.Positions.Length && seen.Add(v))
+                                verts.Add(decoded.Positions[v]);
+                        }
+                    }
+                }
+                all.Add(verts);
+            }
+        }
+        return [.. all];
+    }
+
+    /// <summary>
+    /// The quantum a hit box is stored in: ten metres over a signed 16-bit range. Solved from the shipped
+    /// cars, not assumed — a piece's own vertices say where its box is, and only this scale reproduces them.
+    /// </summary>
+    private const float HitBoxQuantum = 10f / 32768f;
+
+    /// <summary>A hit box's centre, in the model's space. The words are SIGNED here.</summary>
+    private static Vector3 HitBoxCentre(FrameObjectModel.HitBoxInfo box) => new(
+        (short)box.Position.S1 * HitBoxQuantum,
+        (short)box.Position.S2 * HitBoxQuantum,
+        (short)box.Position.S3 * HitBoxQuantum);
+
+    /// <summary>A hit box's half-extent. Unsigned — a size has no direction.</summary>
+    private static Vector3 HitBoxHalfSize(FrameObjectModel.HitBoxInfo box) => new(
+        box.Size.S1 * HitBoxQuantum,
+        box.Size.S2 * HitBoxQuantum,
+        box.Size.S3 * HitBoxQuantum);
+
+    /// <summary>
+    /// The box each split PIECE's own geometry occupies, in piece order — the same order the hit boxes are
+    /// stored in. This is the ground truth the stored bytes are solved against: a piece names its faces, the
+    /// faces name vertices, and the vertices say where that piece is and how big it is.
+    /// </summary>
+    private static List<(Vector3 Centre, Vector3 Half)> PieceBounds(
+        FrameObjectModel model, DecodedMesh decoded)
+    {
+        var bounds = new List<(Vector3, Vector3)>();
+        foreach (FrameObjectModel.WeightedByMeshSplit split in model.BlendMeshSplits ?? [])
+        {
+            foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+            {
+                var min = new Vector3(float.MaxValue);
+                var max = new Vector3(float.MinValue);
+                bool any = false;
+                foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        int from = range.StartIndex;
+                        int to = Math.Min(from + (range.NumFaces * 3), decoded.Indices.Length);
+                        for (int i = from; i < to; i++)
+                        {
+                            int v = (int)decoded.Indices[i];
+                            if (v < 0 || v >= decoded.Positions.Length) continue;
+                            min = Vector3.Min(min, decoded.Positions[v]);
+                            max = Vector3.Max(max, decoded.Positions[v]);
+                            any = true;
+                        }
+                    }
+                }
+                bounds.Add(any ? ((min + max) * 0.5f, (max - min) * 0.5f) : (Vector3.Zero, Vector3.Zero));
+            }
+        }
+        return bounds;
+    }
+
+    /// <summary>A 16-bit-per-axis triple back into model space, the way packed positions are stored.</summary>
+    private static Vector3 Dequantize(Formats.Frames.Short3 v, Vector3 origin, float scale) =>
+        new((v.S1 * scale) + origin.X, (v.S2 * scale) + origin.Y, (v.S3 * scale) + origin.Z);
+
+    /// <summary>The box a decoded vertex set occupies.</summary>
+    private static (Vector3 Min, Vector3 Max) MeshBounds(IReadOnlyList<Vertex> verts)
+    {
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (Vertex v in verts)
+        {
+            min = Vector3.Min(min, v.Position);
+            max = Vector3.Max(max, v.Position);
+        }
+        return (min, max);
     }
 
     /// <summary>Indices of the model's <c>deform_*</c> bones — the ones a car's damage system moves.</summary>

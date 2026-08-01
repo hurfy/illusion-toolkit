@@ -753,6 +753,12 @@ public partial class MainWindow : Window
         Viewport.ShowNavWorld = show;
     }
 
+    private void PartShapes_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized || Viewport == null) return;
+        Viewport.ShowPartShapes = PartShapesToggle.IsChecked == true;
+    }
+
     // The layers popup closes on an outside click; untoggle the button, or reopening it would take two presses.
     private void LayersPopup_Closed(object sender, EventArgs e) => LayersBtn.IsChecked = false;
 

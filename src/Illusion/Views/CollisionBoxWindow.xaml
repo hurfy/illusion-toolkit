@@ -1,0 +1,58 @@
+<Window x:Class="Illusion.Views.CollisionBoxWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Add Collision Box"
+        Width="440" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Scene tree → right-click a bone → Add Collision Box…: a car's mesh is not what bullets hit, so a part
+         added in Blender needs a physics shape of its own. A BOX because a convex hull is a PhysX-cooked blob
+         and the vendored cooker cannot make one; cars ship 307 boxes of their own anyway. Visual language
+         from the shared EditorStyles dictionary, like CrashObjectWindow. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- content -->
+            <RowDefinition Height="Auto" />  <!-- command bar -->
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+            <TextBlock Style="{StaticResource DimLabel}" Text="Part" Margin="0,0,0,4" />
+            <TextBlock x:Name="BoneLabel" Foreground="White" FontSize="13" Margin="0,0,0,16" />
+
+            <!-- Half-extents, which is what the format stores (it mirrors PhysX's NxBoxShapeDesc). The overlay
+                 draws the box as soon as it exists, so the size is checked by looking rather than by trusting. -->
+            <TextBlock Style="{StaticResource DimLabel}" Margin="0,0,0,6"
+                       Text="Half-size (metres) — how far the box reaches from its centre on each side" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                <TextBox x:Name="SizeX" Width="112" Margin="0,0,8,0" Padding="6,4" Text="0.30" />
+                <TextBox x:Name="SizeY" Width="112" Margin="0,0,8,0" Padding="6,4" Text="0.30" />
+                <TextBox x:Name="SizeZ" Width="112" Padding="6,4" Text="0.10" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Style="{StaticResource DimLabel}" Width="120" Text="X" />
+                <TextBlock Style="{StaticResource DimLabel}" Width="120" Text="Y" />
+                <TextBlock Style="{StaticResource DimLabel}" Width="112" Text="Z" />
+            </StackPanel>
+
+            <TextBlock x:Name="ErrorLabel" Foreground="#FFB4A0" FontSize="11.5" Margin="0,12,0,0"
+                       TextWrapping="Wrap" Visibility="Collapsed" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="#0FFFFFFF" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0"
+                Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="230"
+                           TextWrapping="Wrap" VerticalAlignment="Center"
+                           Text="The box lands on the bone; drag it into place with the gizmo, then Save and Build." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" Click="Cancel_Click" />
+                    <Button Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                            Content="Add" IsDefault="True" Click="Add_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

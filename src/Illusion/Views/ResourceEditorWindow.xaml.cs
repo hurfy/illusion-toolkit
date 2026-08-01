@@ -54,6 +54,10 @@ public partial class ResourceEditorWindow : Window
         // and says so), but the rest of the library — props, city objects — it takes.
         ToolShelf.Attach(Stage);
         ToolShelf.BlenderRequested += ToggleBridgeSession;
+
+        // The layers list is a look, not a decision: hovering the button is enough to open it — same as the
+        // map editor, because where you switch what the viewport draws must not depend on the window.
+        HoverPopup.Attach(LayersBtn, LayersPopup);
         Stage.BridgeStateChanged += () => Dispatcher.BeginInvoke(UpdateBridgeUi);
         Stage.SelectionChanged += UpdateBridgeUi;
         UpdateBridgeUi();
@@ -316,6 +320,14 @@ public partial class ResourceEditorWindow : Window
             });
         }
         finally { Mouse.OverrideCursor = null; }
+    }
+
+    private void LayersPopup_Closed(object sender, EventArgs e) => LayersBtn.IsChecked = false;
+
+    private void PartShapes_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized || Stage == null) return;
+        Stage.ShowPartShapes = PartShapesToggle.IsChecked == true;
     }
 
     private void Build_Click(object sender, RoutedEventArgs e)

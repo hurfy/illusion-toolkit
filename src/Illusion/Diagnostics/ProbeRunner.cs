@@ -634,6 +634,11 @@ internal static class ProbeRunner
             case "--probe-skinning":
                 BoneProbes.RunSkinningProbe(args.Length >= 2 ? args[1] : "shubert_38");
                 return true;
+            // What a car is actually SHOT AT: the collision stubs on its bones and the ItemDesc shapes they
+            // name (a car ships no .col). Optional arg = the car. Output: %TEMP%\illusion_car_collision.txt
+            case "--probe-car-collision":
+                CarCollisionProbes.RunCarCollisionProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // What makes a panel crumple: the deform bones, the per-vertex damage group and the BBCoeffs
             // beside it — which of them the shipped cars carry, and what a damage group lines up with.
             // Optional arg = the car. Output: %TEMP%\illusion_damage.txt

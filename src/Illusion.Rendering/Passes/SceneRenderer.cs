@@ -28,6 +28,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     private readonly LineOverlayRenderer _skeletonRenderer;
     private readonly LineOverlayRenderer _jointRenderer;
     private readonly LineOverlayRenderer _attachmentRenderer;
+    private readonly LineOverlayRenderer _partShapeRenderer;
     private readonly ActorMarkerRenderer _actorRenderer;
     private readonly ActorMarkerRenderer _actorSelectionRenderer;
     private readonly SelectionOutlineRenderer _selectionOutline;
@@ -92,6 +93,19 @@ public sealed unsafe class SceneRenderer : IDisposable
         _jointRenderer.SetDistrict(key, lines.Joints);
         _attachmentRenderer.SetDistrict(key, lines.Attachments);
     }
+    /// <summary>
+    /// Whether to draw the physics shapes of the SELECTED part. Off by default and deliberately not a
+    /// whole-scene layer: a car's shapes are what bullets hit rather than what it looks like, so they are
+    /// worth seeing while placing one and only clutter the view otherwise.
+    /// </summary>
+    public bool ShowPartShapes { get; set; }
+
+    /// <summary>Replaces the shape wireframe drawn for the selected part; empty clears it.</summary>
+    public void SetPartShapeLines(IReadOnlyList<Vector3> lineVertices) =>
+        _partShapeRenderer.SetDistrict(PartShapeKey, lineVertices);
+
+    private static readonly object PartShapeKey = new();
+
     /// <summary>Removes one archive's skeletons (district unload).</summary>
     public void RemoveSkeletonDistrict(object key)
     {
@@ -230,6 +244,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _skeletonRenderer = new LineOverlayRenderer(gpu);
         _jointRenderer = new LineOverlayRenderer(gpu);
         _attachmentRenderer = new LineOverlayRenderer(gpu);
+        _partShapeRenderer = new LineOverlayRenderer(gpu);
         _actorRenderer = new ActorMarkerRenderer(gpu);
         _actorSelectionRenderer = new ActorMarkerRenderer(gpu);
         _selectionOutline = new SelectionOutlineRenderer(gpu);
@@ -482,6 +497,10 @@ public sealed unsafe class SceneRenderer : IDisposable
             _jointRenderer.Render(ctx, viewProj, new Vector4(0.90f, 0.62f, 1.00f, 1f));         // joints, bright
         }
 
+        // The selected part's physics shapes, over everything for the same reason the rig is: a collision box
+        // sits INSIDE the body it belongs to, so a depth-tested one is hidden exactly where it is being placed.
+        if (ShowPartShapes) _partShapeRenderer.Render(ctx, viewProj, new Vector4(1f, 0.45f, 0.25f, 0.95f));
+
         // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per category.
         if (ShowActors) _actorRenderer.Render(ctx, viewProj);
         // The selected actor's glyph is drawn even with the overlay off, so a tree selection always shows up.
@@ -724,6 +743,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _skeletonRenderer.Dispose();
         _jointRenderer.Dispose();
         _attachmentRenderer.Dispose();
+        _partShapeRenderer.Dispose();
         _navMeshRenderer.Dispose();
         _navRenderer.Dispose();
         _collisionRenderer.Dispose();

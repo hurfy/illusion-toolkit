@@ -67,6 +67,29 @@ public class FrameObjectModel : FrameObjectSingleMesh
         get { return unkFlags; }
         set { unkFlags = value; }
     }
+
+    /// <summary>
+    /// Hangs <paramref name="frame"/> off one of this model's joints, so it moves with that bone. Both halves
+    /// are done here because they have to agree: the saved reference list, and the runtime link the frame
+    /// carries back to its joint. <see cref="AttachmentReference.AttachmentIndex"/> is not set — it is
+    /// recomputed from the resolved object when the resource is written.
+    /// </summary>
+    public void AttachToJoint(FrameObjectBase frame, byte joint)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        var reference = new AttachmentReference { JointIndex = joint, Attachment = frame };
+        attachmentReferences = [.. attachmentReferences ?? [], reference];
+        frame.SetAttachedJoint(this, joint);
+    }
+
+    /// <summary>Undoes <see cref="AttachToJoint"/>. Silent when the frame was not attached.</summary>
+    public void DetachFromJoints(FrameObjectBase frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        attachmentReferences = [.. (attachmentReferences ?? [])
+            .Where(r => !ReferenceEquals(r.Attachment, frame))];
+        frame.ClearAttachedJoint();
+    }
     public FrameSkeleton Skeleton
     {
         get { return GetSkeletonObject(); }

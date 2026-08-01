@@ -38,6 +38,9 @@ public sealed class BoneNodeAdapter : IFrameNode, IPropertySource
     /// <summary>Index into the model's rest-transform table and its skeleton's bone names.</summary>
     public int Index => _index;
 
+    /// <summary>The document this bone's model belongs to — which archive it will be written back into.</summary>
+    public SceneDocumentAdapter Document => _document;
+
     /// <summary>The bone's name, from the model's skeleton block; empty when the block cannot be read.</summary>
     public string BoneName
     {
