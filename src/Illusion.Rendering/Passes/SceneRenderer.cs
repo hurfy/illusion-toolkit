@@ -17,13 +17,17 @@ public sealed unsafe class SceneRenderer : IDisposable
 {
     private readonly GpuContext _gpu;
     private readonly MeshShader _shader;
+    private readonly SkinnedMeshShader _skinnedShader;
     private readonly InstancedMeshShader _instShader;
     private readonly SkyRenderer _sky;
     private readonly ZoneRenderer _zoneRenderer;
     private readonly CollisionRenderer _collisionRenderer;
-    private readonly NavGraphRenderer _navRenderer;
-    private readonly NavGraphRenderer _navMeshRenderer;
-    private readonly NavGraphRenderer _navWorldRenderer;
+    private readonly LineOverlayRenderer _navRenderer;
+    private readonly LineOverlayRenderer _navMeshRenderer;
+    private readonly LineOverlayRenderer _navWorldRenderer;
+    private readonly LineOverlayRenderer _skeletonRenderer;
+    private readonly LineOverlayRenderer _jointRenderer;
+    private readonly LineOverlayRenderer _attachmentRenderer;
     private readonly ActorMarkerRenderer _actorRenderer;
     private readonly ActorMarkerRenderer _actorSelectionRenderer;
     private readonly SelectionOutlineRenderer _selectionOutline;
@@ -71,6 +75,37 @@ public sealed unsafe class SceneRenderer : IDisposable
     public void RemoveNavWorldDistrict(object key) => _navWorldRenderer.RemoveDistrict(key);
     /// <summary>Removes all .nav overlays (scene reset).</summary>
     public void ClearNavWorld() => _navWorldRenderer.Clear();
+
+    /// <summary>Whether to draw the skeletons of skinned models. Off by default; uploaded per archive at
+    /// load, so this only gates drawing. For a car the bones ARE the parts, so this is how a door or an axle
+    /// becomes visible at all — the mesh itself shows one solid body.</summary>
+    public bool ShowSkeleton { get; set; }
+    /// <summary>
+    /// Uploads/replaces one archive's skeletons (keyed for streaming). The three line lists are drawn in three
+    /// weights on purpose: a car's rig is nearly flat — almost every bone hangs straight off one root — so the
+    /// bone-to-parent segments come out as a star from a single point and say very little, while the joints
+    /// and what hangs off them are the part worth reading.
+    /// </summary>
+    public void SetSkeletonDistrict(object key, RigLines lines)
+    {
+        _skeletonRenderer.SetDistrict(key, lines.Bones);
+        _jointRenderer.SetDistrict(key, lines.Joints);
+        _attachmentRenderer.SetDistrict(key, lines.Attachments);
+    }
+    /// <summary>Removes one archive's skeletons (district unload).</summary>
+    public void RemoveSkeletonDistrict(object key)
+    {
+        _skeletonRenderer.RemoveDistrict(key);
+        _jointRenderer.RemoveDistrict(key);
+        _attachmentRenderer.RemoveDistrict(key);
+    }
+    /// <summary>Removes every skeleton (scene reset).</summary>
+    public void ClearSkeletons()
+    {
+        _skeletonRenderer.Clear();
+        _jointRenderer.Clear();
+        _attachmentRenderer.Clear();
+    }
 
     /// <summary>Whether to draw glyphs for the actors nothing else draws (sounds, lights, triggers, script
     /// hooks…). Off by default; uploaded per district at load, so this only gates drawing.</summary>
@@ -184,13 +219,17 @@ public sealed unsafe class SceneRenderer : IDisposable
     {
         _gpu = gpu;
         _shader = new MeshShader(gpu);
+        _skinnedShader = new SkinnedMeshShader(gpu);
         _instShader = new InstancedMeshShader(gpu);
         _sky = new SkyRenderer(gpu);
         _zoneRenderer = new ZoneRenderer(gpu);
         _collisionRenderer = new CollisionRenderer(gpu);
-        _navRenderer = new NavGraphRenderer(gpu);
-        _navMeshRenderer = new NavGraphRenderer(gpu);
-        _navWorldRenderer = new NavGraphRenderer(gpu);
+        _navRenderer = new LineOverlayRenderer(gpu);
+        _navMeshRenderer = new LineOverlayRenderer(gpu);
+        _navWorldRenderer = new LineOverlayRenderer(gpu);
+        _skeletonRenderer = new LineOverlayRenderer(gpu);
+        _jointRenderer = new LineOverlayRenderer(gpu);
+        _attachmentRenderer = new LineOverlayRenderer(gpu);
         _actorRenderer = new ActorMarkerRenderer(gpu);
         _actorSelectionRenderer = new ActorMarkerRenderer(gpu);
         _selectionOutline = new SelectionOutlineRenderer(gpu);
@@ -434,6 +473,14 @@ public sealed unsafe class SceneRenderer : IDisposable
 
         // .nav overlay: AI path objects (cover / vault-over / action markers) as cyan boxes.
         if (ShowNavWorld) _navWorldRenderer.Render(ctx, viewProj, new Vector4(0.2f, 0.7f, 1f, 0.9f));
+        // The rig, over everything: a bone lives INSIDE the body it moves, so a depth-tested skeleton would
+        // be invisible exactly where it matters.
+        if (ShowSkeleton)
+        {
+            _skeletonRenderer.Render(ctx, viewProj, new Vector4(0.62f, 0.40f, 0.70f, 0.35f));   // bones, dim
+            _attachmentRenderer.Render(ctx, viewProj, new Vector4(0.35f, 0.80f, 0.78f, 0.75f)); // what hangs there
+            _jointRenderer.Render(ctx, viewProj, new Vector4(0.90f, 0.62f, 1.00f, 1f));         // joints, bright
+        }
 
         // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per category.
         if (ShowActors) _actorRenderer.Render(ctx, viewProj);
@@ -465,6 +512,9 @@ public sealed unsafe class SceneRenderer : IDisposable
         var srvs = stackalloc ID3D11ShaderResourceView*[3];            // reused per part: t0 diffuse, t1 normal, t2 spec
         ID3D11ShaderResourceView* last0 = null, last1 = null, last2 = null; // skip redundant SRV binds
 
+        uint skinStride = (uint)sizeof(SkinVertex);
+        bool skinnedBound = false; // which shader is currently on the pipeline
+
         foreach (GpuMesh mesh in _meshes)
         {
             if (!mesh.Visible || mesh.Instanced) continue;             // instanced ones — separate pass
@@ -481,11 +531,34 @@ public sealed unsafe class SceneRenderer : IDisposable
                 Tint = Vector4.One,
                 Lighting = lighting,
             };
-            _shader.UpdateConstants(ctx, ref consts);
+
+            // A skinned model goes through its own shader — same lighting and textures, plus the bone palette
+            // and the second vertex stream. Almost nothing in a scene is skinned, so the swap is rare.
+            if (mesh.IsSkinned != skinnedBound)
+            {
+                skinnedBound = mesh.IsSkinned;
+                if (skinnedBound) _skinnedShader.Bind(ctx); else _shader.Bind(ctx);
+                last0 = last1 = last2 = null; // a rebind drops the SRV state the skip-check assumed
+            }
+
+            if (mesh.IsSkinned)
+            {
+                _skinnedShader.UpdateConstants(ctx, ref consts);
+                _skinnedShader.UpdateBones(ctx, ref mesh.Palette);
+            }
+            else
+            {
+                _shader.UpdateConstants(ctx, ref consts);
+            }
             Vector4 boundTint = Vector4.One;
 
             var vb = mesh.VertexBuffer.Handle;
             ctx.IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+            if (mesh.IsSkinned)
+            {
+                var sb = mesh.SkinBuffer.Handle;
+                ctx.IASetVertexBuffers(1, 1, &sb, &skinStride, &offset);
+            }
             ctx.IASetIndexBuffer(mesh.IndexBuffer, Format.FormatR32Uint, 0);
 
             foreach (GpuPart part in mesh.Parts)
@@ -504,13 +577,18 @@ public sealed unsafe class SceneRenderer : IDisposable
                 if (part.Tint != boundTint)
                 {
                     consts.Tint = part.Tint;
-                    _shader.UpdateConstants(ctx, ref consts);
+                    if (mesh.IsSkinned) _skinnedShader.UpdateConstants(ctx, ref consts);
+                    else _shader.UpdateConstants(ctx, ref consts);
                     boundTint = part.Tint;
                 }
                 ctx.DrawIndexed(part.IndexCount, part.StartIndex, 0);
                 DrawCalls++;
             }
         }
+
+        // Leave the pipeline the way the caller set it up: the ghost pass and the instanced pass that follow
+        // both assume the plain mesh shader is bound.
+        if (skinnedBound) _shader.Bind(ctx);
         return drawn;
     }
 
@@ -639,6 +717,9 @@ public sealed unsafe class SceneRenderer : IDisposable
         _actorSelectionRenderer.Dispose();
         _actorRenderer.Dispose();
         _navWorldRenderer.Dispose();
+        _skeletonRenderer.Dispose();
+        _jointRenderer.Dispose();
+        _attachmentRenderer.Dispose();
         _navMeshRenderer.Dispose();
         _navRenderer.Dispose();
         _collisionRenderer.Dispose();
@@ -646,5 +727,6 @@ public sealed unsafe class SceneRenderer : IDisposable
         _sky.Dispose();
         _instShader.Dispose();
         _shader.Dispose();
+        _skinnedShader.Dispose();
     }
 }

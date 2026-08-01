@@ -83,6 +83,19 @@
     <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\Professional</MfVsRoot>
     <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\Enterprise</MfVsRoot>
     <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(ProgramFiles)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')">$(ProgramFiles)\Microsoft Visual Studio\2022\BuildTools</MfVsRoot>
+    <!-- Same list under the 32-bit program-files root. The installer decides which root an edition
+         lands in and it is not consistent: Build Tools 2022 — the one install that is the compiler
+         WITHOUT the IDE, and so the one a machine set up only to build this is likely to have —
+         goes to Program Files (x86). Probing the 64-bit root alone reported "no C++ toolchain
+         found" on a machine that had one. -->
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\Community</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\Professional\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\Professional</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\Enterprise</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\18\BuildTools</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\Community</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\Professional</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\Enterprise</MfVsRoot>
+    <MfVsRoot Condition="'$(MfVsRoot)' == '' AND Exists('$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')">$(MSBuildProgramFiles32)\Microsoft Visual Studio\2022\BuildTools</MfVsRoot>
     <MfVcVars>$(MfVsRoot)\VC\Auxiliary\Build\vcvars64.bat</MfVcVars>
     <MfCMake>$(MfVsRoot)\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe</MfCMake>
     <MfNinja>$(MfVsRoot)\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe</MfNinja>

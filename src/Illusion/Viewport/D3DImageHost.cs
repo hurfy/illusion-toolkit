@@ -141,6 +141,15 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         set { if (Rnd != null) Rnd.ShowActors = value; }
     }
 
+    /// <summary>Skeletons of skinned models, drawn over the mesh: a segment from each bone to its parent and
+    /// a tick at every joint. A car's doors, covers and axles ARE bones — the mesh is one solid body — so
+    /// this is the only view in which its parts exist. Built at load; this only gates drawing.</summary>
+    public bool ShowSkeleton
+    {
+        get => Rnd?.ShowSkeleton ?? false;
+        set { if (Rnd != null) Rnd.ShowSkeleton = value; }
+    }
+
     // ── Facade: catalogs ──
 
     /// <summary>Main catalog: map areas (districts + interiors from cityareas) for the selector.</summary>

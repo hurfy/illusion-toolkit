@@ -92,6 +92,10 @@ internal sealed class DistrictStreamer
         public readonly Dictionary<Formats.Translokator.Object, SceneNode> RowNodes = new();
     }
 
+    // Resident rigs, per SDS tree node — the source the bone overlay is rebuilt from after a bone is dragged.
+    // Kept here rather than in the renderer because the renderer only knows finished line lists.
+    private readonly Dictionary<SceneNode, List<SkeletonData>> _rigs = new();
+
     // .sds load queue (single area / city_univers when streaming). One item at a time.
     private readonly Queue<(FileInfo File, string Label, string? District)> _loadQueue = new();
     private bool _hasFramedOnce; // frame the camera ONCE (first load), don't reset afterwards
@@ -125,6 +129,7 @@ internal sealed class DistrictStreamer
         public Dictionary<FrameObjectSingleMesh, SceneNode>? CrashLeaves; // prototype mesh → its tree leaf
         public IReadOnlyList<Vector3>? NavLines;                     // decoded .nov road graph (edge endpoint pairs), null if none
         public IReadOnlyList<Vector3>? NavMeshLines;                // decoded .nov AI-mesh box wireframe, null if none
+        public List<SkeletonData>? Skeletons;                        // every skinned model's rig (the overlay is built from these)
         public IReadOnlyList<Vector3>? NavWorldLines;               // decoded .nav path-object boxes, null if none
         public ActorMarkerRenderData? ActorMarkers;                 // glyphs for the actors nothing draws, null if none
         public List<(SceneNode Node, Vector3 Position)>? ActorPickables; // those glyphs, tree nodes, for ray-picking
@@ -1071,6 +1076,10 @@ internal sealed class DistrictStreamer
             }
             ct.ThrowIfCancellationRequested();
 
+            // The rigs. Kept as skeletons rather than as finished lines: a bone can be dragged, and the overlay
+            // is then rebuilt from these (see RefreshRig).
+            List<SkeletonData> skeletons = CollectSkeletons(roots);
+
             return new PreparedLoad
             {
                 Sds = sds,
@@ -1083,6 +1092,7 @@ internal sealed class DistrictStreamer
                 CrashLeaves = crashLeaves,
                 NavLines = navLines,
                 NavMeshLines = navMeshLines,
+                Skeletons = skeletons,
                 NavWorldLines = navWorldLines,
                 ActorMarkers = actorMarkers,
                 ActorPickables = actorPickables,
@@ -1104,6 +1114,116 @@ internal sealed class DistrictStreamer
     }
 
     // Background preparation ready → attach the tree, register the district, queue meshes for attach.
+    /// <summary>
+    /// Every skinned model's rig in one line list: a segment from each bone to its parent, plus a small
+    /// three-axis cross at every bone so a rig that is mostly flat still reads as a set of points. World
+    /// space, like the meshes — the rest transforms are model-space, so they go through the model's own
+    /// matrix. Null when nothing loaded has a rig, which is everything except cars and characters.
+    /// </summary>
+    /// <summary>Every skinned model's rig under these roots, in tree order.</summary>
+    internal static List<SkeletonData> CollectSkeletons(IReadOnlyList<SdsFrameNode> roots)
+    {
+        var found = new List<SkeletonData>();
+        foreach (SdsFrameNode root in roots) Walk(root);
+        return found;
+
+        void Walk(SdsFrameNode node)
+        {
+            if (node.Skeleton is { } rig) found.Add(rig);
+            foreach (SdsFrameNode c in node.Children) Walk(c);
+        }
+    }
+
+    /// <summary>
+    /// The rig overlay for a set of skeletons, in world space. Positions come from each bone's own adapter
+    /// where there is one, so a bone that has been dragged draws where it now is — the rest matrices captured
+    /// at load are only the fallback for a scene built without a document.
+    /// </summary>
+    internal static RigLines? BuildRigLines(IReadOnlyList<SkeletonData> skeletons)
+    {
+        var bones = new List<Vector3>();
+        var joints = new List<Vector3>();
+        var attachments = new List<Vector3>();
+
+        foreach (SkeletonData rig in skeletons)
+        {
+            var at = new Vector3[rig.Bones.Count];
+            for (int i = 0; i < rig.Bones.Count; i++)
+            {
+                at[i] = rig.Bones[i].Source is IFrameNode live
+                    ? live.WorldTransform.Translation
+                    : Vector3.Transform(rig.Bones[i].Rest.Translation, rig.World);
+            }
+
+            for (int i = 0; i < at.Length; i++)
+            {
+                int parent = rig.Bones[i].Parent;
+                if (parent >= 0 && parent < at.Length)
+                {
+                    bones.Add(at[parent]);
+                    bones.Add(at[i]);
+                }
+
+                Tick(joints, at[i], 0.035f);
+            }
+
+            // A leader from the bone to whatever hangs on it, with a tick at the far end. This is the only
+            // drawing that says which bone carries a car's door hull, lock or climb box.
+            foreach (BoneAttachment a in rig.Attachments)
+            {
+                if (a.Joint < 0 || a.Joint >= at.Length) continue;
+                Vector3 to = a.Source is IFrameNode frame ? frame.WorldTransform.Translation : a.World.Translation;
+                attachments.Add(at[a.Joint]);
+                attachments.Add(to);
+                Tick(attachments, to, 0.05f);
+            }
+        }
+
+        var lines = new RigLines(bones, joints, attachments);
+        return lines.IsEmpty ? null : lines;
+
+        // A three-axis cross. Small enough not to clutter a car, big enough to find.
+        static void Tick(List<Vector3> into, Vector3 at, float size)
+        {
+            into.Add(at - new Vector3(size, 0, 0)); into.Add(at + new Vector3(size, 0, 0));
+            into.Add(at - new Vector3(0, size, 0)); into.Add(at + new Vector3(0, size, 0));
+            into.Add(at - new Vector3(0, 0, size)); into.Add(at + new Vector3(0, 0, size));
+        }
+    }
+
+    /// <summary>
+    /// Redraws the rig of the archive <paramref name="node"/> belongs to. Called after a bone moves: the
+    /// overlay is one immutable vertex buffer per archive, so a moved bone only shows up once it is rebuilt.
+    /// </summary>
+    public void RefreshRig(SceneNode node)
+    {
+        for (SceneNode? n = node; n != null; n = n.Parent)
+        {
+            if (!_rigs.TryGetValue(n, out List<SkeletonData>? skeletons)) continue;
+            if (BuildRigLines(skeletons) is { } lines) _host.Rnd?.SetSkeletonDistrict(n, lines);
+            PoseSkinnedMeshes(n);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Puts every skinned mesh under <paramref name="sds"/> into the pose its own bones are in now. This is
+    /// what makes the body follow the bone rather than only the rig overlay: the vertices are blended on the
+    /// GPU against a palette, and the palette is what changes here.
+    /// </summary>
+    private void PoseSkinnedMeshes(SceneNode sds)
+    {
+        foreach (SceneNode leaf in sds.DescendantMeshLeaves())
+        {
+            if (leaf.Mesh is not { } mesh || !mesh.IsSkinned) continue;
+            // The rest transforms of the mesh's OWN model — not of some other rig in the archive that happens
+            // to have the same number of bones.
+            if (leaf.Source is not FrameNodeAdapter adapter) continue;
+            if (adapter.Frame is not FrameObjectModel model || model.RestTransform is not { } rest) continue;
+            mesh.SetPose(rest);
+        }
+    }
+
     private void BeginBuild()
     {
         Task<PreparedLoad?> task = _loadTask!;
@@ -1186,6 +1306,11 @@ internal sealed class DistrictStreamer
         // Navigation-graph overlay: uploaded per district (keyed by its SDS node); ShowNav gates drawing.
         if (load.NavLines != null) _host.Rnd!.SetNavDistrict(load.Sds, load.NavLines);
         if (load.NavMeshLines != null) _host.Rnd!.SetNavMeshDistrict(load.Sds, load.NavMeshLines);
+        if (load.Skeletons is { Count: > 0 } skeletons)
+        {
+            _rigs[load.Sds] = skeletons;
+            if (BuildRigLines(skeletons) is { } rig) _host.Rnd!.SetSkeletonDistrict(load.Sds, rig);
+        }
         // .nav path objects (cover / vault-over markers): separate toggle (ShowNavWorld), same keying.
         if (load.NavWorldLines != null) _host.Rnd!.SetNavWorldDistrict(load.Sds, load.NavWorldLines);
         // Actor glyphs (sounds, lights, triggers…): own toggle (ShowActors), same per-district keying. The mesh
@@ -1299,6 +1424,8 @@ internal sealed class DistrictStreamer
         {
             _host.Rnd!.RemoveCollisionDistrict(node); // drop this district's collision overlay with it
             _host.Rnd!.RemoveNavDistrict(node);       // and its .nov graph overlay
+            _host.Rnd!.RemoveSkeletonDistrict(node);  // and the rigs of its skinned models
+            _rigs.Remove(node);
             _host.Rnd!.RemoveNavMeshDistrict(node);   // and its .nov AI-mesh overlay
             _host.Rnd!.RemoveNavWorldDistrict(node);  // and its .nav path-object overlay
             _host.Rnd!.RemoveActorDistrict(node);     // and its actor glyphs
@@ -1335,6 +1462,8 @@ internal sealed class DistrictStreamer
         _host.Rnd?.ClearCollision();
         _host.Rnd?.ClearNov();
         _host.Rnd?.ClearNavWorld();
+        _host.Rnd?.ClearSkeletons();
+        _rigs.Clear();
         _host.Rnd?.ClearActors();
         Actors.Clear();
         _collisionSources.Clear();

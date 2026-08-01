@@ -22,6 +22,26 @@ namespace Illusion.Diagnostics.Probes;
 /// </summary>
 internal static class CarLibraryProbes
 {
+    private static BoneData? Bone(SkeletonData rig, string name) =>
+        rig.Bones.Cast<BoneData?>().FirstOrDefault(b => b!.Value.Name == name);
+
+    // Two bones are a left/right pair when they differ in X and agree on the rest — which is what says the
+    // rest transforms were read in the space they are actually stored in.
+    private static bool Mirrored(SkeletonData rig, string left, string right)
+    {
+        if (Bone(rig, left) is not { } l || Bone(rig, right) is not { } r) return false;
+        Vector3 a = l.Rest.Translation, b = r.Rest.Translation;
+        return Math.Abs(a.X + b.X) < Math.Abs(a.X) * 0.6f + 0.05f && a.X * b.X < 0
+               && Math.Abs(a.Y - b.Y) < 0.05f && Math.Abs(a.Z - b.Z) < 0.05f;
+    }
+
+    private static bool Inside(Vector3 p, Vector3 min, Vector3 max, float slack) =>
+        p.X >= min.X - slack && p.X <= max.X + slack
+        && p.Y >= min.Y - slack && p.Y <= max.Y + slack
+        && p.Z >= min.Z - slack && p.Z <= max.Z + slack;
+
+    private static string Fmt(Vector3 v) => $"({v.X:F2},{v.Y:F2},{v.Z:F2})";
+
     internal static void RunCarsLibraryProbe(string focus)
     {
         string outFile = Path.Combine(Path.GetTempPath(), "illusion_library_cars.txt");
@@ -134,6 +154,59 @@ internal static class CarLibraryProbes
             Check("the focus car's body carries a paint colour", painted.Length > 0);
             Check("the paint is not white", painted.All(p => p.Tint.X < 0.99f || p.Tint.Y < 0.99f || p.Tint.Z < 0.99f));
             Check("it is a save unit", document != null);
+
+            // ── The rig ──
+            //
+            // A car's bones ARE its parts, and until now nothing in the editor showed them. What matters is
+            // that they land where the parts are: a rest transform read in the wrong space would put the
+            // whole skeleton somewhere else, and a picture of it would still look plausible.
+            // The body's own box, to check the rig lands in it.
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            foreach (MeshData m in focusMeshes)
+                foreach (Vector3 p in m.Positions)
+                {
+                    Vector3 w = Vector3.Transform(p, m.World);
+                    min = Vector3.Min(min, w);
+                    max = Vector3.Max(max, w);
+                }
+
+            (List<SdsFrameNode> focusRoots, _, _) = SdsMeshLoader.LoadHierarchy(car);
+            var rigs = new List<SkeletonData>();
+            void Collect(SdsFrameNode n)
+            {
+                if (n.Skeleton is { } s) rigs.Add(s);
+                foreach (SdsFrameNode c in n.Children) Collect(c);
+            }
+            foreach (SdsFrameNode r in focusRoots) Collect(r);
+
+            Check("the car brings a rig with it", rigs.Count == 1 && rigs[0].Bones.Count > 50,
+                $"{rigs.Count} rig(s), {(rigs.Count > 0 ? rigs[0].Bones.Count : 0)} bones");
+            if (rigs.Count > 0)
+            {
+                SkeletonData rig = rigs[0];
+                sb.AppendLine($"\nrig of {rig.OwnerName}: {rig.Bones.Count} bones, " +
+                              $"{rig.Bones.Count(b => b.Parent < 0)} root(s)");
+
+                // Every bone inside the body's own box, with a little slack for the ones that sit on its skin.
+                var outside = rig.Bones
+                    .Where(b => !Inside(Vector3.Transform(b.Rest.Translation, rig.World), min, max, 0.35f))
+                    .ToList();
+                Check("every bone sits inside the body it belongs to", outside.Count == 0,
+                    string.Join(", ", outside.Take(6).Select(b =>
+                        $"{b.Name}{Fmt(Vector3.Transform(b.Rest.Translation, rig.World))}")));
+
+                // The pairs are the giveaway that the space is right: a car's left and right axles are the
+                // same bone mirrored about X, and reading the rest transforms wrongly would break that.
+                Check("left and right axles mirror each other",
+                    Mirrored(rig, "axleFL", "axleFR") && Mirrored(rig, "axleBL", "axleBR"),
+                    string.Join(" ", new[] { "axleFL", "axleFR", "axleBL", "axleBR" }
+                        .Select(n => n + Fmt(Bone(rig, n)?.Rest.Translation ?? default))));
+
+                Check("the parts a car is made of are all there",
+                    new[] { "doorFL", "doorFR", "doorBL", "doorBR", "coverF", "coverB", "engine" }
+                        .All(n => Bone(rig, n) != null));
+            }
 
             // ── Save and pack, on the car ──
             string carExtracted = folders[0];

@@ -20,6 +20,31 @@ public sealed class PrefabFile
     /// <summary>The name hashes the container is keyed by — how an entity finds its init data.</summary>
     public IReadOnlyList<ulong> Hashes => [.. Wire.Prefabs.Select(p => p.Hash)];
 
+    /// <summary>Each entry's type id and the size of its init-data blob, in file order. The blob itself stays
+    /// inside the core; this is what a caller can ask about it while it is opaque.</summary>
+    public IReadOnlyList<(int Type, int Size)> Entries => [.. Wire.Prefabs.Select(p => (p.PrefabType, p.Data.Length))];
+
+    /// <summary>
+    /// Which entries the core decoded rather than carrying opaquely, by type id (0 = still opaque). Typing is
+    /// going variant by variant, so this is how much of a container is actually understood — and the number a
+    /// probe asserts against so a regression shows up as coverage falling, not as silence.
+    /// </summary>
+    public IReadOnlyList<int> DecodedKinds => [.. Wire.Prefabs.Select(p => p.TypedKind)];
+
+    /// <summary>
+    /// The assembly of the car this container describes, or null when it holds none. Everything in it names a
+    /// FRAME of the car's own model by FNV64 hash — a bone, a dummy, a point — which is what makes it the
+    /// description of how the thing is put together rather than a table of numbers.
+    /// </summary>
+    public CarPrefab? Car
+    {
+        get
+        {
+            Native.Model.PrefabEntryW? entry = Wire.Prefabs.FirstOrDefault(p => p.CarInit.Count > 0);
+            return entry == null ? null : new CarPrefab(entry.CarInit[0]);
+        }
+    }
+
     public static PrefabFile Load(string path)
     {
         using var stream = new MemoryStream(File.ReadAllBytes(path), writable: false);

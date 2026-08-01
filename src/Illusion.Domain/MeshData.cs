@@ -21,6 +21,26 @@ public sealed class MeshData
     public MeshPart[] Parts { get; init; } = null!;
 
     /// <summary>
+    /// Per-vertex bone influences, four per vertex, flattened: vertex i owns [4i, 4i+4). Null for a mesh with
+    /// no skin, which is nearly everything — only a skinned model has these.
+    /// <para>
+    /// The indices are ALREADY resolved to the model's own bone list. In the file they are not: a vertex's
+    /// four ids index a per-LOD remap pool, and which pool depends on the face group being drawn (see
+    /// <c>--probe-skinning</c>). Resolving that at load is what lets the renderer treat a bone id as a bone.
+    /// </para>
+    /// </summary>
+    public byte[]? BoneIndices { get; init; }
+
+    /// <summary>Weights parallel to <see cref="BoneIndices"/>; they sum to one per vertex.</summary>
+    public float[]? BoneWeights { get; init; }
+
+    /// <summary>The rig this mesh is skinned to, in the pose it was authored in. Null when there is no skin.</summary>
+    public SkeletonData? Skeleton { get; init; }
+
+    /// <summary>True when the mesh carries everything a skinned draw needs.</summary>
+    public bool IsSkinned => BoneIndices != null && BoneWeights != null && Skeleton != null;
+
+    /// <summary>
     /// World matrices of copies for hardware instancing (city_crash / Translokator). null for a regular
     /// mesh — then the single <see cref="World"/> is used. Vertex positions here are in the prototype's
     /// LOCAL space: each matrix is already = refTransform·instanceTRS.

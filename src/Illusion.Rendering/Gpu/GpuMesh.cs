@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Illusion.Domain;
+using Illusion.Rendering.Shaders;
 using Illusion.Rendering.Textures;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
@@ -15,6 +16,21 @@ public struct MeshVertex
     public Vector2 UV;
     public Vector3 Tangent;   // local frame; transformed to world in the VS for normal mapping
     public Vector3 Binormal;  // decoder-supplied, handedness-signed
+}
+
+/// <summary>
+/// The skin of one vertex, in its own stream. Kept off <see cref="MeshVertex"/> on purpose: a district is
+/// millions of vertices and not one of them is skinned, so paying twenty bytes each for a channel only a car
+/// or a character uses would be a third of its vertex memory spent on nothing.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct SkinVertex
+{
+    public byte Bone0;
+    public byte Bone1;
+    public byte Bone2;
+    public byte Bone3;
+    public Vector4 Weights;
 }
 
 /// <summary>Range of indices with its material's texture maps (SRVs belong to TextureLibrary).</summary>
@@ -55,6 +71,23 @@ public sealed unsafe class GpuMesh : IDisposable
 
     /// <summary>The scene-tree leaf that owns this mesh (set on upload) — lets a viewport pick resolve to a node.</summary>
     public object? Owner;
+
+    /// <summary>Stream 1: four bone influences per vertex. Null for everything that is not a skinned model.</summary>
+    public ComPtr<ID3D11Buffer> SkinBuffer;
+
+    /// <summary>
+    /// What each bone does to the mesh right now: the matrix from the pose the geometry was authored in to
+    /// the bone's current pose. Identity everywhere until a bone is moved, so a freshly loaded model draws
+    /// exactly as it did before skinning existed.
+    /// </summary>
+    public BonePalette Palette = BonePalette.Identity;
+
+    /// <summary>Inverse of each bone's rest transform, captured at upload — the bind pose. Recomputing a
+    /// palette entry is <c>BindInverse[i] * currentRest[i]</c> and nothing else.</summary>
+    public Matrix4x4[]? BindInverse;
+
+    /// <summary>True when the mesh has everything a skinned draw needs.</summary>
+    public bool IsSkinned => SkinBuffer.Handle != null;
 
     // CPU geometry (local space) retained for ray-picking and world-AABB recompute after a transform edit.
     // These reference the source MeshData arrays (no extra copy). An instanced cloud keeps them too — not for the
@@ -179,7 +212,63 @@ public sealed unsafe class GpuMesh : IDisposable
                 result.InstanceBuffer = GpuBuffers.CreateImmutable(gpu, pInst, (uint)(sortedInstances!.Length * sizeof(Matrix4x4)), BindFlag.VertexBuffer);
         }
 
+        // The skin, when the mesh has one and its rig fits the palette. A rig too big to address is simply not
+        // skinned: drawing it with wrapped-around bone indices would tear the model apart.
+        if (!instanced && mesh.IsSkinned && mesh.Skeleton!.Bones.Count <= BonePalette.MaxBones)
+        {
+            var skin = new SkinVertex[n];
+            byte[] ids = mesh.BoneIndices!;
+            float[] weights = mesh.BoneWeights!;
+            for (int i = 0; i < n && ((i * 4) + 3) < ids.Length; i++)
+            {
+                skin[i].Bone0 = ids[i * 4];
+                skin[i].Bone1 = ids[(i * 4) + 1];
+                skin[i].Bone2 = ids[(i * 4) + 2];
+                skin[i].Bone3 = ids[(i * 4) + 3];
+                skin[i].Weights = new Vector4(
+                    weights[i * 4], weights[(i * 4) + 1], weights[(i * 4) + 2], weights[(i * 4) + 3]);
+            }
+            fixed (SkinVertex* pSkin = skin)
+                result.SkinBuffer = GpuBuffers.CreateImmutable(
+                    gpu, pSkin, (uint)(n * sizeof(SkinVertex)), BindFlag.VertexBuffer);
+
+            // The bind pose. A frame matrix arrives with a fourth column that is not (0,0,0,1), so it has to be
+            // made affine before it will invert at all — see --probe-skinning.
+            var bindInverse = new Matrix4x4[mesh.Skeleton.Bones.Count];
+            for (int i = 0; i < bindInverse.Length; i++)
+            {
+                Matrix4x4 rest = Affine(mesh.Skeleton.Bones[i].Rest);
+                bindInverse[i] = Matrix4x4.Invert(rest, out Matrix4x4 inverse) ? inverse : Matrix4x4.Identity;
+            }
+            result.BindInverse = bindInverse;
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// Puts the mesh into a pose: entry i of <paramref name="currentRest"/> is where bone i stands now, in the
+    /// same space its rest transform was in. Passing the rest transforms back gives the identity palette,
+    /// which is the mesh as authored.
+    /// </summary>
+    public void SetPose(IReadOnlyList<Matrix4x4> currentRest)
+    {
+        if (BindInverse is not { } bind) return;
+        for (int i = 0; i < bind.Length; i++)
+        {
+            Palette.Set(i, i < currentRest.Count ? bind[i] * Affine(currentRest[i]) : Matrix4x4.Identity);
+        }
+    }
+
+    // A frame matrix rides as 4x3, so its fourth column is not (0,0,0,1) and neither inversion nor
+    // multiplication behaves until the 1 is put back.
+    private static Matrix4x4 Affine(Matrix4x4 m)
+    {
+        m.M14 = 0;
+        m.M24 = 0;
+        m.M34 = 0;
+        m.M44 = 1;
+        return m;
     }
 
     /// <summary>
@@ -305,6 +394,7 @@ public sealed unsafe class GpuMesh : IDisposable
         VertexBuffer.Dispose();
         IndexBuffer.Dispose();
         if (Instanced) InstanceBuffer.Dispose();
+        if (IsSkinned) SkinBuffer.Dispose();
         // SRVs belong to TextureLibrary — returning the leases lets it evict entries with no users left.
         _textures?.Release(_textureLeases);
     }

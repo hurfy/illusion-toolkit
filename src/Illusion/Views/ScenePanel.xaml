@@ -205,6 +205,24 @@
                                             <Setter Property="Stroke" Value="#E8873C" />
                                             <Setter Property="Data" Value="M6,0.6 L11.4,6 L6,11.4 L0.6,6 Z" />
                                         </DataTrigger>
+                                        <!-- The rig of a skinned model, and one of its bones. A bone is drawn
+                                             the way a skeleton overlay draws it: a joint with a shaft. -->
+                                        <DataTrigger Binding="{Binding Kind}" Value="Skeleton">
+                                            <Setter Property="Stroke" Value="#D08AE0" />
+                                            <Setter Property="Data"
+                                                    Value="M6,1.4 A1.5,1.5 0 1 1 6,4.4 A1.5,1.5 0 1 1 6,1.4 Z M6,4.4 L3.4,10.4 M6,4.4 L8.6,10.4" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Kind}" Value="Bone">
+                                            <Setter Property="Stroke" Value="#D08AE0" />
+                                            <Setter Property="Data"
+                                                    Value="M3.2,8.8 A1.6,1.6 0 1 1 3.2,8.79 M8.8,3.2 A1.6,1.6 0 1 1 8.8,3.19 M4.4,7.6 L7.6,4.4" />
+                                        </DataTrigger>
+                                        <!-- A frame hanging off a bone: the same joint dot, on a leader. -->
+                                        <DataTrigger Binding="{Binding Kind}" Value="Attachment">
+                                            <Setter Property="Stroke" Value="#5ACCC6" />
+                                            <Setter Property="Data"
+                                                    Value="M2,6 L6.4,6 M8,6 A1.6,1.6 0 1 1 8,5.99 M6.4,4.2 L6.4,7.8" />
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding Kind}" Value="Actor">
                                             <Setter Property="Stroke" Value="#E8873C" />
                                             <Setter Property="Data" Value="M6,2.2 L9.8,6 L6,9.8 L2.2,6 Z" />
@@ -319,6 +337,29 @@
                         <ToggleButton Grid.Column="2" x:Name="SnowScenesToggle"
                                       Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
                                       ToolTip="Winter-only snow geometry (scene4XX). Auto-follows the winter selector — toggle to override."
+                                      Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                    </Grid>
+
+                    <!-- (e) skeletons — the bone glyph, violet #D08AE0. Not a city filter: a rig belongs to
+                         a skinned model, and a car's bones are the only place its doors and axles exist. -->
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                              Margin="0,0,9,0" Fill="Transparent" Stroke="#D08AE0" StrokeThickness="1.2"
+                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Data="M3.2,8.8 A1.6,1.6 0 1 1 3.2,8.79 M8.8,3.2 A1.6,1.6 0 1 1 8.8,3.19 M4.4,7.6 L7.6,4.4" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="Render skeletons" Foreground="White" FontSize="12" />
+                            <TextBlock Text="Bones of skinned models — a car's parts" Foreground="#80FFFFFF"
+                                       FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <ToggleButton Grid.Column="2" x:Name="SkeletonToggle"
+                                      Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                      ToolTip="The rig of every skinned model on screen, drawn over the mesh: a segment from each bone to its parent and a tick at every joint. A car's doors, covers and axles are bones — the mesh itself is one solid body."
                                       Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
                     </Grid>
 

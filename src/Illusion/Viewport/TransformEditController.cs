@@ -218,6 +218,11 @@ internal sealed class TransformEditController
         // An actor's geometry does not hang under its tree node — it lives in the FrameResource branch, placed
         // by the actor's matrix. Moving the actor has to push those meshes' new worlds too.
         if (node.Source is ActorNodeAdapter) _host.Streamer.Actors.SyncMeshes(node);
+
+        // A bone draws as part of the archive's rig overlay, which is one immutable buffer — so a moved bone
+        // (and everything attached to it, which the frame hierarchy has already carried along) only appears in
+        // its new place once that buffer is rebuilt.
+        if (node.Source is BoneNodeAdapter) _host.Streamer.RefreshRig(node);
     }
 
     /// <summary>Resyncs a node's GPU meshes to its current world, then refreshes the outline/pivot and the
@@ -431,9 +436,11 @@ internal sealed class TransformEditController
             // Collision placements and crash props are IFrameNode too, but they delete through their own
             // controllers (the .col and .tra paths), not this one. An actor is an IFrameNode as well and has
             // no frame object at all — this path would drop its tree row while its geometry stayed in the
-            // scene, and undo would then try to re-insert the row where nothing removed one.
+            // scene, and undo would then try to re-insert the row where nothing removed one. A bone is not a
+            // frame either: deleting one would have to renumber every vertex weight in the model.
             if (n.Source is IFrameNode
-                    and not (CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter)
+                    and not (CollisionInstanceAdapter or TranslokatorInstanceAdapter or ActorNodeAdapter
+                             or BoneNodeAdapter)
                 && !HasSelectedAncestorNode(n, sel))
                 roots.Add(n);
         return roots;

@@ -372,8 +372,9 @@ public partial class ScenePanel : UserControl
         _viewport.ShowProxyScenes = ProxyScenesToggle.IsChecked == true;
         _viewport.ShowProxyMeshes = ProxyMeshesToggle.IsChecked == true;
         _viewport.ShowSnowScenes = SnowScenesToggle.IsChecked == true;
-        // Actor glyphs are pure overlay — no scene reload, unlike the three filters above.
+        // Actor glyphs and skeletons are pure overlay — no scene reload, unlike the three filters above.
         _viewport.ShowActors = ActorsToggle.IsChecked == true;
+        _viewport.ShowSkeleton = SkeletonToggle.IsChecked == true;
     }
 
     /// <summary>Drives the snow filter from the host's winter selector: winter geometry lives in its own

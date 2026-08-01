@@ -8242,6 +8242,3642 @@ internal sealed class CutsceneFileW
     }
 }
 
+internal sealed class PrefabPhysThingInitW
+{
+    public uint PrefabVersion { get; set; }
+    public List<ulong> Hashes0 { get; set; } = [];
+    public List<ulong> Hashes1 { get; set; } = [];
+    public byte PadBits { get; set; }
+    public byte[] Tail { get; set; } = [];
+
+    internal static PrefabPhysThingInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabPhysThingInitW();
+        value.PrefabVersion = reader.ReadUInt32();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes0.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes1.Add(reader.ReadUInt64());
+            }
+        }
+        value.PadBits = reader.ReadByte();
+        value.Tail = Wire.ReadBytes(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(PrefabVersion);
+        Wire.WriteCount(writer, Hashes0.Count);
+        foreach (ulong item in Hashes0)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Hashes1.Count);
+        foreach (ulong item in Hashes1)
+        {
+            writer.Write(item);
+        }
+        writer.Write(PadBits);
+        Wire.WriteBytes(writer, Tail);
+    }
+
+    internal static void Diff(string path, PrefabPhysThingInitW a, PrefabPhysThingInitW b, List<string> diffs)
+    {
+        if (a.PrefabVersion != b.PrefabVersion) diffs.Add($"{path}.PrefabVersion: {a.PrefabVersion} vs {b.PrefabVersion}");
+        if (a.Hashes0.Count != b.Hashes0.Count)
+        {
+            diffs.Add($"{path}.Hashes0: count {a.Hashes0.Count} vs {b.Hashes0.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes0.Count; i++)
+            {
+                if (a.Hashes0[i] != b.Hashes0[i]) diffs.Add($"{path}.Hashes0[{i}]: {a.Hashes0[i]} vs {b.Hashes0[i]}");
+            }
+        }
+        if (a.Hashes1.Count != b.Hashes1.Count)
+        {
+            diffs.Add($"{path}.Hashes1: count {a.Hashes1.Count} vs {b.Hashes1.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes1.Count; i++)
+            {
+                if (a.Hashes1[i] != b.Hashes1[i]) diffs.Add($"{path}.Hashes1[{i}]: {a.Hashes1[i]} vs {b.Hashes1[i]}");
+            }
+        }
+        if (a.PadBits != b.PadBits) diffs.Add($"{path}.PadBits: {a.PadBits} vs {b.PadBits}");
+        Wire.DiffBytes($"{path}.Tail", a.Tail, b.Tail, diffs);
+    }
+}
+
+internal sealed class PrefabTransformW
+{
+    public Vector3 Translation { get; set; }
+    public Vector3 Row0 { get; set; }
+    public Vector3 Row1 { get; set; }
+    public Vector3 Row2 { get; set; }
+
+    internal static PrefabTransformW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabTransformW();
+        value.Translation = Wire.ReadVector3(reader);
+        value.Row0 = Wire.ReadVector3(reader);
+        value.Row1 = Wire.ReadVector3(reader);
+        value.Row2 = Wire.ReadVector3(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteVector3(writer, Translation);
+        Wire.WriteVector3(writer, Row0);
+        Wire.WriteVector3(writer, Row1);
+        Wire.WriteVector3(writer, Row2);
+    }
+
+    internal static void Diff(string path, PrefabTransformW a, PrefabTransformW b, List<string> diffs)
+    {
+        Wire.DiffVector3($"{path}.Translation", a.Translation, b.Translation, diffs);
+        Wire.DiffVector3($"{path}.Row0", a.Row0, b.Row0, diffs);
+        Wire.DiffVector3($"{path}.Row1", a.Row1, b.Row1, diffs);
+        Wire.DiffVector3($"{path}.Row2", a.Row2, b.Row2, diffs);
+    }
+}
+
+internal sealed class PrefabGuidW
+{
+    public uint Part0 { get; set; }
+    public uint Part1 { get; set; }
+
+    internal static PrefabGuidW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabGuidW();
+        value.Part0 = reader.ReadUInt32();
+        value.Part1 = reader.ReadUInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Part0);
+        writer.Write(Part1);
+    }
+
+    internal static void Diff(string path, PrefabGuidW a, PrefabGuidW b, List<string> diffs)
+    {
+        if (a.Part0 != b.Part0) diffs.Add($"{path}.Part0: {a.Part0} vs {b.Part0}");
+        if (a.Part1 != b.Part1) diffs.Add($"{path}.Part1: {a.Part1} vs {b.Part1}");
+    }
+}
+
+internal sealed class PrefabHashIndexW
+{
+    public ulong Hash { get; set; }
+    public ushort Index { get; set; }
+
+    internal static PrefabHashIndexW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabHashIndexW();
+        value.Hash = reader.ReadUInt64();
+        value.Index = reader.ReadUInt16();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Hash);
+        writer.Write(Index);
+    }
+
+    internal static void Diff(string path, PrefabHashIndexW a, PrefabHashIndexW b, List<string> diffs)
+    {
+        if (a.Hash != b.Hash) diffs.Add($"{path}.Hash: {a.Hash} vs {b.Hash}");
+        if (a.Index != b.Index) diffs.Add($"{path}.Index: {a.Index} vs {b.Index}");
+    }
+}
+
+internal sealed class PrefabDrainEnergyW
+{
+    public uint DrainPart { get; set; }
+    public float DrainEnergyCoeff { get; set; }
+
+    internal static PrefabDrainEnergyW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDrainEnergyW();
+        value.DrainPart = reader.ReadUInt32();
+        value.DrainEnergyCoeff = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(DrainPart);
+        writer.Write(DrainEnergyCoeff);
+    }
+
+    internal static void Diff(string path, PrefabDrainEnergyW a, PrefabDrainEnergyW b, List<string> diffs)
+    {
+        if (a.DrainPart != b.DrainPart) diffs.Add($"{path}.DrainPart: {a.DrainPart} vs {b.DrainPart}");
+        if (BitConverter.SingleToUInt32Bits(a.DrainEnergyCoeff) != BitConverter.SingleToUInt32Bits(b.DrainEnergyCoeff)) diffs.Add($"{path}.DrainEnergyCoeff: {a.DrainEnergyCoeff} vs {b.DrainEnergyCoeff}");
+    }
+}
+
+internal sealed class PrefabDropPartW
+{
+    public int DropPart { get; set; }
+    public float VersionOrEnergy { get; set; }
+    public uint Flags { get; set; }
+
+    internal static PrefabDropPartW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDropPartW();
+        value.DropPart = reader.ReadInt32();
+        value.VersionOrEnergy = reader.ReadSingle();
+        value.Flags = reader.ReadUInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(DropPart);
+        writer.Write(VersionOrEnergy);
+        writer.Write(Flags);
+    }
+
+    internal static void Diff(string path, PrefabDropPartW a, PrefabDropPartW b, List<string> diffs)
+    {
+        if (a.DropPart != b.DropPart) diffs.Add($"{path}.DropPart: {a.DropPart} vs {b.DropPart}");
+        if (BitConverter.SingleToUInt32Bits(a.VersionOrEnergy) != BitConverter.SingleToUInt32Bits(b.VersionOrEnergy)) diffs.Add($"{path}.VersionOrEnergy: {a.VersionOrEnergy} vs {b.VersionOrEnergy}");
+        if (a.Flags != b.Flags) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+    }
+}
+
+internal sealed class PrefabInternalImpulseW
+{
+    public Vector3 Direction { get; set; }
+    public Vector3 DirectionNormal { get; set; }
+    public Vector3 Position { get; set; }
+    public float Gain { get; set; }
+    public float GainSpreadDown { get; set; }
+    public float DirectionSpread { get; set; }
+    public float VersionOrEnergy { get; set; }
+    public float Flags { get; set; }
+
+    internal static PrefabInternalImpulseW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabInternalImpulseW();
+        value.Direction = Wire.ReadVector3(reader);
+        value.DirectionNormal = Wire.ReadVector3(reader);
+        value.Position = Wire.ReadVector3(reader);
+        value.Gain = reader.ReadSingle();
+        value.GainSpreadDown = reader.ReadSingle();
+        value.DirectionSpread = reader.ReadSingle();
+        value.VersionOrEnergy = reader.ReadSingle();
+        value.Flags = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteVector3(writer, Direction);
+        Wire.WriteVector3(writer, DirectionNormal);
+        Wire.WriteVector3(writer, Position);
+        writer.Write(Gain);
+        writer.Write(GainSpreadDown);
+        writer.Write(DirectionSpread);
+        writer.Write(VersionOrEnergy);
+        writer.Write(Flags);
+    }
+
+    internal static void Diff(string path, PrefabInternalImpulseW a, PrefabInternalImpulseW b, List<string> diffs)
+    {
+        Wire.DiffVector3($"{path}.Direction", a.Direction, b.Direction, diffs);
+        Wire.DiffVector3($"{path}.DirectionNormal", a.DirectionNormal, b.DirectionNormal, diffs);
+        Wire.DiffVector3($"{path}.Position", a.Position, b.Position, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.Gain) != BitConverter.SingleToUInt32Bits(b.Gain)) diffs.Add($"{path}.Gain: {a.Gain} vs {b.Gain}");
+        if (BitConverter.SingleToUInt32Bits(a.GainSpreadDown) != BitConverter.SingleToUInt32Bits(b.GainSpreadDown)) diffs.Add($"{path}.GainSpreadDown: {a.GainSpreadDown} vs {b.GainSpreadDown}");
+        if (BitConverter.SingleToUInt32Bits(a.DirectionSpread) != BitConverter.SingleToUInt32Bits(b.DirectionSpread)) diffs.Add($"{path}.DirectionSpread: {a.DirectionSpread} vs {b.DirectionSpread}");
+        if (BitConverter.SingleToUInt32Bits(a.VersionOrEnergy) != BitConverter.SingleToUInt32Bits(b.VersionOrEnergy)) diffs.Add($"{path}.VersionOrEnergy: {a.VersionOrEnergy} vs {b.VersionOrEnergy}");
+        if (BitConverter.SingleToUInt32Bits(a.Flags) != BitConverter.SingleToUInt32Bits(b.Flags)) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+    }
+}
+
+internal sealed class PrefabDeformOrigDataW
+{
+    public ulong Hash { get; set; }
+    public PrefabTransformW Unk1 { get; set; } = new();
+    public List<ushort> Unk2 { get; set; } = [];
+    public ushort Unk3 { get; set; }
+    public ushort Unk4 { get; set; }
+
+    internal static PrefabDeformOrigDataW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformOrigDataW();
+        value.Hash = reader.ReadUInt64();
+        value.Unk1 = PrefabTransformW.ReadFrom(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk2.Add(reader.ReadUInt16());
+            }
+        }
+        value.Unk3 = reader.ReadUInt16();
+        value.Unk4 = reader.ReadUInt16();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Hash);
+        Unk1.WriteTo(writer);
+        Wire.WriteCount(writer, Unk2.Count);
+        foreach (ushort item in Unk2)
+        {
+            writer.Write(item);
+        }
+        writer.Write(Unk3);
+        writer.Write(Unk4);
+    }
+
+    internal static void Diff(string path, PrefabDeformOrigDataW a, PrefabDeformOrigDataW b, List<string> diffs)
+    {
+        if (a.Hash != b.Hash) diffs.Add($"{path}.Hash: {a.Hash} vs {b.Hash}");
+        PrefabTransformW.Diff($"{path}.Unk1", a.Unk1, b.Unk1, diffs);
+        if (a.Unk2.Count != b.Unk2.Count)
+        {
+            diffs.Add($"{path}.Unk2: count {a.Unk2.Count} vs {b.Unk2.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk2.Count; i++)
+            {
+                if (a.Unk2[i] != b.Unk2[i]) diffs.Add($"{path}.Unk2[{i}]: {a.Unk2[i]} vs {b.Unk2[i]}");
+            }
+        }
+        if (a.Unk3 != b.Unk3) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+        if (a.Unk4 != b.Unk4) diffs.Add($"{path}.Unk4: {a.Unk4} vs {b.Unk4}");
+    }
+}
+
+internal sealed class PrefabDeformRelDataW
+{
+    public Vector3 Unk0 { get; set; }
+    public PrefabTransformW Transform { get; set; } = new();
+
+    internal static PrefabDeformRelDataW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformRelDataW();
+        value.Unk0 = Wire.ReadVector3(reader);
+        value.Transform = PrefabTransformW.ReadFrom(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteVector3(writer, Unk0);
+        Transform.WriteTo(writer);
+    }
+
+    internal static void Diff(string path, PrefabDeformRelDataW a, PrefabDeformRelDataW b, List<string> diffs)
+    {
+        Wire.DiffVector3($"{path}.Unk0", a.Unk0, b.Unk0, diffs);
+        PrefabTransformW.Diff($"{path}.Transform", a.Transform, b.Transform, diffs);
+    }
+}
+
+internal sealed class PrefabCollVolumeNestedW
+{
+    public float Unk0 { get; set; }
+    public float Unk1 { get; set; }
+    public float Unk2 { get; set; }
+    public int Unk3 { get; set; }
+    public int Unk4 { get; set; }
+
+    internal static PrefabCollVolumeNestedW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabCollVolumeNestedW();
+        value.Unk0 = reader.ReadSingle();
+        value.Unk1 = reader.ReadSingle();
+        value.Unk2 = reader.ReadSingle();
+        value.Unk3 = reader.ReadInt32();
+        value.Unk4 = reader.ReadInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Unk0);
+        writer.Write(Unk1);
+        writer.Write(Unk2);
+        writer.Write(Unk3);
+        writer.Write(Unk4);
+    }
+
+    internal static void Diff(string path, PrefabCollVolumeNestedW a, PrefabCollVolumeNestedW b, List<string> diffs)
+    {
+        if (BitConverter.SingleToUInt32Bits(a.Unk0) != BitConverter.SingleToUInt32Bits(b.Unk0)) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk1) != BitConverter.SingleToUInt32Bits(b.Unk1)) diffs.Add($"{path}.Unk1: {a.Unk1} vs {b.Unk1}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk2) != BitConverter.SingleToUInt32Bits(b.Unk2)) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (a.Unk3 != b.Unk3) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+        if (a.Unk4 != b.Unk4) diffs.Add($"{path}.Unk4: {a.Unk4} vs {b.Unk4}");
+    }
+}
+
+internal sealed class PrefabCollVolumeW
+{
+    public uint VolumeType { get; set; }
+    public PrefabTransformW Transform { get; set; } = new();
+    public List<PrefabTransformW> Unk2Transform { get; set; } = [];
+    public Vector3 Extents { get; set; }
+    public List<ulong> Unk4Hashes { get; set; } = [];
+    public List<PrefabCollVolumeNestedW> Unk6 { get; set; } = [];
+
+    internal static PrefabCollVolumeW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabCollVolumeW();
+        value.VolumeType = reader.ReadUInt32();
+        value.Transform = PrefabTransformW.ReadFrom(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk2Transform.Add(PrefabTransformW.ReadFrom(reader));
+            }
+        }
+        value.Extents = Wire.ReadVector3(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk4Hashes.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk6.Add(PrefabCollVolumeNestedW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(VolumeType);
+        Transform.WriteTo(writer);
+        Wire.WriteCount(writer, Unk2Transform.Count);
+        foreach (PrefabTransformW item in Unk2Transform)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteVector3(writer, Extents);
+        Wire.WriteCount(writer, Unk4Hashes.Count);
+        foreach (ulong item in Unk4Hashes)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Unk6.Count);
+        foreach (PrefabCollVolumeNestedW item in Unk6)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabCollVolumeW a, PrefabCollVolumeW b, List<string> diffs)
+    {
+        if (a.VolumeType != b.VolumeType) diffs.Add($"{path}.VolumeType: {a.VolumeType} vs {b.VolumeType}");
+        PrefabTransformW.Diff($"{path}.Transform", a.Transform, b.Transform, diffs);
+        if (a.Unk2Transform.Count != b.Unk2Transform.Count)
+        {
+            diffs.Add($"{path}.Unk2Transform: count {a.Unk2Transform.Count} vs {b.Unk2Transform.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk2Transform.Count; i++)
+            {
+                PrefabTransformW.Diff($"{path}.Unk2Transform[{i}]", a.Unk2Transform[i], b.Unk2Transform[i], diffs);
+            }
+        }
+        Wire.DiffVector3($"{path}.Extents", a.Extents, b.Extents, diffs);
+        if (a.Unk4Hashes.Count != b.Unk4Hashes.Count)
+        {
+            diffs.Add($"{path}.Unk4Hashes: count {a.Unk4Hashes.Count} vs {b.Unk4Hashes.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk4Hashes.Count; i++)
+            {
+                if (a.Unk4Hashes[i] != b.Unk4Hashes[i]) diffs.Add($"{path}.Unk4Hashes[{i}]: {a.Unk4Hashes[i]} vs {b.Unk4Hashes[i]}");
+            }
+        }
+        if (a.Unk6.Count != b.Unk6.Count)
+        {
+            diffs.Add($"{path}.Unk6: count {a.Unk6.Count} vs {b.Unk6.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk6.Count; i++)
+            {
+                PrefabCollVolumeNestedW.Diff($"{path}.Unk6[{i}]", a.Unk6[i], b.Unk6[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabCollVolumeCollectionW
+{
+    public List<PrefabCollVolumeW> Volumes { get; set; } = [];
+
+    internal static PrefabCollVolumeCollectionW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabCollVolumeCollectionW();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Volumes.Add(PrefabCollVolumeW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteCount(writer, Volumes.Count);
+        foreach (PrefabCollVolumeW item in Volumes)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabCollVolumeCollectionW a, PrefabCollVolumeCollectionW b, List<string> diffs)
+    {
+        if (a.Volumes.Count != b.Volumes.Count)
+        {
+            diffs.Add($"{path}.Volumes: count {a.Volumes.Count} vs {b.Volumes.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Volumes.Count; i++)
+            {
+                PrefabCollVolumeW.Diff($"{path}.Volumes[{i}]", a.Volumes[i], b.Volumes[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabSmDeformBoneW
+{
+    public ulong SmJointName { get; set; }
+    public Vector3 OriginalPosition { get; set; }
+    public Vector3 Range { get; set; }
+    public Vector3 MoveAccumulator { get; set; }
+    public float Intensity { get; set; }
+    public float CRadius { get; set; }
+
+    internal static PrefabSmDeformBoneW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSmDeformBoneW();
+        value.SmJointName = reader.ReadUInt64();
+        value.OriginalPosition = Wire.ReadVector3(reader);
+        value.Range = Wire.ReadVector3(reader);
+        value.MoveAccumulator = Wire.ReadVector3(reader);
+        value.Intensity = reader.ReadSingle();
+        value.CRadius = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(SmJointName);
+        Wire.WriteVector3(writer, OriginalPosition);
+        Wire.WriteVector3(writer, Range);
+        Wire.WriteVector3(writer, MoveAccumulator);
+        writer.Write(Intensity);
+        writer.Write(CRadius);
+    }
+
+    internal static void Diff(string path, PrefabSmDeformBoneW a, PrefabSmDeformBoneW b, List<string> diffs)
+    {
+        if (a.SmJointName != b.SmJointName) diffs.Add($"{path}.SmJointName: {a.SmJointName} vs {b.SmJointName}");
+        Wire.DiffVector3($"{path}.OriginalPosition", a.OriginalPosition, b.OriginalPosition, diffs);
+        Wire.DiffVector3($"{path}.Range", a.Range, b.Range, diffs);
+        Wire.DiffVector3($"{path}.MoveAccumulator", a.MoveAccumulator, b.MoveAccumulator, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.Intensity) != BitConverter.SingleToUInt32Bits(b.Intensity)) diffs.Add($"{path}.Intensity: {a.Intensity} vs {b.Intensity}");
+        if (BitConverter.SingleToUInt32Bits(a.CRadius) != BitConverter.SingleToUInt32Bits(b.CRadius)) diffs.Add($"{path}.CRadius: {a.CRadius} vs {b.CRadius}");
+    }
+}
+
+internal sealed class PrefabDeformPartEffectPackW
+{
+    public short Unk0 { get; set; }
+    public short Unk1 { get; set; }
+    public float Unk2 { get; set; }
+    public float Unk3 { get; set; }
+    public float Unk4 { get; set; }
+    public float Unk5 { get; set; }
+    public short Unk6 { get; set; }
+
+    internal static PrefabDeformPartEffectPackW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformPartEffectPackW();
+        value.Unk0 = reader.ReadInt16();
+        value.Unk1 = reader.ReadInt16();
+        value.Unk2 = reader.ReadSingle();
+        value.Unk3 = reader.ReadSingle();
+        value.Unk4 = reader.ReadSingle();
+        value.Unk5 = reader.ReadSingle();
+        value.Unk6 = reader.ReadInt16();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Unk0);
+        writer.Write(Unk1);
+        writer.Write(Unk2);
+        writer.Write(Unk3);
+        writer.Write(Unk4);
+        writer.Write(Unk5);
+        writer.Write(Unk6);
+    }
+
+    internal static void Diff(string path, PrefabDeformPartEffectPackW a, PrefabDeformPartEffectPackW b, List<string> diffs)
+    {
+        if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
+        if (a.Unk1 != b.Unk1) diffs.Add($"{path}.Unk1: {a.Unk1} vs {b.Unk1}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk2) != BitConverter.SingleToUInt32Bits(b.Unk2)) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk3) != BitConverter.SingleToUInt32Bits(b.Unk3)) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk4) != BitConverter.SingleToUInt32Bits(b.Unk4)) diffs.Add($"{path}.Unk4: {a.Unk4} vs {b.Unk4}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk5) != BitConverter.SingleToUInt32Bits(b.Unk5)) diffs.Add($"{path}.Unk5: {a.Unk5} vs {b.Unk5}");
+        if (a.Unk6 != b.Unk6) diffs.Add($"{path}.Unk6: {a.Unk6} vs {b.Unk6}");
+    }
+}
+
+internal sealed class PrefabDeformPartEffectsW
+{
+    public PrefabTransformW EffectMatrix { get; set; } = new();
+    public List<PrefabDeformPartEffectPackW> Packs { get; set; } = [];
+    public short Unk2 { get; set; }
+    public short Unk3 { get; set; }
+    public short Unk4 { get; set; }
+    public float Unk5 { get; set; }
+    public float Unk6 { get; set; }
+    public float Unk7 { get; set; }
+    public float Unk8 { get; set; }
+    public short Unk9 { get; set; }
+    public short Unk10 { get; set; }
+    public short Unk11 { get; set; }
+    public short Unk12 { get; set; }
+    public short Unk13 { get; set; }
+    public short Unk14 { get; set; }
+    public float Unk15 { get; set; }
+    public float Unk16 { get; set; }
+    public float Unk17 { get; set; }
+    public float Unk18 { get; set; }
+    public short Unk19 { get; set; }
+    public short Unk20 { get; set; }
+    public short Unk21 { get; set; }
+    public short ParticleBreakId { get; set; }
+    public short ParticleHingeVersionId { get; set; }
+    public short Unk24 { get; set; }
+    public short Unk25 { get; set; }
+    public short Unk26 { get; set; }
+    public short Unk27 { get; set; }
+    public short Unk28 { get; set; }
+    public short SnowParticleId0 { get; set; }
+    public short SnowParticleId1 { get; set; }
+    public short SnowParticleId2 { get; set; }
+    public short SnowParticleId3 { get; set; }
+    public short Unk33 { get; set; }
+    public byte Unk34 { get; set; }
+    public float ParticleScale { get; set; }
+    public int Unk36 { get; set; }
+    public float Unk37 { get; set; }
+    public int Unk38 { get; set; }
+    public int Unk39 { get; set; }
+
+    internal static PrefabDeformPartEffectsW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformPartEffectsW();
+        value.EffectMatrix = PrefabTransformW.ReadFrom(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Packs.Add(PrefabDeformPartEffectPackW.ReadFrom(reader));
+            }
+        }
+        value.Unk2 = reader.ReadInt16();
+        value.Unk3 = reader.ReadInt16();
+        value.Unk4 = reader.ReadInt16();
+        value.Unk5 = reader.ReadSingle();
+        value.Unk6 = reader.ReadSingle();
+        value.Unk7 = reader.ReadSingle();
+        value.Unk8 = reader.ReadSingle();
+        value.Unk9 = reader.ReadInt16();
+        value.Unk10 = reader.ReadInt16();
+        value.Unk11 = reader.ReadInt16();
+        value.Unk12 = reader.ReadInt16();
+        value.Unk13 = reader.ReadInt16();
+        value.Unk14 = reader.ReadInt16();
+        value.Unk15 = reader.ReadSingle();
+        value.Unk16 = reader.ReadSingle();
+        value.Unk17 = reader.ReadSingle();
+        value.Unk18 = reader.ReadSingle();
+        value.Unk19 = reader.ReadInt16();
+        value.Unk20 = reader.ReadInt16();
+        value.Unk21 = reader.ReadInt16();
+        value.ParticleBreakId = reader.ReadInt16();
+        value.ParticleHingeVersionId = reader.ReadInt16();
+        value.Unk24 = reader.ReadInt16();
+        value.Unk25 = reader.ReadInt16();
+        value.Unk26 = reader.ReadInt16();
+        value.Unk27 = reader.ReadInt16();
+        value.Unk28 = reader.ReadInt16();
+        value.SnowParticleId0 = reader.ReadInt16();
+        value.SnowParticleId1 = reader.ReadInt16();
+        value.SnowParticleId2 = reader.ReadInt16();
+        value.SnowParticleId3 = reader.ReadInt16();
+        value.Unk33 = reader.ReadInt16();
+        value.Unk34 = reader.ReadByte();
+        value.ParticleScale = reader.ReadSingle();
+        value.Unk36 = reader.ReadInt32();
+        value.Unk37 = reader.ReadSingle();
+        value.Unk38 = reader.ReadInt32();
+        value.Unk39 = reader.ReadInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        EffectMatrix.WriteTo(writer);
+        Wire.WriteCount(writer, Packs.Count);
+        foreach (PrefabDeformPartEffectPackW item in Packs)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(Unk2);
+        writer.Write(Unk3);
+        writer.Write(Unk4);
+        writer.Write(Unk5);
+        writer.Write(Unk6);
+        writer.Write(Unk7);
+        writer.Write(Unk8);
+        writer.Write(Unk9);
+        writer.Write(Unk10);
+        writer.Write(Unk11);
+        writer.Write(Unk12);
+        writer.Write(Unk13);
+        writer.Write(Unk14);
+        writer.Write(Unk15);
+        writer.Write(Unk16);
+        writer.Write(Unk17);
+        writer.Write(Unk18);
+        writer.Write(Unk19);
+        writer.Write(Unk20);
+        writer.Write(Unk21);
+        writer.Write(ParticleBreakId);
+        writer.Write(ParticleHingeVersionId);
+        writer.Write(Unk24);
+        writer.Write(Unk25);
+        writer.Write(Unk26);
+        writer.Write(Unk27);
+        writer.Write(Unk28);
+        writer.Write(SnowParticleId0);
+        writer.Write(SnowParticleId1);
+        writer.Write(SnowParticleId2);
+        writer.Write(SnowParticleId3);
+        writer.Write(Unk33);
+        writer.Write(Unk34);
+        writer.Write(ParticleScale);
+        writer.Write(Unk36);
+        writer.Write(Unk37);
+        writer.Write(Unk38);
+        writer.Write(Unk39);
+    }
+
+    internal static void Diff(string path, PrefabDeformPartEffectsW a, PrefabDeformPartEffectsW b, List<string> diffs)
+    {
+        PrefabTransformW.Diff($"{path}.EffectMatrix", a.EffectMatrix, b.EffectMatrix, diffs);
+        if (a.Packs.Count != b.Packs.Count)
+        {
+            diffs.Add($"{path}.Packs: count {a.Packs.Count} vs {b.Packs.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Packs.Count; i++)
+            {
+                PrefabDeformPartEffectPackW.Diff($"{path}.Packs[{i}]", a.Packs[i], b.Packs[i], diffs);
+            }
+        }
+        if (a.Unk2 != b.Unk2) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (a.Unk3 != b.Unk3) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+        if (a.Unk4 != b.Unk4) diffs.Add($"{path}.Unk4: {a.Unk4} vs {b.Unk4}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk5) != BitConverter.SingleToUInt32Bits(b.Unk5)) diffs.Add($"{path}.Unk5: {a.Unk5} vs {b.Unk5}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk6) != BitConverter.SingleToUInt32Bits(b.Unk6)) diffs.Add($"{path}.Unk6: {a.Unk6} vs {b.Unk6}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk7) != BitConverter.SingleToUInt32Bits(b.Unk7)) diffs.Add($"{path}.Unk7: {a.Unk7} vs {b.Unk7}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk8) != BitConverter.SingleToUInt32Bits(b.Unk8)) diffs.Add($"{path}.Unk8: {a.Unk8} vs {b.Unk8}");
+        if (a.Unk9 != b.Unk9) diffs.Add($"{path}.Unk9: {a.Unk9} vs {b.Unk9}");
+        if (a.Unk10 != b.Unk10) diffs.Add($"{path}.Unk10: {a.Unk10} vs {b.Unk10}");
+        if (a.Unk11 != b.Unk11) diffs.Add($"{path}.Unk11: {a.Unk11} vs {b.Unk11}");
+        if (a.Unk12 != b.Unk12) diffs.Add($"{path}.Unk12: {a.Unk12} vs {b.Unk12}");
+        if (a.Unk13 != b.Unk13) diffs.Add($"{path}.Unk13: {a.Unk13} vs {b.Unk13}");
+        if (a.Unk14 != b.Unk14) diffs.Add($"{path}.Unk14: {a.Unk14} vs {b.Unk14}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk15) != BitConverter.SingleToUInt32Bits(b.Unk15)) diffs.Add($"{path}.Unk15: {a.Unk15} vs {b.Unk15}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk16) != BitConverter.SingleToUInt32Bits(b.Unk16)) diffs.Add($"{path}.Unk16: {a.Unk16} vs {b.Unk16}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk17) != BitConverter.SingleToUInt32Bits(b.Unk17)) diffs.Add($"{path}.Unk17: {a.Unk17} vs {b.Unk17}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk18) != BitConverter.SingleToUInt32Bits(b.Unk18)) diffs.Add($"{path}.Unk18: {a.Unk18} vs {b.Unk18}");
+        if (a.Unk19 != b.Unk19) diffs.Add($"{path}.Unk19: {a.Unk19} vs {b.Unk19}");
+        if (a.Unk20 != b.Unk20) diffs.Add($"{path}.Unk20: {a.Unk20} vs {b.Unk20}");
+        if (a.Unk21 != b.Unk21) diffs.Add($"{path}.Unk21: {a.Unk21} vs {b.Unk21}");
+        if (a.ParticleBreakId != b.ParticleBreakId) diffs.Add($"{path}.ParticleBreakId: {a.ParticleBreakId} vs {b.ParticleBreakId}");
+        if (a.ParticleHingeVersionId != b.ParticleHingeVersionId) diffs.Add($"{path}.ParticleHingeVersionId: {a.ParticleHingeVersionId} vs {b.ParticleHingeVersionId}");
+        if (a.Unk24 != b.Unk24) diffs.Add($"{path}.Unk24: {a.Unk24} vs {b.Unk24}");
+        if (a.Unk25 != b.Unk25) diffs.Add($"{path}.Unk25: {a.Unk25} vs {b.Unk25}");
+        if (a.Unk26 != b.Unk26) diffs.Add($"{path}.Unk26: {a.Unk26} vs {b.Unk26}");
+        if (a.Unk27 != b.Unk27) diffs.Add($"{path}.Unk27: {a.Unk27} vs {b.Unk27}");
+        if (a.Unk28 != b.Unk28) diffs.Add($"{path}.Unk28: {a.Unk28} vs {b.Unk28}");
+        if (a.SnowParticleId0 != b.SnowParticleId0) diffs.Add($"{path}.SnowParticleId0: {a.SnowParticleId0} vs {b.SnowParticleId0}");
+        if (a.SnowParticleId1 != b.SnowParticleId1) diffs.Add($"{path}.SnowParticleId1: {a.SnowParticleId1} vs {b.SnowParticleId1}");
+        if (a.SnowParticleId2 != b.SnowParticleId2) diffs.Add($"{path}.SnowParticleId2: {a.SnowParticleId2} vs {b.SnowParticleId2}");
+        if (a.SnowParticleId3 != b.SnowParticleId3) diffs.Add($"{path}.SnowParticleId3: {a.SnowParticleId3} vs {b.SnowParticleId3}");
+        if (a.Unk33 != b.Unk33) diffs.Add($"{path}.Unk33: {a.Unk33} vs {b.Unk33}");
+        if (a.Unk34 != b.Unk34) diffs.Add($"{path}.Unk34: {a.Unk34} vs {b.Unk34}");
+        if (BitConverter.SingleToUInt32Bits(a.ParticleScale) != BitConverter.SingleToUInt32Bits(b.ParticleScale)) diffs.Add($"{path}.ParticleScale: {a.ParticleScale} vs {b.ParticleScale}");
+        if (a.Unk36 != b.Unk36) diffs.Add($"{path}.Unk36: {a.Unk36} vs {b.Unk36}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk37) != BitConverter.SingleToUInt32Bits(b.Unk37)) diffs.Add($"{path}.Unk37: {a.Unk37} vs {b.Unk37}");
+        if (a.Unk38 != b.Unk38) diffs.Add($"{path}.Unk38: {a.Unk38} vs {b.Unk38}");
+        if (a.Unk39 != b.Unk39) diffs.Add($"{path}.Unk39: {a.Unk39} vs {b.Unk39}");
+    }
+}
+
+internal sealed class PrefabDeformPartCommonPairW
+{
+    public int Unk0 { get; set; }
+    public int Unk1 { get; set; }
+
+    internal static PrefabDeformPartCommonPairW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformPartCommonPairW();
+        value.Unk0 = reader.ReadInt32();
+        value.Unk1 = reader.ReadInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Unk0);
+        writer.Write(Unk1);
+    }
+
+    internal static void Diff(string path, PrefabDeformPartCommonPairW a, PrefabDeformPartCommonPairW b, List<string> diffs)
+    {
+        if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
+        if (a.Unk1 != b.Unk1) diffs.Add($"{path}.Unk1: {a.Unk1} vs {b.Unk1}");
+    }
+}
+
+internal sealed class PrefabDeformPartCommonW
+{
+    public float SpeedMin { get; set; }
+    public float SpeedMax { get; set; }
+    public float Resistance { get; set; }
+    public float Mass { get; set; }
+    public float EnergyStart { get; set; }
+    public float EnergyDrop { get; set; }
+    public List<int> Unk2 { get; set; } = [];
+    public List<PrefabTransformW> Unk3Transform { get; set; } = [];
+    public List<PrefabDeformPartCommonPairW> Unk4 { get; set; } = [];
+    public List<PrefabCollVolumeNestedW> Unk5Data { get; set; } = [];
+    public List<string> Unk6Value { get; set; } = [];
+    public int Unk7 { get; set; }
+    public List<uint> Unk8 { get; set; } = [];
+    public List<PrefabDeformPartEffectsW> PartEffects { get; set; } = [];
+
+    internal static PrefabDeformPartCommonW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformPartCommonW();
+        value.SpeedMin = reader.ReadSingle();
+        value.SpeedMax = reader.ReadSingle();
+        value.Resistance = reader.ReadSingle();
+        value.Mass = reader.ReadSingle();
+        value.EnergyStart = reader.ReadSingle();
+        value.EnergyDrop = reader.ReadSingle();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk2.Add(reader.ReadInt32());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk3Transform.Add(PrefabTransformW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk4.Add(PrefabDeformPartCommonPairW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk5Data.Add(PrefabCollVolumeNestedW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk6Value.Add(Wire.ReadString(reader));
+            }
+        }
+        value.Unk7 = reader.ReadInt32();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk8.Add(reader.ReadUInt32());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.PartEffects.Add(PrefabDeformPartEffectsW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(SpeedMin);
+        writer.Write(SpeedMax);
+        writer.Write(Resistance);
+        writer.Write(Mass);
+        writer.Write(EnergyStart);
+        writer.Write(EnergyDrop);
+        Wire.WriteCount(writer, Unk2.Count);
+        foreach (int item in Unk2)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Unk3Transform.Count);
+        foreach (PrefabTransformW item in Unk3Transform)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Unk4.Count);
+        foreach (PrefabDeformPartCommonPairW item in Unk4)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Unk5Data.Count);
+        foreach (PrefabCollVolumeNestedW item in Unk5Data)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Unk6Value.Count);
+        foreach (string item in Unk6Value)
+        {
+            Wire.WriteString(writer, item);
+        }
+        writer.Write(Unk7);
+        Wire.WriteCount(writer, Unk8.Count);
+        foreach (uint item in Unk8)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, PartEffects.Count);
+        foreach (PrefabDeformPartEffectsW item in PartEffects)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabDeformPartCommonW a, PrefabDeformPartCommonW b, List<string> diffs)
+    {
+        if (BitConverter.SingleToUInt32Bits(a.SpeedMin) != BitConverter.SingleToUInt32Bits(b.SpeedMin)) diffs.Add($"{path}.SpeedMin: {a.SpeedMin} vs {b.SpeedMin}");
+        if (BitConverter.SingleToUInt32Bits(a.SpeedMax) != BitConverter.SingleToUInt32Bits(b.SpeedMax)) diffs.Add($"{path}.SpeedMax: {a.SpeedMax} vs {b.SpeedMax}");
+        if (BitConverter.SingleToUInt32Bits(a.Resistance) != BitConverter.SingleToUInt32Bits(b.Resistance)) diffs.Add($"{path}.Resistance: {a.Resistance} vs {b.Resistance}");
+        if (BitConverter.SingleToUInt32Bits(a.Mass) != BitConverter.SingleToUInt32Bits(b.Mass)) diffs.Add($"{path}.Mass: {a.Mass} vs {b.Mass}");
+        if (BitConverter.SingleToUInt32Bits(a.EnergyStart) != BitConverter.SingleToUInt32Bits(b.EnergyStart)) diffs.Add($"{path}.EnergyStart: {a.EnergyStart} vs {b.EnergyStart}");
+        if (BitConverter.SingleToUInt32Bits(a.EnergyDrop) != BitConverter.SingleToUInt32Bits(b.EnergyDrop)) diffs.Add($"{path}.EnergyDrop: {a.EnergyDrop} vs {b.EnergyDrop}");
+        if (a.Unk2.Count != b.Unk2.Count)
+        {
+            diffs.Add($"{path}.Unk2: count {a.Unk2.Count} vs {b.Unk2.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk2.Count; i++)
+            {
+                if (a.Unk2[i] != b.Unk2[i]) diffs.Add($"{path}.Unk2[{i}]: {a.Unk2[i]} vs {b.Unk2[i]}");
+            }
+        }
+        if (a.Unk3Transform.Count != b.Unk3Transform.Count)
+        {
+            diffs.Add($"{path}.Unk3Transform: count {a.Unk3Transform.Count} vs {b.Unk3Transform.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk3Transform.Count; i++)
+            {
+                PrefabTransformW.Diff($"{path}.Unk3Transform[{i}]", a.Unk3Transform[i], b.Unk3Transform[i], diffs);
+            }
+        }
+        if (a.Unk4.Count != b.Unk4.Count)
+        {
+            diffs.Add($"{path}.Unk4: count {a.Unk4.Count} vs {b.Unk4.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk4.Count; i++)
+            {
+                PrefabDeformPartCommonPairW.Diff($"{path}.Unk4[{i}]", a.Unk4[i], b.Unk4[i], diffs);
+            }
+        }
+        if (a.Unk5Data.Count != b.Unk5Data.Count)
+        {
+            diffs.Add($"{path}.Unk5Data: count {a.Unk5Data.Count} vs {b.Unk5Data.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk5Data.Count; i++)
+            {
+                PrefabCollVolumeNestedW.Diff($"{path}.Unk5Data[{i}]", a.Unk5Data[i], b.Unk5Data[i], diffs);
+            }
+        }
+        if (a.Unk6Value.Count != b.Unk6Value.Count)
+        {
+            diffs.Add($"{path}.Unk6Value: count {a.Unk6Value.Count} vs {b.Unk6Value.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk6Value.Count; i++)
+            {
+                if (!string.Equals(a.Unk6Value[i], b.Unk6Value[i], StringComparison.Ordinal)) diffs.Add($"{path}.Unk6Value[{i}]: '{a.Unk6Value[i]}' vs '{b.Unk6Value[i]}'");
+            }
+        }
+        if (a.Unk7 != b.Unk7) diffs.Add($"{path}.Unk7: {a.Unk7} vs {b.Unk7}");
+        if (a.Unk8.Count != b.Unk8.Count)
+        {
+            diffs.Add($"{path}.Unk8: count {a.Unk8.Count} vs {b.Unk8.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk8.Count; i++)
+            {
+                if (a.Unk8[i] != b.Unk8[i]) diffs.Add($"{path}.Unk8[{i}]: {a.Unk8[i]} vs {b.Unk8[i]}");
+            }
+        }
+        if (a.PartEffects.Count != b.PartEffects.Count)
+        {
+            diffs.Add($"{path}.PartEffects: count {a.PartEffects.Count} vs {b.PartEffects.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.PartEffects.Count; i++)
+            {
+                PrefabDeformPartEffectsW.Diff($"{path}.PartEffects[{i}]", a.PartEffects[i], b.PartEffects[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabDeformPartW
+{
+    public uint PartType { get; set; }
+    public uint Flags { get; set; }
+    public byte Unk2 { get; set; }
+    public List<ulong> Unk3 { get; set; } = [];
+    public float Unk4 { get; set; }
+    public float Unk5 { get; set; }
+    public float Unk6 { get; set; }
+    public Vector3 CentreOfMass { get; set; }
+    public List<PrefabInternalImpulseW> InternalImpulses { get; set; } = [];
+    public List<PrefabDropPartW> DropParts { get; set; } = [];
+    public List<PrefabDrainEnergyW> DrainEnergy { get; set; } = [];
+    public List<PrefabCollVolumeCollectionW> CollisionVolumes { get; set; } = [];
+    public List<PrefabSmDeformBoneW> SmDeformBones { get; set; } = [];
+    public List<ushort> Unk14 { get; set; } = [];
+    public PrefabTransformW PartTransform { get; set; } = new();
+    public ulong ParentDeformPartName { get; set; }
+    public ushort Unk17 { get; set; }
+    public byte Unk18 { get; set; }
+    public byte Unk19 { get; set; }
+    public List<ushort> Unk20 { get; set; } = [];
+    public List<PrefabDeformOrigDataW> Unk21Data { get; set; } = [];
+    public List<PrefabDeformRelDataW> Unk22RelData { get; set; } = [];
+    public uint Unk23 { get; set; }
+    public uint Unk24 { get; set; }
+    public List<PrefabDeformPartCommonW> Common { get; set; } = [];
+
+    internal static PrefabDeformPartW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformPartW();
+        value.PartType = reader.ReadUInt32();
+        value.Flags = reader.ReadUInt32();
+        value.Unk2 = reader.ReadByte();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk3.Add(reader.ReadUInt64());
+            }
+        }
+        value.Unk4 = reader.ReadSingle();
+        value.Unk5 = reader.ReadSingle();
+        value.Unk6 = reader.ReadSingle();
+        value.CentreOfMass = Wire.ReadVector3(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.InternalImpulses.Add(PrefabInternalImpulseW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DropParts.Add(PrefabDropPartW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DrainEnergy.Add(PrefabDrainEnergyW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.CollisionVolumes.Add(PrefabCollVolumeCollectionW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.SmDeformBones.Add(PrefabSmDeformBoneW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk14.Add(reader.ReadUInt16());
+            }
+        }
+        value.PartTransform = PrefabTransformW.ReadFrom(reader);
+        value.ParentDeformPartName = reader.ReadUInt64();
+        value.Unk17 = reader.ReadUInt16();
+        value.Unk18 = reader.ReadByte();
+        value.Unk19 = reader.ReadByte();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk20.Add(reader.ReadUInt16());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk21Data.Add(PrefabDeformOrigDataW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk22RelData.Add(PrefabDeformRelDataW.ReadFrom(reader));
+            }
+        }
+        value.Unk23 = reader.ReadUInt32();
+        value.Unk24 = reader.ReadUInt32();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Common.Add(PrefabDeformPartCommonW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(PartType);
+        writer.Write(Flags);
+        writer.Write(Unk2);
+        Wire.WriteCount(writer, Unk3.Count);
+        foreach (ulong item in Unk3)
+        {
+            writer.Write(item);
+        }
+        writer.Write(Unk4);
+        writer.Write(Unk5);
+        writer.Write(Unk6);
+        Wire.WriteVector3(writer, CentreOfMass);
+        Wire.WriteCount(writer, InternalImpulses.Count);
+        foreach (PrefabInternalImpulseW item in InternalImpulses)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, DropParts.Count);
+        foreach (PrefabDropPartW item in DropParts)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, DrainEnergy.Count);
+        foreach (PrefabDrainEnergyW item in DrainEnergy)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, CollisionVolumes.Count);
+        foreach (PrefabCollVolumeCollectionW item in CollisionVolumes)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, SmDeformBones.Count);
+        foreach (PrefabSmDeformBoneW item in SmDeformBones)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Unk14.Count);
+        foreach (ushort item in Unk14)
+        {
+            writer.Write(item);
+        }
+        PartTransform.WriteTo(writer);
+        writer.Write(ParentDeformPartName);
+        writer.Write(Unk17);
+        writer.Write(Unk18);
+        writer.Write(Unk19);
+        Wire.WriteCount(writer, Unk20.Count);
+        foreach (ushort item in Unk20)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Unk21Data.Count);
+        foreach (PrefabDeformOrigDataW item in Unk21Data)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Unk22RelData.Count);
+        foreach (PrefabDeformRelDataW item in Unk22RelData)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(Unk23);
+        writer.Write(Unk24);
+        Wire.WriteCount(writer, Common.Count);
+        foreach (PrefabDeformPartCommonW item in Common)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabDeformPartW a, PrefabDeformPartW b, List<string> diffs)
+    {
+        if (a.PartType != b.PartType) diffs.Add($"{path}.PartType: {a.PartType} vs {b.PartType}");
+        if (a.Flags != b.Flags) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+        if (a.Unk2 != b.Unk2) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (a.Unk3.Count != b.Unk3.Count)
+        {
+            diffs.Add($"{path}.Unk3: count {a.Unk3.Count} vs {b.Unk3.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk3.Count; i++)
+            {
+                if (a.Unk3[i] != b.Unk3[i]) diffs.Add($"{path}.Unk3[{i}]: {a.Unk3[i]} vs {b.Unk3[i]}");
+            }
+        }
+        if (BitConverter.SingleToUInt32Bits(a.Unk4) != BitConverter.SingleToUInt32Bits(b.Unk4)) diffs.Add($"{path}.Unk4: {a.Unk4} vs {b.Unk4}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk5) != BitConverter.SingleToUInt32Bits(b.Unk5)) diffs.Add($"{path}.Unk5: {a.Unk5} vs {b.Unk5}");
+        if (BitConverter.SingleToUInt32Bits(a.Unk6) != BitConverter.SingleToUInt32Bits(b.Unk6)) diffs.Add($"{path}.Unk6: {a.Unk6} vs {b.Unk6}");
+        Wire.DiffVector3($"{path}.CentreOfMass", a.CentreOfMass, b.CentreOfMass, diffs);
+        if (a.InternalImpulses.Count != b.InternalImpulses.Count)
+        {
+            diffs.Add($"{path}.InternalImpulses: count {a.InternalImpulses.Count} vs {b.InternalImpulses.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.InternalImpulses.Count; i++)
+            {
+                PrefabInternalImpulseW.Diff($"{path}.InternalImpulses[{i}]", a.InternalImpulses[i], b.InternalImpulses[i], diffs);
+            }
+        }
+        if (a.DropParts.Count != b.DropParts.Count)
+        {
+            diffs.Add($"{path}.DropParts: count {a.DropParts.Count} vs {b.DropParts.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DropParts.Count; i++)
+            {
+                PrefabDropPartW.Diff($"{path}.DropParts[{i}]", a.DropParts[i], b.DropParts[i], diffs);
+            }
+        }
+        if (a.DrainEnergy.Count != b.DrainEnergy.Count)
+        {
+            diffs.Add($"{path}.DrainEnergy: count {a.DrainEnergy.Count} vs {b.DrainEnergy.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DrainEnergy.Count; i++)
+            {
+                PrefabDrainEnergyW.Diff($"{path}.DrainEnergy[{i}]", a.DrainEnergy[i], b.DrainEnergy[i], diffs);
+            }
+        }
+        if (a.CollisionVolumes.Count != b.CollisionVolumes.Count)
+        {
+            diffs.Add($"{path}.CollisionVolumes: count {a.CollisionVolumes.Count} vs {b.CollisionVolumes.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.CollisionVolumes.Count; i++)
+            {
+                PrefabCollVolumeCollectionW.Diff($"{path}.CollisionVolumes[{i}]", a.CollisionVolumes[i], b.CollisionVolumes[i], diffs);
+            }
+        }
+        if (a.SmDeformBones.Count != b.SmDeformBones.Count)
+        {
+            diffs.Add($"{path}.SmDeformBones: count {a.SmDeformBones.Count} vs {b.SmDeformBones.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.SmDeformBones.Count; i++)
+            {
+                PrefabSmDeformBoneW.Diff($"{path}.SmDeformBones[{i}]", a.SmDeformBones[i], b.SmDeformBones[i], diffs);
+            }
+        }
+        if (a.Unk14.Count != b.Unk14.Count)
+        {
+            diffs.Add($"{path}.Unk14: count {a.Unk14.Count} vs {b.Unk14.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk14.Count; i++)
+            {
+                if (a.Unk14[i] != b.Unk14[i]) diffs.Add($"{path}.Unk14[{i}]: {a.Unk14[i]} vs {b.Unk14[i]}");
+            }
+        }
+        PrefabTransformW.Diff($"{path}.PartTransform", a.PartTransform, b.PartTransform, diffs);
+        if (a.ParentDeformPartName != b.ParentDeformPartName) diffs.Add($"{path}.ParentDeformPartName: {a.ParentDeformPartName} vs {b.ParentDeformPartName}");
+        if (a.Unk17 != b.Unk17) diffs.Add($"{path}.Unk17: {a.Unk17} vs {b.Unk17}");
+        if (a.Unk18 != b.Unk18) diffs.Add($"{path}.Unk18: {a.Unk18} vs {b.Unk18}");
+        if (a.Unk19 != b.Unk19) diffs.Add($"{path}.Unk19: {a.Unk19} vs {b.Unk19}");
+        if (a.Unk20.Count != b.Unk20.Count)
+        {
+            diffs.Add($"{path}.Unk20: count {a.Unk20.Count} vs {b.Unk20.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk20.Count; i++)
+            {
+                if (a.Unk20[i] != b.Unk20[i]) diffs.Add($"{path}.Unk20[{i}]: {a.Unk20[i]} vs {b.Unk20[i]}");
+            }
+        }
+        if (a.Unk21Data.Count != b.Unk21Data.Count)
+        {
+            diffs.Add($"{path}.Unk21Data: count {a.Unk21Data.Count} vs {b.Unk21Data.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk21Data.Count; i++)
+            {
+                PrefabDeformOrigDataW.Diff($"{path}.Unk21Data[{i}]", a.Unk21Data[i], b.Unk21Data[i], diffs);
+            }
+        }
+        if (a.Unk22RelData.Count != b.Unk22RelData.Count)
+        {
+            diffs.Add($"{path}.Unk22RelData: count {a.Unk22RelData.Count} vs {b.Unk22RelData.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk22RelData.Count; i++)
+            {
+                PrefabDeformRelDataW.Diff($"{path}.Unk22RelData[{i}]", a.Unk22RelData[i], b.Unk22RelData[i], diffs);
+            }
+        }
+        if (a.Unk23 != b.Unk23) diffs.Add($"{path}.Unk23: {a.Unk23} vs {b.Unk23}");
+        if (a.Unk24 != b.Unk24) diffs.Add($"{path}.Unk24: {a.Unk24} vs {b.Unk24}");
+        if (a.Common.Count != b.Common.Count)
+        {
+            diffs.Add($"{path}.Common: count {a.Common.Count} vs {b.Common.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Common.Count; i++)
+            {
+                PrefabDeformPartCommonW.Diff($"{path}.Common[{i}]", a.Common[i], b.Common[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabPartBreakEnergyW
+{
+    public int PartId { get; set; }
+    public float BreakEnergy { get; set; }
+
+    internal static PrefabPartBreakEnergyW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabPartBreakEnergyW();
+        value.PartId = reader.ReadInt32();
+        value.BreakEnergy = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(PartId);
+        writer.Write(BreakEnergy);
+    }
+
+    internal static void Diff(string path, PrefabPartBreakEnergyW a, PrefabPartBreakEnergyW b, List<string> diffs)
+    {
+        if (a.PartId != b.PartId) diffs.Add($"{path}.PartId: {a.PartId} vs {b.PartId}");
+        if (BitConverter.SingleToUInt32Bits(a.BreakEnergy) != BitConverter.SingleToUInt32Bits(b.BreakEnergy)) diffs.Add($"{path}.BreakEnergy: {a.BreakEnergy} vs {b.BreakEnergy}");
+    }
+}
+
+internal sealed class PrefabJointSetW
+{
+    public uint Flags { get; set; }
+    public float EnergyDeform { get; set; }
+    public List<float> LinearAndAngular { get; set; } = [];
+
+    internal static PrefabJointSetW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabJointSetW();
+        value.Flags = reader.ReadUInt32();
+        value.EnergyDeform = reader.ReadSingle();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.LinearAndAngular.Add(reader.ReadSingle());
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Flags);
+        writer.Write(EnergyDeform);
+        Wire.WriteCount(writer, LinearAndAngular.Count);
+        foreach (float item in LinearAndAngular)
+        {
+            writer.Write(item);
+        }
+    }
+
+    internal static void Diff(string path, PrefabJointSetW a, PrefabJointSetW b, List<string> diffs)
+    {
+        if (a.Flags != b.Flags) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+        if (BitConverter.SingleToUInt32Bits(a.EnergyDeform) != BitConverter.SingleToUInt32Bits(b.EnergyDeform)) diffs.Add($"{path}.EnergyDeform: {a.EnergyDeform} vs {b.EnergyDeform}");
+        if (a.LinearAndAngular.Count != b.LinearAndAngular.Count)
+        {
+            diffs.Add($"{path}.LinearAndAngular: count {a.LinearAndAngular.Count} vs {b.LinearAndAngular.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.LinearAndAngular.Count; i++)
+            {
+                if (BitConverter.SingleToUInt32Bits(a.LinearAndAngular[i]) != BitConverter.SingleToUInt32Bits(b.LinearAndAngular[i])) diffs.Add($"{path}.LinearAndAngular[{i}]: {a.LinearAndAngular[i]} vs {b.LinearAndAngular[i]}");
+            }
+        }
+    }
+}
+
+internal sealed class PrefabJointW
+{
+    public ushort Unk0 { get; set; }
+    public ushort Unk1 { get; set; }
+    public ushort Unk2 { get; set; }
+    public ushort Unk3 { get; set; }
+    public List<PrefabJointSetW> JointSets { get; set; } = [];
+    public PrefabTransformW Unk4 { get; set; } = new();
+    public PrefabTransformW Unk5 { get; set; } = new();
+    public List<string> Unk6 { get; set; } = [];
+    public Vector3 Unk7 { get; set; }
+    public List<PrefabPartBreakEnergyW> PartBreakEnergy { get; set; } = [];
+
+    internal static PrefabJointW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabJointW();
+        value.Unk0 = reader.ReadUInt16();
+        value.Unk1 = reader.ReadUInt16();
+        value.Unk2 = reader.ReadUInt16();
+        value.Unk3 = reader.ReadUInt16();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.JointSets.Add(PrefabJointSetW.ReadFrom(reader));
+            }
+        }
+        value.Unk4 = PrefabTransformW.ReadFrom(reader);
+        value.Unk5 = PrefabTransformW.ReadFrom(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk6.Add(Wire.ReadString(reader));
+            }
+        }
+        value.Unk7 = Wire.ReadVector3(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.PartBreakEnergy.Add(PrefabPartBreakEnergyW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Unk0);
+        writer.Write(Unk1);
+        writer.Write(Unk2);
+        writer.Write(Unk3);
+        Wire.WriteCount(writer, JointSets.Count);
+        foreach (PrefabJointSetW item in JointSets)
+        {
+            item.WriteTo(writer);
+        }
+        Unk4.WriteTo(writer);
+        Unk5.WriteTo(writer);
+        Wire.WriteCount(writer, Unk6.Count);
+        foreach (string item in Unk6)
+        {
+            Wire.WriteString(writer, item);
+        }
+        Wire.WriteVector3(writer, Unk7);
+        Wire.WriteCount(writer, PartBreakEnergy.Count);
+        foreach (PrefabPartBreakEnergyW item in PartBreakEnergy)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabJointW a, PrefabJointW b, List<string> diffs)
+    {
+        if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
+        if (a.Unk1 != b.Unk1) diffs.Add($"{path}.Unk1: {a.Unk1} vs {b.Unk1}");
+        if (a.Unk2 != b.Unk2) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (a.Unk3 != b.Unk3) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+        if (a.JointSets.Count != b.JointSets.Count)
+        {
+            diffs.Add($"{path}.JointSets: count {a.JointSets.Count} vs {b.JointSets.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.JointSets.Count; i++)
+            {
+                PrefabJointSetW.Diff($"{path}.JointSets[{i}]", a.JointSets[i], b.JointSets[i], diffs);
+            }
+        }
+        PrefabTransformW.Diff($"{path}.Unk4", a.Unk4, b.Unk4, diffs);
+        PrefabTransformW.Diff($"{path}.Unk5", a.Unk5, b.Unk5, diffs);
+        if (a.Unk6.Count != b.Unk6.Count)
+        {
+            diffs.Add($"{path}.Unk6: count {a.Unk6.Count} vs {b.Unk6.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk6.Count; i++)
+            {
+                if (!string.Equals(a.Unk6[i], b.Unk6[i], StringComparison.Ordinal)) diffs.Add($"{path}.Unk6[{i}]: '{a.Unk6[i]}' vs '{b.Unk6[i]}'");
+            }
+        }
+        Wire.DiffVector3($"{path}.Unk7", a.Unk7, b.Unk7, diffs);
+        if (a.PartBreakEnergy.Count != b.PartBreakEnergy.Count)
+        {
+            diffs.Add($"{path}.PartBreakEnergy: count {a.PartBreakEnergy.Count} vs {b.PartBreakEnergy.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.PartBreakEnergy.Count; i++)
+            {
+                PrefabPartBreakEnergyW.Diff($"{path}.PartBreakEnergy[{i}]", a.PartBreakEnergy[i], b.PartBreakEnergy[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabPartMatrixW
+{
+    public ulong PartHashName { get; set; }
+    public PrefabTransformW PartTransform { get; set; } = new();
+
+    internal static PrefabPartMatrixW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabPartMatrixW();
+        value.PartHashName = reader.ReadUInt64();
+        value.PartTransform = PrefabTransformW.ReadFrom(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(PartHashName);
+        PartTransform.WriteTo(writer);
+    }
+
+    internal static void Diff(string path, PrefabPartMatrixW a, PrefabPartMatrixW b, List<string> diffs)
+    {
+        if (a.PartHashName != b.PartHashName) diffs.Add($"{path}.PartHashName: {a.PartHashName} vs {b.PartHashName}");
+        PrefabTransformW.Diff($"{path}.PartTransform", a.PartTransform, b.PartTransform, diffs);
+    }
+}
+
+internal sealed class PrefabOwnerDeformW
+{
+    public ulong Unk0 { get; set; }
+    public ulong Unk1 { get; set; }
+    public PrefabTransformW Unk2 { get; set; } = new();
+    public Vector3 Unk11 { get; set; }
+    public Vector3 Unk12 { get; set; }
+    public List<ushort> Unk4 { get; set; } = [];
+    public List<ushort> Unk6 { get; set; } = [];
+    public List<PrefabPartMatrixW> PartTransforms { get; set; } = [];
+    public PrefabTransformW Unk10 { get; set; } = new();
+
+    internal static PrefabOwnerDeformW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabOwnerDeformW();
+        value.Unk0 = reader.ReadUInt64();
+        value.Unk1 = reader.ReadUInt64();
+        value.Unk2 = PrefabTransformW.ReadFrom(reader);
+        value.Unk11 = Wire.ReadVector3(reader);
+        value.Unk12 = Wire.ReadVector3(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk4.Add(reader.ReadUInt16());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk6.Add(reader.ReadUInt16());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.PartTransforms.Add(PrefabPartMatrixW.ReadFrom(reader));
+            }
+        }
+        value.Unk10 = PrefabTransformW.ReadFrom(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Unk0);
+        writer.Write(Unk1);
+        Unk2.WriteTo(writer);
+        Wire.WriteVector3(writer, Unk11);
+        Wire.WriteVector3(writer, Unk12);
+        Wire.WriteCount(writer, Unk4.Count);
+        foreach (ushort item in Unk4)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Unk6.Count);
+        foreach (ushort item in Unk6)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, PartTransforms.Count);
+        foreach (PrefabPartMatrixW item in PartTransforms)
+        {
+            item.WriteTo(writer);
+        }
+        Unk10.WriteTo(writer);
+    }
+
+    internal static void Diff(string path, PrefabOwnerDeformW a, PrefabOwnerDeformW b, List<string> diffs)
+    {
+        if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
+        if (a.Unk1 != b.Unk1) diffs.Add($"{path}.Unk1: {a.Unk1} vs {b.Unk1}");
+        PrefabTransformW.Diff($"{path}.Unk2", a.Unk2, b.Unk2, diffs);
+        Wire.DiffVector3($"{path}.Unk11", a.Unk11, b.Unk11, diffs);
+        Wire.DiffVector3($"{path}.Unk12", a.Unk12, b.Unk12, diffs);
+        if (a.Unk4.Count != b.Unk4.Count)
+        {
+            diffs.Add($"{path}.Unk4: count {a.Unk4.Count} vs {b.Unk4.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk4.Count; i++)
+            {
+                if (a.Unk4[i] != b.Unk4[i]) diffs.Add($"{path}.Unk4[{i}]: {a.Unk4[i]} vs {b.Unk4[i]}");
+            }
+        }
+        if (a.Unk6.Count != b.Unk6.Count)
+        {
+            diffs.Add($"{path}.Unk6: count {a.Unk6.Count} vs {b.Unk6.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk6.Count; i++)
+            {
+                if (a.Unk6[i] != b.Unk6[i]) diffs.Add($"{path}.Unk6[{i}]: {a.Unk6[i]} vs {b.Unk6[i]}");
+            }
+        }
+        if (a.PartTransforms.Count != b.PartTransforms.Count)
+        {
+            diffs.Add($"{path}.PartTransforms: count {a.PartTransforms.Count} vs {b.PartTransforms.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.PartTransforms.Count; i++)
+            {
+                PrefabPartMatrixW.Diff($"{path}.PartTransforms[{i}]", a.PartTransforms[i], b.PartTransforms[i], diffs);
+            }
+        }
+        PrefabTransformW.Diff($"{path}.Unk10", a.Unk10, b.Unk10, diffs);
+    }
+}
+
+internal sealed class PrefabDeformationInitW
+{
+    public uint PrefabVersion { get; set; }
+    public ulong HashCrc { get; set; }
+    public ulong ScaleBoneFrameName { get; set; }
+    public ulong RootFrameName { get; set; }
+    public List<PrefabDeformPartW> DeformParts { get; set; } = [];
+    public List<PrefabJointW> Joints { get; set; } = [];
+    public List<PrefabHashIndexW> Unk1Pairs { get; set; } = [];
+    public List<PrefabOwnerDeformW> OwnerDeforms { get; set; } = [];
+    public byte Unk2 { get; set; }
+    public byte Unk3 { get; set; }
+
+    internal static PrefabDeformationInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformationInitW();
+        value.PrefabVersion = reader.ReadUInt32();
+        value.HashCrc = reader.ReadUInt64();
+        value.ScaleBoneFrameName = reader.ReadUInt64();
+        value.RootFrameName = reader.ReadUInt64();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DeformParts.Add(PrefabDeformPartW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Joints.Add(PrefabJointW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Unk1Pairs.Add(PrefabHashIndexW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.OwnerDeforms.Add(PrefabOwnerDeformW.ReadFrom(reader));
+            }
+        }
+        value.Unk2 = reader.ReadByte();
+        value.Unk3 = reader.ReadByte();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(PrefabVersion);
+        writer.Write(HashCrc);
+        writer.Write(ScaleBoneFrameName);
+        writer.Write(RootFrameName);
+        Wire.WriteCount(writer, DeformParts.Count);
+        foreach (PrefabDeformPartW item in DeformParts)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Joints.Count);
+        foreach (PrefabJointW item in Joints)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Unk1Pairs.Count);
+        foreach (PrefabHashIndexW item in Unk1Pairs)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, OwnerDeforms.Count);
+        foreach (PrefabOwnerDeformW item in OwnerDeforms)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(Unk2);
+        writer.Write(Unk3);
+    }
+
+    internal static void Diff(string path, PrefabDeformationInitW a, PrefabDeformationInitW b, List<string> diffs)
+    {
+        if (a.PrefabVersion != b.PrefabVersion) diffs.Add($"{path}.PrefabVersion: {a.PrefabVersion} vs {b.PrefabVersion}");
+        if (a.HashCrc != b.HashCrc) diffs.Add($"{path}.HashCrc: {a.HashCrc} vs {b.HashCrc}");
+        if (a.ScaleBoneFrameName != b.ScaleBoneFrameName) diffs.Add($"{path}.ScaleBoneFrameName: {a.ScaleBoneFrameName} vs {b.ScaleBoneFrameName}");
+        if (a.RootFrameName != b.RootFrameName) diffs.Add($"{path}.RootFrameName: {a.RootFrameName} vs {b.RootFrameName}");
+        if (a.DeformParts.Count != b.DeformParts.Count)
+        {
+            diffs.Add($"{path}.DeformParts: count {a.DeformParts.Count} vs {b.DeformParts.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DeformParts.Count; i++)
+            {
+                PrefabDeformPartW.Diff($"{path}.DeformParts[{i}]", a.DeformParts[i], b.DeformParts[i], diffs);
+            }
+        }
+        if (a.Joints.Count != b.Joints.Count)
+        {
+            diffs.Add($"{path}.Joints: count {a.Joints.Count} vs {b.Joints.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Joints.Count; i++)
+            {
+                PrefabJointW.Diff($"{path}.Joints[{i}]", a.Joints[i], b.Joints[i], diffs);
+            }
+        }
+        if (a.Unk1Pairs.Count != b.Unk1Pairs.Count)
+        {
+            diffs.Add($"{path}.Unk1Pairs: count {a.Unk1Pairs.Count} vs {b.Unk1Pairs.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Unk1Pairs.Count; i++)
+            {
+                PrefabHashIndexW.Diff($"{path}.Unk1Pairs[{i}]", a.Unk1Pairs[i], b.Unk1Pairs[i], diffs);
+            }
+        }
+        if (a.OwnerDeforms.Count != b.OwnerDeforms.Count)
+        {
+            diffs.Add($"{path}.OwnerDeforms: count {a.OwnerDeforms.Count} vs {b.OwnerDeforms.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.OwnerDeforms.Count; i++)
+            {
+                PrefabOwnerDeformW.Diff($"{path}.OwnerDeforms[{i}]", a.OwnerDeforms[i], b.OwnerDeforms[i], diffs);
+            }
+        }
+        if (a.Unk2 != b.Unk2) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (a.Unk3 != b.Unk3) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+    }
+}
+
+internal sealed class PrefabDcbDataW
+{
+    public ulong DoorFrameName { get; set; }
+    public float Resistance { get; set; }
+    public float Hitpoints { get; set; }
+
+    internal static PrefabDcbDataW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDcbDataW();
+        value.DoorFrameName = reader.ReadUInt64();
+        value.Resistance = reader.ReadSingle();
+        value.Hitpoints = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(DoorFrameName);
+        writer.Write(Resistance);
+        writer.Write(Hitpoints);
+    }
+
+    internal static void Diff(string path, PrefabDcbDataW a, PrefabDcbDataW b, List<string> diffs)
+    {
+        if (a.DoorFrameName != b.DoorFrameName) diffs.Add($"{path}.DoorFrameName: {a.DoorFrameName} vs {b.DoorFrameName}");
+        if (BitConverter.SingleToUInt32Bits(a.Resistance) != BitConverter.SingleToUInt32Bits(b.Resistance)) diffs.Add($"{path}.Resistance: {a.Resistance} vs {b.Resistance}");
+        if (BitConverter.SingleToUInt32Bits(a.Hitpoints) != BitConverter.SingleToUInt32Bits(b.Hitpoints)) diffs.Add($"{path}.Hitpoints: {a.Hitpoints} vs {b.Hitpoints}");
+    }
+}
+
+internal sealed class PrefabWindowDataW
+{
+    public ulong WindowFrameName { get; set; }
+    public List<ulong> CheckBoneFrameName { get; set; } = [];
+    public float Depth { get; set; }
+    public byte IsOpenable { get; set; }
+
+    internal static PrefabWindowDataW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabWindowDataW();
+        value.WindowFrameName = reader.ReadUInt64();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.CheckBoneFrameName.Add(reader.ReadUInt64());
+            }
+        }
+        value.Depth = reader.ReadSingle();
+        value.IsOpenable = reader.ReadByte();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(WindowFrameName);
+        Wire.WriteCount(writer, CheckBoneFrameName.Count);
+        foreach (ulong item in CheckBoneFrameName)
+        {
+            writer.Write(item);
+        }
+        writer.Write(Depth);
+        writer.Write(IsOpenable);
+    }
+
+    internal static void Diff(string path, PrefabWindowDataW a, PrefabWindowDataW b, List<string> diffs)
+    {
+        if (a.WindowFrameName != b.WindowFrameName) diffs.Add($"{path}.WindowFrameName: {a.WindowFrameName} vs {b.WindowFrameName}");
+        if (a.CheckBoneFrameName.Count != b.CheckBoneFrameName.Count)
+        {
+            diffs.Add($"{path}.CheckBoneFrameName: count {a.CheckBoneFrameName.Count} vs {b.CheckBoneFrameName.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.CheckBoneFrameName.Count; i++)
+            {
+                if (a.CheckBoneFrameName[i] != b.CheckBoneFrameName[i]) diffs.Add($"{path}.CheckBoneFrameName[{i}]: {a.CheckBoneFrameName[i]} vs {b.CheckBoneFrameName[i]}");
+            }
+        }
+        if (BitConverter.SingleToUInt32Bits(a.Depth) != BitConverter.SingleToUInt32Bits(b.Depth)) diffs.Add($"{path}.Depth: {a.Depth} vs {b.Depth}");
+        if (a.IsOpenable != b.IsOpenable) diffs.Add($"{path}.IsOpenable: {a.IsOpenable} vs {b.IsOpenable}");
+    }
+}
+
+internal sealed class PrefabOtherInitW
+{
+    public ulong VehicleBodyName { get; set; }
+    public ulong RestBoneName { get; set; }
+    public ulong MotorVentilatorName { get; set; }
+    public List<ulong> Hashes0 { get; set; } = [];
+    public List<ulong> DrivingWheels { get; set; } = [];
+    public List<ulong> Hashes2 { get; set; } = [];
+    public List<ulong> FuelTanks { get; set; } = [];
+    public List<ulong> ExhaustEmitters { get; set; } = [];
+    public List<ulong> LocalWindEmitters { get; set; } = [];
+    public Vector3 BoneRange { get; set; }
+    public float ReduceBboxZ { get; set; }
+    public List<PrefabTransformW> LightMatrices { get; set; } = [];
+    public List<PrefabDcbDataW> DcbData { get; set; } = [];
+    public List<PrefabWindowDataW> WindowData { get; set; } = [];
+    public ulong SnowRestName { get; set; }
+    public ulong HeadlightModelName { get; set; }
+    public ulong BacklightModelName { get; set; }
+    public ulong ToplightModelName { get; set; }
+
+    internal static PrefabOtherInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabOtherInitW();
+        value.VehicleBodyName = reader.ReadUInt64();
+        value.RestBoneName = reader.ReadUInt64();
+        value.MotorVentilatorName = reader.ReadUInt64();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes0.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DrivingWheels.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes2.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.FuelTanks.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.ExhaustEmitters.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.LocalWindEmitters.Add(reader.ReadUInt64());
+            }
+        }
+        value.BoneRange = Wire.ReadVector3(reader);
+        value.ReduceBboxZ = reader.ReadSingle();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.LightMatrices.Add(PrefabTransformW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DcbData.Add(PrefabDcbDataW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.WindowData.Add(PrefabWindowDataW.ReadFrom(reader));
+            }
+        }
+        value.SnowRestName = reader.ReadUInt64();
+        value.HeadlightModelName = reader.ReadUInt64();
+        value.BacklightModelName = reader.ReadUInt64();
+        value.ToplightModelName = reader.ReadUInt64();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(VehicleBodyName);
+        writer.Write(RestBoneName);
+        writer.Write(MotorVentilatorName);
+        Wire.WriteCount(writer, Hashes0.Count);
+        foreach (ulong item in Hashes0)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, DrivingWheels.Count);
+        foreach (ulong item in DrivingWheels)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Hashes2.Count);
+        foreach (ulong item in Hashes2)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, FuelTanks.Count);
+        foreach (ulong item in FuelTanks)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, ExhaustEmitters.Count);
+        foreach (ulong item in ExhaustEmitters)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, LocalWindEmitters.Count);
+        foreach (ulong item in LocalWindEmitters)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteVector3(writer, BoneRange);
+        writer.Write(ReduceBboxZ);
+        Wire.WriteCount(writer, LightMatrices.Count);
+        foreach (PrefabTransformW item in LightMatrices)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, DcbData.Count);
+        foreach (PrefabDcbDataW item in DcbData)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, WindowData.Count);
+        foreach (PrefabWindowDataW item in WindowData)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(SnowRestName);
+        writer.Write(HeadlightModelName);
+        writer.Write(BacklightModelName);
+        writer.Write(ToplightModelName);
+    }
+
+    internal static void Diff(string path, PrefabOtherInitW a, PrefabOtherInitW b, List<string> diffs)
+    {
+        if (a.VehicleBodyName != b.VehicleBodyName) diffs.Add($"{path}.VehicleBodyName: {a.VehicleBodyName} vs {b.VehicleBodyName}");
+        if (a.RestBoneName != b.RestBoneName) diffs.Add($"{path}.RestBoneName: {a.RestBoneName} vs {b.RestBoneName}");
+        if (a.MotorVentilatorName != b.MotorVentilatorName) diffs.Add($"{path}.MotorVentilatorName: {a.MotorVentilatorName} vs {b.MotorVentilatorName}");
+        if (a.Hashes0.Count != b.Hashes0.Count)
+        {
+            diffs.Add($"{path}.Hashes0: count {a.Hashes0.Count} vs {b.Hashes0.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes0.Count; i++)
+            {
+                if (a.Hashes0[i] != b.Hashes0[i]) diffs.Add($"{path}.Hashes0[{i}]: {a.Hashes0[i]} vs {b.Hashes0[i]}");
+            }
+        }
+        if (a.DrivingWheels.Count != b.DrivingWheels.Count)
+        {
+            diffs.Add($"{path}.DrivingWheels: count {a.DrivingWheels.Count} vs {b.DrivingWheels.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DrivingWheels.Count; i++)
+            {
+                if (a.DrivingWheels[i] != b.DrivingWheels[i]) diffs.Add($"{path}.DrivingWheels[{i}]: {a.DrivingWheels[i]} vs {b.DrivingWheels[i]}");
+            }
+        }
+        if (a.Hashes2.Count != b.Hashes2.Count)
+        {
+            diffs.Add($"{path}.Hashes2: count {a.Hashes2.Count} vs {b.Hashes2.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes2.Count; i++)
+            {
+                if (a.Hashes2[i] != b.Hashes2[i]) diffs.Add($"{path}.Hashes2[{i}]: {a.Hashes2[i]} vs {b.Hashes2[i]}");
+            }
+        }
+        if (a.FuelTanks.Count != b.FuelTanks.Count)
+        {
+            diffs.Add($"{path}.FuelTanks: count {a.FuelTanks.Count} vs {b.FuelTanks.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.FuelTanks.Count; i++)
+            {
+                if (a.FuelTanks[i] != b.FuelTanks[i]) diffs.Add($"{path}.FuelTanks[{i}]: {a.FuelTanks[i]} vs {b.FuelTanks[i]}");
+            }
+        }
+        if (a.ExhaustEmitters.Count != b.ExhaustEmitters.Count)
+        {
+            diffs.Add($"{path}.ExhaustEmitters: count {a.ExhaustEmitters.Count} vs {b.ExhaustEmitters.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.ExhaustEmitters.Count; i++)
+            {
+                if (a.ExhaustEmitters[i] != b.ExhaustEmitters[i]) diffs.Add($"{path}.ExhaustEmitters[{i}]: {a.ExhaustEmitters[i]} vs {b.ExhaustEmitters[i]}");
+            }
+        }
+        if (a.LocalWindEmitters.Count != b.LocalWindEmitters.Count)
+        {
+            diffs.Add($"{path}.LocalWindEmitters: count {a.LocalWindEmitters.Count} vs {b.LocalWindEmitters.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.LocalWindEmitters.Count; i++)
+            {
+                if (a.LocalWindEmitters[i] != b.LocalWindEmitters[i]) diffs.Add($"{path}.LocalWindEmitters[{i}]: {a.LocalWindEmitters[i]} vs {b.LocalWindEmitters[i]}");
+            }
+        }
+        Wire.DiffVector3($"{path}.BoneRange", a.BoneRange, b.BoneRange, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.ReduceBboxZ) != BitConverter.SingleToUInt32Bits(b.ReduceBboxZ)) diffs.Add($"{path}.ReduceBboxZ: {a.ReduceBboxZ} vs {b.ReduceBboxZ}");
+        if (a.LightMatrices.Count != b.LightMatrices.Count)
+        {
+            diffs.Add($"{path}.LightMatrices: count {a.LightMatrices.Count} vs {b.LightMatrices.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.LightMatrices.Count; i++)
+            {
+                PrefabTransformW.Diff($"{path}.LightMatrices[{i}]", a.LightMatrices[i], b.LightMatrices[i], diffs);
+            }
+        }
+        if (a.DcbData.Count != b.DcbData.Count)
+        {
+            diffs.Add($"{path}.DcbData: count {a.DcbData.Count} vs {b.DcbData.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DcbData.Count; i++)
+            {
+                PrefabDcbDataW.Diff($"{path}.DcbData[{i}]", a.DcbData[i], b.DcbData[i], diffs);
+            }
+        }
+        if (a.WindowData.Count != b.WindowData.Count)
+        {
+            diffs.Add($"{path}.WindowData: count {a.WindowData.Count} vs {b.WindowData.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.WindowData.Count; i++)
+            {
+                PrefabWindowDataW.Diff($"{path}.WindowData[{i}]", a.WindowData[i], b.WindowData[i], diffs);
+            }
+        }
+        if (a.SnowRestName != b.SnowRestName) diffs.Add($"{path}.SnowRestName: {a.SnowRestName} vs {b.SnowRestName}");
+        if (a.HeadlightModelName != b.HeadlightModelName) diffs.Add($"{path}.HeadlightModelName: {a.HeadlightModelName} vs {b.HeadlightModelName}");
+        if (a.BacklightModelName != b.BacklightModelName) diffs.Add($"{path}.BacklightModelName: {a.BacklightModelName} vs {b.BacklightModelName}");
+        if (a.ToplightModelName != b.ToplightModelName) diffs.Add($"{path}.ToplightModelName: {a.ToplightModelName} vs {b.ToplightModelName}");
+    }
+}
+
+internal sealed class PrefabWheelW
+{
+    public float DeformAngleMax { get; set; }
+    public float DeformEnergyMax { get; set; }
+    public uint NumArms { get; set; }
+    public PrefabTransformW PosLocalOrigMtr { get; set; } = new();
+    public float ArmLength { get; set; }
+    public Vector3 WheelPosOnBrakeDrum { get; set; }
+    public float BrakeDrumRadius { get; set; }
+    public float BrakeDrumWidth { get; set; }
+    public float BrakeDrumMass { get; set; }
+    public float BrakeDrumInertia { get; set; }
+    public float AxleMass { get; set; }
+
+    internal static PrefabWheelW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabWheelW();
+        value.DeformAngleMax = reader.ReadSingle();
+        value.DeformEnergyMax = reader.ReadSingle();
+        value.NumArms = reader.ReadUInt32();
+        value.PosLocalOrigMtr = PrefabTransformW.ReadFrom(reader);
+        value.ArmLength = reader.ReadSingle();
+        value.WheelPosOnBrakeDrum = Wire.ReadVector3(reader);
+        value.BrakeDrumRadius = reader.ReadSingle();
+        value.BrakeDrumWidth = reader.ReadSingle();
+        value.BrakeDrumMass = reader.ReadSingle();
+        value.BrakeDrumInertia = reader.ReadSingle();
+        value.AxleMass = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(DeformAngleMax);
+        writer.Write(DeformEnergyMax);
+        writer.Write(NumArms);
+        PosLocalOrigMtr.WriteTo(writer);
+        writer.Write(ArmLength);
+        Wire.WriteVector3(writer, WheelPosOnBrakeDrum);
+        writer.Write(BrakeDrumRadius);
+        writer.Write(BrakeDrumWidth);
+        writer.Write(BrakeDrumMass);
+        writer.Write(BrakeDrumInertia);
+        writer.Write(AxleMass);
+    }
+
+    internal static void Diff(string path, PrefabWheelW a, PrefabWheelW b, List<string> diffs)
+    {
+        if (BitConverter.SingleToUInt32Bits(a.DeformAngleMax) != BitConverter.SingleToUInt32Bits(b.DeformAngleMax)) diffs.Add($"{path}.DeformAngleMax: {a.DeformAngleMax} vs {b.DeformAngleMax}");
+        if (BitConverter.SingleToUInt32Bits(a.DeformEnergyMax) != BitConverter.SingleToUInt32Bits(b.DeformEnergyMax)) diffs.Add($"{path}.DeformEnergyMax: {a.DeformEnergyMax} vs {b.DeformEnergyMax}");
+        if (a.NumArms != b.NumArms) diffs.Add($"{path}.NumArms: {a.NumArms} vs {b.NumArms}");
+        PrefabTransformW.Diff($"{path}.PosLocalOrigMtr", a.PosLocalOrigMtr, b.PosLocalOrigMtr, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.ArmLength) != BitConverter.SingleToUInt32Bits(b.ArmLength)) diffs.Add($"{path}.ArmLength: {a.ArmLength} vs {b.ArmLength}");
+        Wire.DiffVector3($"{path}.WheelPosOnBrakeDrum", a.WheelPosOnBrakeDrum, b.WheelPosOnBrakeDrum, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.BrakeDrumRadius) != BitConverter.SingleToUInt32Bits(b.BrakeDrumRadius)) diffs.Add($"{path}.BrakeDrumRadius: {a.BrakeDrumRadius} vs {b.BrakeDrumRadius}");
+        if (BitConverter.SingleToUInt32Bits(a.BrakeDrumWidth) != BitConverter.SingleToUInt32Bits(b.BrakeDrumWidth)) diffs.Add($"{path}.BrakeDrumWidth: {a.BrakeDrumWidth} vs {b.BrakeDrumWidth}");
+        if (BitConverter.SingleToUInt32Bits(a.BrakeDrumMass) != BitConverter.SingleToUInt32Bits(b.BrakeDrumMass)) diffs.Add($"{path}.BrakeDrumMass: {a.BrakeDrumMass} vs {b.BrakeDrumMass}");
+        if (BitConverter.SingleToUInt32Bits(a.BrakeDrumInertia) != BitConverter.SingleToUInt32Bits(b.BrakeDrumInertia)) diffs.Add($"{path}.BrakeDrumInertia: {a.BrakeDrumInertia} vs {b.BrakeDrumInertia}");
+        if (BitConverter.SingleToUInt32Bits(a.AxleMass) != BitConverter.SingleToUInt32Bits(b.AxleMass)) diffs.Add($"{path}.AxleMass: {a.AxleMass} vs {b.AxleMass}");
+    }
+}
+
+internal sealed class PrefabAxleW
+{
+    public ulong AxleName { get; set; }
+    public ulong BrakeDrumName { get; set; }
+    public ulong RotWingName { get; set; }
+    public uint AxleType { get; set; }
+    public PrefabWheelW Wheel { get; set; } = new();
+
+    internal static PrefabAxleW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabAxleW();
+        value.AxleName = reader.ReadUInt64();
+        value.BrakeDrumName = reader.ReadUInt64();
+        value.RotWingName = reader.ReadUInt64();
+        value.AxleType = reader.ReadUInt32();
+        value.Wheel = PrefabWheelW.ReadFrom(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(AxleName);
+        writer.Write(BrakeDrumName);
+        writer.Write(RotWingName);
+        writer.Write(AxleType);
+        Wheel.WriteTo(writer);
+    }
+
+    internal static void Diff(string path, PrefabAxleW a, PrefabAxleW b, List<string> diffs)
+    {
+        if (a.AxleName != b.AxleName) diffs.Add($"{path}.AxleName: {a.AxleName} vs {b.AxleName}");
+        if (a.BrakeDrumName != b.BrakeDrumName) diffs.Add($"{path}.BrakeDrumName: {a.BrakeDrumName} vs {b.BrakeDrumName}");
+        if (a.RotWingName != b.RotWingName) diffs.Add($"{path}.RotWingName: {a.RotWingName} vs {b.RotWingName}");
+        if (a.AxleType != b.AxleType) diffs.Add($"{path}.AxleType: {a.AxleType} vs {b.AxleType}");
+        PrefabWheelW.Diff($"{path}.Wheel", a.Wheel, b.Wheel, diffs);
+    }
+}
+
+internal sealed class PrefabDeformMaterialW
+{
+    public PrefabGuidW Guid { get; set; } = new();
+    public uint Group { get; set; }
+
+    internal static PrefabDeformMaterialW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDeformMaterialW();
+        value.Guid = PrefabGuidW.ReadFrom(reader);
+        value.Group = reader.ReadUInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Guid.WriteTo(writer);
+        writer.Write(Group);
+    }
+
+    internal static void Diff(string path, PrefabDeformMaterialW a, PrefabDeformMaterialW b, List<string> diffs)
+    {
+        PrefabGuidW.Diff($"{path}.Guid", a.Guid, b.Guid, diffs);
+        if (a.Group != b.Group) diffs.Add($"{path}.Group: {a.Group} vs {b.Group}");
+    }
+}
+
+internal sealed class PrefabColorAndDirtyW
+{
+    public PrefabGuidW Guid { get; set; } = new();
+    public ulong TextureName { get; set; }
+    public uint Flags { get; set; }
+
+    internal static PrefabColorAndDirtyW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabColorAndDirtyW();
+        value.Guid = PrefabGuidW.ReadFrom(reader);
+        value.TextureName = reader.ReadUInt64();
+        value.Flags = reader.ReadUInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Guid.WriteTo(writer);
+        writer.Write(TextureName);
+        writer.Write(Flags);
+    }
+
+    internal static void Diff(string path, PrefabColorAndDirtyW a, PrefabColorAndDirtyW b, List<string> diffs)
+    {
+        PrefabGuidW.Diff($"{path}.Guid", a.Guid, b.Guid, diffs);
+        if (a.TextureName != b.TextureName) diffs.Add($"{path}.TextureName: {a.TextureName} vs {b.TextureName}");
+        if (a.Flags != b.Flags) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+    }
+}
+
+internal sealed class PrefabLightInitW
+{
+    public ulong FrameName { get; set; }
+    public int Unk1 { get; set; }
+    public int Unk2 { get; set; }
+    public uint Unk3 { get; set; }
+    public uint Unk4 { get; set; }
+    public float EmissivePower { get; set; }
+    public float EmissiveMiddle { get; set; }
+    public float EmissiveSpeed0 { get; set; }
+    public float EmissiveSpeed1 { get; set; }
+    public List<ulong> CheckBoneName { get; set; } = [];
+    public ulong LightModelHash { get; set; }
+    public uint ParticleBreakId { get; set; }
+    public uint Unk12 { get; set; }
+
+    internal static PrefabLightInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabLightInitW();
+        value.FrameName = reader.ReadUInt64();
+        value.Unk1 = reader.ReadInt32();
+        value.Unk2 = reader.ReadInt32();
+        value.Unk3 = reader.ReadUInt32();
+        value.Unk4 = reader.ReadUInt32();
+        value.EmissivePower = reader.ReadSingle();
+        value.EmissiveMiddle = reader.ReadSingle();
+        value.EmissiveSpeed0 = reader.ReadSingle();
+        value.EmissiveSpeed1 = reader.ReadSingle();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.CheckBoneName.Add(reader.ReadUInt64());
+            }
+        }
+        value.LightModelHash = reader.ReadUInt64();
+        value.ParticleBreakId = reader.ReadUInt32();
+        value.Unk12 = reader.ReadUInt32();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(FrameName);
+        writer.Write(Unk1);
+        writer.Write(Unk2);
+        writer.Write(Unk3);
+        writer.Write(Unk4);
+        writer.Write(EmissivePower);
+        writer.Write(EmissiveMiddle);
+        writer.Write(EmissiveSpeed0);
+        writer.Write(EmissiveSpeed1);
+        Wire.WriteCount(writer, CheckBoneName.Count);
+        foreach (ulong item in CheckBoneName)
+        {
+            writer.Write(item);
+        }
+        writer.Write(LightModelHash);
+        writer.Write(ParticleBreakId);
+        writer.Write(Unk12);
+    }
+
+    internal static void Diff(string path, PrefabLightInitW a, PrefabLightInitW b, List<string> diffs)
+    {
+        if (a.FrameName != b.FrameName) diffs.Add($"{path}.FrameName: {a.FrameName} vs {b.FrameName}");
+        if (a.Unk1 != b.Unk1) diffs.Add($"{path}.Unk1: {a.Unk1} vs {b.Unk1}");
+        if (a.Unk2 != b.Unk2) diffs.Add($"{path}.Unk2: {a.Unk2} vs {b.Unk2}");
+        if (a.Unk3 != b.Unk3) diffs.Add($"{path}.Unk3: {a.Unk3} vs {b.Unk3}");
+        if (a.Unk4 != b.Unk4) diffs.Add($"{path}.Unk4: {a.Unk4} vs {b.Unk4}");
+        if (BitConverter.SingleToUInt32Bits(a.EmissivePower) != BitConverter.SingleToUInt32Bits(b.EmissivePower)) diffs.Add($"{path}.EmissivePower: {a.EmissivePower} vs {b.EmissivePower}");
+        if (BitConverter.SingleToUInt32Bits(a.EmissiveMiddle) != BitConverter.SingleToUInt32Bits(b.EmissiveMiddle)) diffs.Add($"{path}.EmissiveMiddle: {a.EmissiveMiddle} vs {b.EmissiveMiddle}");
+        if (BitConverter.SingleToUInt32Bits(a.EmissiveSpeed0) != BitConverter.SingleToUInt32Bits(b.EmissiveSpeed0)) diffs.Add($"{path}.EmissiveSpeed0: {a.EmissiveSpeed0} vs {b.EmissiveSpeed0}");
+        if (BitConverter.SingleToUInt32Bits(a.EmissiveSpeed1) != BitConverter.SingleToUInt32Bits(b.EmissiveSpeed1)) diffs.Add($"{path}.EmissiveSpeed1: {a.EmissiveSpeed1} vs {b.EmissiveSpeed1}");
+        if (a.CheckBoneName.Count != b.CheckBoneName.Count)
+        {
+            diffs.Add($"{path}.CheckBoneName: count {a.CheckBoneName.Count} vs {b.CheckBoneName.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.CheckBoneName.Count; i++)
+            {
+                if (a.CheckBoneName[i] != b.CheckBoneName[i]) diffs.Add($"{path}.CheckBoneName[{i}]: {a.CheckBoneName[i]} vs {b.CheckBoneName[i]}");
+            }
+        }
+        if (a.LightModelHash != b.LightModelHash) diffs.Add($"{path}.LightModelHash: {a.LightModelHash} vs {b.LightModelHash}");
+        if (a.ParticleBreakId != b.ParticleBreakId) diffs.Add($"{path}.ParticleBreakId: {a.ParticleBreakId} vs {b.ParticleBreakId}");
+        if (a.Unk12 != b.Unk12) diffs.Add($"{path}.Unk12: {a.Unk12} vs {b.Unk12}");
+    }
+}
+
+internal sealed class PrefabSzDefaultRangeW
+{
+    public uint Group { get; set; }
+    public float RangeMin { get; set; }
+    public float RangeMax { get; set; }
+
+    internal static PrefabSzDefaultRangeW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSzDefaultRangeW();
+        value.Group = reader.ReadUInt32();
+        value.RangeMin = reader.ReadSingle();
+        value.RangeMax = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Group);
+        writer.Write(RangeMin);
+        writer.Write(RangeMax);
+    }
+
+    internal static void Diff(string path, PrefabSzDefaultRangeW a, PrefabSzDefaultRangeW b, List<string> diffs)
+    {
+        if (a.Group != b.Group) diffs.Add($"{path}.Group: {a.Group} vs {b.Group}");
+        if (BitConverter.SingleToUInt32Bits(a.RangeMin) != BitConverter.SingleToUInt32Bits(b.RangeMin)) diffs.Add($"{path}.RangeMin: {a.RangeMin} vs {b.RangeMin}");
+        if (BitConverter.SingleToUInt32Bits(a.RangeMax) != BitConverter.SingleToUInt32Bits(b.RangeMax)) diffs.Add($"{path}.RangeMax: {a.RangeMax} vs {b.RangeMax}");
+    }
+}
+
+internal sealed class PrefabSkinZoneRangeW
+{
+    public uint Group { get; set; }
+    public uint SkinZone { get; set; }
+    public float RangeMax { get; set; }
+    public float RangeMin { get; set; }
+
+    internal static PrefabSkinZoneRangeW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSkinZoneRangeW();
+        value.Group = reader.ReadUInt32();
+        value.SkinZone = reader.ReadUInt32();
+        value.RangeMax = reader.ReadSingle();
+        value.RangeMin = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Group);
+        writer.Write(SkinZone);
+        writer.Write(RangeMax);
+        writer.Write(RangeMin);
+    }
+
+    internal static void Diff(string path, PrefabSkinZoneRangeW a, PrefabSkinZoneRangeW b, List<string> diffs)
+    {
+        if (a.Group != b.Group) diffs.Add($"{path}.Group: {a.Group} vs {b.Group}");
+        if (a.SkinZone != b.SkinZone) diffs.Add($"{path}.SkinZone: {a.SkinZone} vs {b.SkinZone}");
+        if (BitConverter.SingleToUInt32Bits(a.RangeMax) != BitConverter.SingleToUInt32Bits(b.RangeMax)) diffs.Add($"{path}.RangeMax: {a.RangeMax} vs {b.RangeMax}");
+        if (BitConverter.SingleToUInt32Bits(a.RangeMin) != BitConverter.SingleToUInt32Bits(b.RangeMin)) diffs.Add($"{path}.RangeMin: {a.RangeMin} vs {b.RangeMin}");
+    }
+}
+
+internal sealed class PrefabSkinZoneSettingsW
+{
+    public ushort SkinZoneIndex { get; set; }
+    public ushort MaterialGroupIndex { get; set; }
+    public float Intensity { get; set; }
+
+    internal static PrefabSkinZoneSettingsW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSkinZoneSettingsW();
+        value.SkinZoneIndex = reader.ReadUInt16();
+        value.MaterialGroupIndex = reader.ReadUInt16();
+        value.Intensity = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(SkinZoneIndex);
+        writer.Write(MaterialGroupIndex);
+        writer.Write(Intensity);
+    }
+
+    internal static void Diff(string path, PrefabSkinZoneSettingsW a, PrefabSkinZoneSettingsW b, List<string> diffs)
+    {
+        if (a.SkinZoneIndex != b.SkinZoneIndex) diffs.Add($"{path}.SkinZoneIndex: {a.SkinZoneIndex} vs {b.SkinZoneIndex}");
+        if (a.MaterialGroupIndex != b.MaterialGroupIndex) diffs.Add($"{path}.MaterialGroupIndex: {a.MaterialGroupIndex} vs {b.MaterialGroupIndex}");
+        if (BitConverter.SingleToUInt32Bits(a.Intensity) != BitConverter.SingleToUInt32Bits(b.Intensity)) diffs.Add($"{path}.Intensity: {a.Intensity} vs {b.Intensity}");
+    }
+}
+
+internal sealed class PrefabSkinZoneFrameDataW
+{
+    public ulong FrameName { get; set; }
+    public List<PrefabSkinZoneSettingsW> Settings { get; set; } = [];
+
+    internal static PrefabSkinZoneFrameDataW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSkinZoneFrameDataW();
+        value.FrameName = reader.ReadUInt64();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Settings.Add(PrefabSkinZoneSettingsW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(FrameName);
+        Wire.WriteCount(writer, Settings.Count);
+        foreach (PrefabSkinZoneSettingsW item in Settings)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabSkinZoneFrameDataW a, PrefabSkinZoneFrameDataW b, List<string> diffs)
+    {
+        if (a.FrameName != b.FrameName) diffs.Add($"{path}.FrameName: {a.FrameName} vs {b.FrameName}");
+        if (a.Settings.Count != b.Settings.Count)
+        {
+            diffs.Add($"{path}.Settings: count {a.Settings.Count} vs {b.Settings.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Settings.Count; i++)
+            {
+                PrefabSkinZoneSettingsW.Diff($"{path}.Settings[{i}]", a.Settings[i], b.Settings[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabSkinZonePartDataW
+{
+    public ulong MainPartFrameName { get; set; }
+    public List<PrefabSkinZoneFrameDataW> FrameData { get; set; } = [];
+
+    internal static PrefabSkinZonePartDataW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSkinZonePartDataW();
+        value.MainPartFrameName = reader.ReadUInt64();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.FrameData.Add(PrefabSkinZoneFrameDataW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(MainPartFrameName);
+        Wire.WriteCount(writer, FrameData.Count);
+        foreach (PrefabSkinZoneFrameDataW item in FrameData)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabSkinZonePartDataW a, PrefabSkinZonePartDataW b, List<string> diffs)
+    {
+        if (a.MainPartFrameName != b.MainPartFrameName) diffs.Add($"{path}.MainPartFrameName: {a.MainPartFrameName} vs {b.MainPartFrameName}");
+        if (a.FrameData.Count != b.FrameData.Count)
+        {
+            diffs.Add($"{path}.FrameData: count {a.FrameData.Count} vs {b.FrameData.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.FrameData.Count; i++)
+            {
+                PrefabSkinZoneFrameDataW.Diff($"{path}.FrameData[{i}]", a.FrameData[i], b.FrameData[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabSkinZoneGroupW
+{
+    public ushort MaterialGroup { get; set; }
+    public ushort SkinZoneRange { get; set; }
+    public ushort SkinZoneGroupIndex { get; set; }
+
+    internal static PrefabSkinZoneGroupW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSkinZoneGroupW();
+        value.MaterialGroup = reader.ReadUInt16();
+        value.SkinZoneRange = reader.ReadUInt16();
+        value.SkinZoneGroupIndex = reader.ReadUInt16();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(MaterialGroup);
+        writer.Write(SkinZoneRange);
+        writer.Write(SkinZoneGroupIndex);
+    }
+
+    internal static void Diff(string path, PrefabSkinZoneGroupW a, PrefabSkinZoneGroupW b, List<string> diffs)
+    {
+        if (a.MaterialGroup != b.MaterialGroup) diffs.Add($"{path}.MaterialGroup: {a.MaterialGroup} vs {b.MaterialGroup}");
+        if (a.SkinZoneRange != b.SkinZoneRange) diffs.Add($"{path}.SkinZoneRange: {a.SkinZoneRange} vs {b.SkinZoneRange}");
+        if (a.SkinZoneGroupIndex != b.SkinZoneGroupIndex) diffs.Add($"{path}.SkinZoneGroupIndex: {a.SkinZoneGroupIndex} vs {b.SkinZoneGroupIndex}");
+    }
+}
+
+internal sealed class PrefabShaderEffectInitW
+{
+    public List<ulong> FgsCloneVisuals { get; set; } = [];
+    public List<PrefabDeformMaterialW> DeformMaterial { get; set; } = [];
+    public List<PrefabColorAndDirtyW> ColorAndDirty { get; set; } = [];
+    public List<PrefabLightInitW> Lights { get; set; } = [];
+    public List<PrefabSzDefaultRangeW> SzDefaultRanges { get; set; } = [];
+    public List<PrefabSkinZoneRangeW> SkinZoneRanges { get; set; } = [];
+    public List<PrefabSkinZonePartDataW> SkinZonePartData { get; set; } = [];
+    public List<PrefabSkinZoneGroupW> SkinZoneGroups { get; set; } = [];
+    public PrefabGuidW SpzAndLightGuid { get; set; } = new();
+    public float BoneStiffness { get; set; }
+
+    internal static PrefabShaderEffectInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabShaderEffectInitW();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.FgsCloneVisuals.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DeformMaterial.Add(PrefabDeformMaterialW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.ColorAndDirty.Add(PrefabColorAndDirtyW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Lights.Add(PrefabLightInitW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.SzDefaultRanges.Add(PrefabSzDefaultRangeW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.SkinZoneRanges.Add(PrefabSkinZoneRangeW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.SkinZonePartData.Add(PrefabSkinZonePartDataW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.SkinZoneGroups.Add(PrefabSkinZoneGroupW.ReadFrom(reader));
+            }
+        }
+        value.SpzAndLightGuid = PrefabGuidW.ReadFrom(reader);
+        value.BoneStiffness = reader.ReadSingle();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteCount(writer, FgsCloneVisuals.Count);
+        foreach (ulong item in FgsCloneVisuals)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, DeformMaterial.Count);
+        foreach (PrefabDeformMaterialW item in DeformMaterial)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, ColorAndDirty.Count);
+        foreach (PrefabColorAndDirtyW item in ColorAndDirty)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Lights.Count);
+        foreach (PrefabLightInitW item in Lights)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, SzDefaultRanges.Count);
+        foreach (PrefabSzDefaultRangeW item in SzDefaultRanges)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, SkinZoneRanges.Count);
+        foreach (PrefabSkinZoneRangeW item in SkinZoneRanges)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, SkinZonePartData.Count);
+        foreach (PrefabSkinZonePartDataW item in SkinZonePartData)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, SkinZoneGroups.Count);
+        foreach (PrefabSkinZoneGroupW item in SkinZoneGroups)
+        {
+            item.WriteTo(writer);
+        }
+        SpzAndLightGuid.WriteTo(writer);
+        writer.Write(BoneStiffness);
+    }
+
+    internal static void Diff(string path, PrefabShaderEffectInitW a, PrefabShaderEffectInitW b, List<string> diffs)
+    {
+        if (a.FgsCloneVisuals.Count != b.FgsCloneVisuals.Count)
+        {
+            diffs.Add($"{path}.FgsCloneVisuals: count {a.FgsCloneVisuals.Count} vs {b.FgsCloneVisuals.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.FgsCloneVisuals.Count; i++)
+            {
+                if (a.FgsCloneVisuals[i] != b.FgsCloneVisuals[i]) diffs.Add($"{path}.FgsCloneVisuals[{i}]: {a.FgsCloneVisuals[i]} vs {b.FgsCloneVisuals[i]}");
+            }
+        }
+        if (a.DeformMaterial.Count != b.DeformMaterial.Count)
+        {
+            diffs.Add($"{path}.DeformMaterial: count {a.DeformMaterial.Count} vs {b.DeformMaterial.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DeformMaterial.Count; i++)
+            {
+                PrefabDeformMaterialW.Diff($"{path}.DeformMaterial[{i}]", a.DeformMaterial[i], b.DeformMaterial[i], diffs);
+            }
+        }
+        if (a.ColorAndDirty.Count != b.ColorAndDirty.Count)
+        {
+            diffs.Add($"{path}.ColorAndDirty: count {a.ColorAndDirty.Count} vs {b.ColorAndDirty.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.ColorAndDirty.Count; i++)
+            {
+                PrefabColorAndDirtyW.Diff($"{path}.ColorAndDirty[{i}]", a.ColorAndDirty[i], b.ColorAndDirty[i], diffs);
+            }
+        }
+        if (a.Lights.Count != b.Lights.Count)
+        {
+            diffs.Add($"{path}.Lights: count {a.Lights.Count} vs {b.Lights.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Lights.Count; i++)
+            {
+                PrefabLightInitW.Diff($"{path}.Lights[{i}]", a.Lights[i], b.Lights[i], diffs);
+            }
+        }
+        if (a.SzDefaultRanges.Count != b.SzDefaultRanges.Count)
+        {
+            diffs.Add($"{path}.SzDefaultRanges: count {a.SzDefaultRanges.Count} vs {b.SzDefaultRanges.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.SzDefaultRanges.Count; i++)
+            {
+                PrefabSzDefaultRangeW.Diff($"{path}.SzDefaultRanges[{i}]", a.SzDefaultRanges[i], b.SzDefaultRanges[i], diffs);
+            }
+        }
+        if (a.SkinZoneRanges.Count != b.SkinZoneRanges.Count)
+        {
+            diffs.Add($"{path}.SkinZoneRanges: count {a.SkinZoneRanges.Count} vs {b.SkinZoneRanges.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.SkinZoneRanges.Count; i++)
+            {
+                PrefabSkinZoneRangeW.Diff($"{path}.SkinZoneRanges[{i}]", a.SkinZoneRanges[i], b.SkinZoneRanges[i], diffs);
+            }
+        }
+        if (a.SkinZonePartData.Count != b.SkinZonePartData.Count)
+        {
+            diffs.Add($"{path}.SkinZonePartData: count {a.SkinZonePartData.Count} vs {b.SkinZonePartData.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.SkinZonePartData.Count; i++)
+            {
+                PrefabSkinZonePartDataW.Diff($"{path}.SkinZonePartData[{i}]", a.SkinZonePartData[i], b.SkinZonePartData[i], diffs);
+            }
+        }
+        if (a.SkinZoneGroups.Count != b.SkinZoneGroups.Count)
+        {
+            diffs.Add($"{path}.SkinZoneGroups: count {a.SkinZoneGroups.Count} vs {b.SkinZoneGroups.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.SkinZoneGroups.Count; i++)
+            {
+                PrefabSkinZoneGroupW.Diff($"{path}.SkinZoneGroups[{i}]", a.SkinZoneGroups[i], b.SkinZoneGroups[i], diffs);
+            }
+        }
+        PrefabGuidW.Diff($"{path}.SpzAndLightGuid", a.SpzAndLightGuid, b.SpzAndLightGuid, diffs);
+        if (BitConverter.SingleToUInt32Bits(a.BoneStiffness) != BitConverter.SingleToUInt32Bits(b.BoneStiffness)) diffs.Add($"{path}.BoneStiffness: {a.BoneStiffness} vs {b.BoneStiffness}");
+    }
+}
+
+internal sealed class PrefabSeatW
+{
+    public uint Flags { get; set; }
+    public ulong DoorIndexFrameName { get; set; }
+    public Vector3 TargetAim { get; set; }
+    public Vector3 TargetSeat { get; set; }
+    public Vector3 LockPos { get; set; }
+    public Vector3 Direction { get; set; }
+    public Vector3 Position { get; set; }
+    public uint SeatType { get; set; }
+    public uint SeatIndex { get; set; }
+    public uint SeatGroup { get; set; }
+    public ulong FrameName { get; set; }
+
+    internal static PrefabSeatW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabSeatW();
+        value.Flags = reader.ReadUInt32();
+        value.DoorIndexFrameName = reader.ReadUInt64();
+        value.TargetAim = Wire.ReadVector3(reader);
+        value.TargetSeat = Wire.ReadVector3(reader);
+        value.LockPos = Wire.ReadVector3(reader);
+        value.Direction = Wire.ReadVector3(reader);
+        value.Position = Wire.ReadVector3(reader);
+        value.SeatType = reader.ReadUInt32();
+        value.SeatIndex = reader.ReadUInt32();
+        value.SeatGroup = reader.ReadUInt32();
+        value.FrameName = reader.ReadUInt64();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(Flags);
+        writer.Write(DoorIndexFrameName);
+        Wire.WriteVector3(writer, TargetAim);
+        Wire.WriteVector3(writer, TargetSeat);
+        Wire.WriteVector3(writer, LockPos);
+        Wire.WriteVector3(writer, Direction);
+        Wire.WriteVector3(writer, Position);
+        writer.Write(SeatType);
+        writer.Write(SeatIndex);
+        writer.Write(SeatGroup);
+        writer.Write(FrameName);
+    }
+
+    internal static void Diff(string path, PrefabSeatW a, PrefabSeatW b, List<string> diffs)
+    {
+        if (a.Flags != b.Flags) diffs.Add($"{path}.Flags: {a.Flags} vs {b.Flags}");
+        if (a.DoorIndexFrameName != b.DoorIndexFrameName) diffs.Add($"{path}.DoorIndexFrameName: {a.DoorIndexFrameName} vs {b.DoorIndexFrameName}");
+        Wire.DiffVector3($"{path}.TargetAim", a.TargetAim, b.TargetAim, diffs);
+        Wire.DiffVector3($"{path}.TargetSeat", a.TargetSeat, b.TargetSeat, diffs);
+        Wire.DiffVector3($"{path}.LockPos", a.LockPos, b.LockPos, diffs);
+        Wire.DiffVector3($"{path}.Direction", a.Direction, b.Direction, diffs);
+        Wire.DiffVector3($"{path}.Position", a.Position, b.Position, diffs);
+        if (a.SeatType != b.SeatType) diffs.Add($"{path}.SeatType: {a.SeatType} vs {b.SeatType}");
+        if (a.SeatIndex != b.SeatIndex) diffs.Add($"{path}.SeatIndex: {a.SeatIndex} vs {b.SeatIndex}");
+        if (a.SeatGroup != b.SeatGroup) diffs.Add($"{path}.SeatGroup: {a.SeatGroup} vs {b.SeatGroup}");
+        if (a.FrameName != b.FrameName) diffs.Add($"{path}.FrameName: {a.FrameName} vs {b.FrameName}");
+    }
+}
+
+internal sealed class PrefabClimbBoxW
+{
+    public Vector3 BoxMin { get; set; }
+    public Vector3 BoxMax { get; set; }
+    public ulong BoneFrameName { get; set; }
+    public ulong DummyFrameName { get; set; }
+
+    internal static PrefabClimbBoxW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabClimbBoxW();
+        value.BoxMin = Wire.ReadVector3(reader);
+        value.BoxMax = Wire.ReadVector3(reader);
+        value.BoneFrameName = reader.ReadUInt64();
+        value.DummyFrameName = reader.ReadUInt64();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteVector3(writer, BoxMin);
+        Wire.WriteVector3(writer, BoxMax);
+        writer.Write(BoneFrameName);
+        writer.Write(DummyFrameName);
+    }
+
+    internal static void Diff(string path, PrefabClimbBoxW a, PrefabClimbBoxW b, List<string> diffs)
+    {
+        Wire.DiffVector3($"{path}.BoxMin", a.BoxMin, b.BoxMin, diffs);
+        Wire.DiffVector3($"{path}.BoxMax", a.BoxMax, b.BoxMax, diffs);
+        if (a.BoneFrameName != b.BoneFrameName) diffs.Add($"{path}.BoneFrameName: {a.BoneFrameName} vs {b.BoneFrameName}");
+        if (a.DummyFrameName != b.DummyFrameName) diffs.Add($"{path}.DummyFrameName: {a.DummyFrameName} vs {b.DummyFrameName}");
+    }
+}
+
+internal sealed class PrefabDoorPointsW
+{
+    public Vector3 HandlePos { get; set; }
+    public Vector3 LockPos { get; set; }
+    public ulong DoorFrameName { get; set; }
+
+    internal static PrefabDoorPointsW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDoorPointsW();
+        value.HandlePos = Wire.ReadVector3(reader);
+        value.LockPos = Wire.ReadVector3(reader);
+        value.DoorFrameName = reader.ReadUInt64();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteVector3(writer, HandlePos);
+        Wire.WriteVector3(writer, LockPos);
+        writer.Write(DoorFrameName);
+    }
+
+    internal static void Diff(string path, PrefabDoorPointsW a, PrefabDoorPointsW b, List<string> diffs)
+    {
+        Wire.DiffVector3($"{path}.HandlePos", a.HandlePos, b.HandlePos, diffs);
+        Wire.DiffVector3($"{path}.LockPos", a.LockPos, b.LockPos, diffs);
+        if (a.DoorFrameName != b.DoorFrameName) diffs.Add($"{path}.DoorFrameName: {a.DoorFrameName} vs {b.DoorFrameName}");
+    }
+}
+
+internal sealed class PrefabDrWheelSnapW
+{
+    public ulong DrWheelFrameName { get; set; }
+    public ulong LeftSnapFrameName { get; set; }
+    public ulong RightSnapFrameName { get; set; }
+
+    internal static PrefabDrWheelSnapW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabDrWheelSnapW();
+        value.DrWheelFrameName = reader.ReadUInt64();
+        value.LeftSnapFrameName = reader.ReadUInt64();
+        value.RightSnapFrameName = reader.ReadUInt64();
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(DrWheelFrameName);
+        writer.Write(LeftSnapFrameName);
+        writer.Write(RightSnapFrameName);
+    }
+
+    internal static void Diff(string path, PrefabDrWheelSnapW a, PrefabDrWheelSnapW b, List<string> diffs)
+    {
+        if (a.DrWheelFrameName != b.DrWheelFrameName) diffs.Add($"{path}.DrWheelFrameName: {a.DrWheelFrameName} vs {b.DrWheelFrameName}");
+        if (a.LeftSnapFrameName != b.LeftSnapFrameName) diffs.Add($"{path}.LeftSnapFrameName: {a.LeftSnapFrameName} vs {b.LeftSnapFrameName}");
+        if (a.RightSnapFrameName != b.RightSnapFrameName) diffs.Add($"{path}.RightSnapFrameName: {a.RightSnapFrameName} vs {b.RightSnapFrameName}");
+    }
+}
+
+internal sealed class PrefabCarInitW
+{
+    public List<PrefabDeformationInitW> Deformation { get; set; } = [];
+    public List<PrefabOtherInitW> Other { get; set; } = [];
+    public uint AxlePairs { get; set; }
+    public List<PrefabAxleW> Axles { get; set; } = [];
+    public List<PrefabShaderEffectInitW> ShaderEffects { get; set; } = [];
+    public ulong Hash0 { get; set; }
+    public ulong Hash1 { get; set; }
+    public List<PrefabSeatW> Seats { get; set; } = [];
+    public List<ulong> BusSeatsFrameName { get; set; } = [];
+    public List<ulong> EnterBusFrameName { get; set; } = [];
+    public List<ulong> Hashes4 { get; set; } = [];
+    public List<ulong> Hashes5 { get; set; } = [];
+    public List<ulong> WipersFrameName { get; set; } = [];
+    public List<PrefabDrWheelSnapW> DrWheelSnap { get; set; } = [];
+    public List<ulong> Hashes8 { get; set; } = [];
+    public List<ulong> Hashes9 { get; set; } = [];
+    public List<PrefabDoorPointsW> DoorPoints { get; set; } = [];
+    public List<PrefabClimbBoxW> ClimbBoxes { get; set; } = [];
+    public byte PadBits { get; set; }
+    public byte[] Tail { get; set; } = [];
+
+    internal static PrefabCarInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabCarInitW();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Deformation.Add(PrefabDeformationInitW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Other.Add(PrefabOtherInitW.ReadFrom(reader));
+            }
+        }
+        value.AxlePairs = reader.ReadUInt32();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Axles.Add(PrefabAxleW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.ShaderEffects.Add(PrefabShaderEffectInitW.ReadFrom(reader));
+            }
+        }
+        value.Hash0 = reader.ReadUInt64();
+        value.Hash1 = reader.ReadUInt64();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Seats.Add(PrefabSeatW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.BusSeatsFrameName.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.EnterBusFrameName.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes4.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes5.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.WipersFrameName.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DrWheelSnap.Add(PrefabDrWheelSnapW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes8.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Hashes9.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.DoorPoints.Add(PrefabDoorPointsW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.ClimbBoxes.Add(PrefabClimbBoxW.ReadFrom(reader));
+            }
+        }
+        value.PadBits = reader.ReadByte();
+        value.Tail = Wire.ReadBytes(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        Wire.WriteCount(writer, Deformation.Count);
+        foreach (PrefabDeformationInitW item in Deformation)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Other.Count);
+        foreach (PrefabOtherInitW item in Other)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(AxlePairs);
+        Wire.WriteCount(writer, Axles.Count);
+        foreach (PrefabAxleW item in Axles)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, ShaderEffects.Count);
+        foreach (PrefabShaderEffectInitW item in ShaderEffects)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(Hash0);
+        writer.Write(Hash1);
+        Wire.WriteCount(writer, Seats.Count);
+        foreach (PrefabSeatW item in Seats)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, BusSeatsFrameName.Count);
+        foreach (ulong item in BusSeatsFrameName)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, EnterBusFrameName.Count);
+        foreach (ulong item in EnterBusFrameName)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Hashes4.Count);
+        foreach (ulong item in Hashes4)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Hashes5.Count);
+        foreach (ulong item in Hashes5)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, WipersFrameName.Count);
+        foreach (ulong item in WipersFrameName)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, DrWheelSnap.Count);
+        foreach (PrefabDrWheelSnapW item in DrWheelSnap)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, Hashes8.Count);
+        foreach (ulong item in Hashes8)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, Hashes9.Count);
+        foreach (ulong item in Hashes9)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, DoorPoints.Count);
+        foreach (PrefabDoorPointsW item in DoorPoints)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, ClimbBoxes.Count);
+        foreach (PrefabClimbBoxW item in ClimbBoxes)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(PadBits);
+        Wire.WriteBytes(writer, Tail);
+    }
+
+    internal static void Diff(string path, PrefabCarInitW a, PrefabCarInitW b, List<string> diffs)
+    {
+        if (a.Deformation.Count != b.Deformation.Count)
+        {
+            diffs.Add($"{path}.Deformation: count {a.Deformation.Count} vs {b.Deformation.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Deformation.Count; i++)
+            {
+                PrefabDeformationInitW.Diff($"{path}.Deformation[{i}]", a.Deformation[i], b.Deformation[i], diffs);
+            }
+        }
+        if (a.Other.Count != b.Other.Count)
+        {
+            diffs.Add($"{path}.Other: count {a.Other.Count} vs {b.Other.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Other.Count; i++)
+            {
+                PrefabOtherInitW.Diff($"{path}.Other[{i}]", a.Other[i], b.Other[i], diffs);
+            }
+        }
+        if (a.AxlePairs != b.AxlePairs) diffs.Add($"{path}.AxlePairs: {a.AxlePairs} vs {b.AxlePairs}");
+        if (a.Axles.Count != b.Axles.Count)
+        {
+            diffs.Add($"{path}.Axles: count {a.Axles.Count} vs {b.Axles.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Axles.Count; i++)
+            {
+                PrefabAxleW.Diff($"{path}.Axles[{i}]", a.Axles[i], b.Axles[i], diffs);
+            }
+        }
+        if (a.ShaderEffects.Count != b.ShaderEffects.Count)
+        {
+            diffs.Add($"{path}.ShaderEffects: count {a.ShaderEffects.Count} vs {b.ShaderEffects.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.ShaderEffects.Count; i++)
+            {
+                PrefabShaderEffectInitW.Diff($"{path}.ShaderEffects[{i}]", a.ShaderEffects[i], b.ShaderEffects[i], diffs);
+            }
+        }
+        if (a.Hash0 != b.Hash0) diffs.Add($"{path}.Hash0: {a.Hash0} vs {b.Hash0}");
+        if (a.Hash1 != b.Hash1) diffs.Add($"{path}.Hash1: {a.Hash1} vs {b.Hash1}");
+        if (a.Seats.Count != b.Seats.Count)
+        {
+            diffs.Add($"{path}.Seats: count {a.Seats.Count} vs {b.Seats.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Seats.Count; i++)
+            {
+                PrefabSeatW.Diff($"{path}.Seats[{i}]", a.Seats[i], b.Seats[i], diffs);
+            }
+        }
+        if (a.BusSeatsFrameName.Count != b.BusSeatsFrameName.Count)
+        {
+            diffs.Add($"{path}.BusSeatsFrameName: count {a.BusSeatsFrameName.Count} vs {b.BusSeatsFrameName.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.BusSeatsFrameName.Count; i++)
+            {
+                if (a.BusSeatsFrameName[i] != b.BusSeatsFrameName[i]) diffs.Add($"{path}.BusSeatsFrameName[{i}]: {a.BusSeatsFrameName[i]} vs {b.BusSeatsFrameName[i]}");
+            }
+        }
+        if (a.EnterBusFrameName.Count != b.EnterBusFrameName.Count)
+        {
+            diffs.Add($"{path}.EnterBusFrameName: count {a.EnterBusFrameName.Count} vs {b.EnterBusFrameName.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.EnterBusFrameName.Count; i++)
+            {
+                if (a.EnterBusFrameName[i] != b.EnterBusFrameName[i]) diffs.Add($"{path}.EnterBusFrameName[{i}]: {a.EnterBusFrameName[i]} vs {b.EnterBusFrameName[i]}");
+            }
+        }
+        if (a.Hashes4.Count != b.Hashes4.Count)
+        {
+            diffs.Add($"{path}.Hashes4: count {a.Hashes4.Count} vs {b.Hashes4.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes4.Count; i++)
+            {
+                if (a.Hashes4[i] != b.Hashes4[i]) diffs.Add($"{path}.Hashes4[{i}]: {a.Hashes4[i]} vs {b.Hashes4[i]}");
+            }
+        }
+        if (a.Hashes5.Count != b.Hashes5.Count)
+        {
+            diffs.Add($"{path}.Hashes5: count {a.Hashes5.Count} vs {b.Hashes5.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes5.Count; i++)
+            {
+                if (a.Hashes5[i] != b.Hashes5[i]) diffs.Add($"{path}.Hashes5[{i}]: {a.Hashes5[i]} vs {b.Hashes5[i]}");
+            }
+        }
+        if (a.WipersFrameName.Count != b.WipersFrameName.Count)
+        {
+            diffs.Add($"{path}.WipersFrameName: count {a.WipersFrameName.Count} vs {b.WipersFrameName.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.WipersFrameName.Count; i++)
+            {
+                if (a.WipersFrameName[i] != b.WipersFrameName[i]) diffs.Add($"{path}.WipersFrameName[{i}]: {a.WipersFrameName[i]} vs {b.WipersFrameName[i]}");
+            }
+        }
+        if (a.DrWheelSnap.Count != b.DrWheelSnap.Count)
+        {
+            diffs.Add($"{path}.DrWheelSnap: count {a.DrWheelSnap.Count} vs {b.DrWheelSnap.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DrWheelSnap.Count; i++)
+            {
+                PrefabDrWheelSnapW.Diff($"{path}.DrWheelSnap[{i}]", a.DrWheelSnap[i], b.DrWheelSnap[i], diffs);
+            }
+        }
+        if (a.Hashes8.Count != b.Hashes8.Count)
+        {
+            diffs.Add($"{path}.Hashes8: count {a.Hashes8.Count} vs {b.Hashes8.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes8.Count; i++)
+            {
+                if (a.Hashes8[i] != b.Hashes8[i]) diffs.Add($"{path}.Hashes8[{i}]: {a.Hashes8[i]} vs {b.Hashes8[i]}");
+            }
+        }
+        if (a.Hashes9.Count != b.Hashes9.Count)
+        {
+            diffs.Add($"{path}.Hashes9: count {a.Hashes9.Count} vs {b.Hashes9.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Hashes9.Count; i++)
+            {
+                if (a.Hashes9[i] != b.Hashes9[i]) diffs.Add($"{path}.Hashes9[{i}]: {a.Hashes9[i]} vs {b.Hashes9[i]}");
+            }
+        }
+        if (a.DoorPoints.Count != b.DoorPoints.Count)
+        {
+            diffs.Add($"{path}.DoorPoints: count {a.DoorPoints.Count} vs {b.DoorPoints.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.DoorPoints.Count; i++)
+            {
+                PrefabDoorPointsW.Diff($"{path}.DoorPoints[{i}]", a.DoorPoints[i], b.DoorPoints[i], diffs);
+            }
+        }
+        if (a.ClimbBoxes.Count != b.ClimbBoxes.Count)
+        {
+            diffs.Add($"{path}.ClimbBoxes: count {a.ClimbBoxes.Count} vs {b.ClimbBoxes.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.ClimbBoxes.Count; i++)
+            {
+                PrefabClimbBoxW.Diff($"{path}.ClimbBoxes[{i}]", a.ClimbBoxes[i], b.ClimbBoxes[i], diffs);
+            }
+        }
+        if (a.PadBits != b.PadBits) diffs.Add($"{path}.PadBits: {a.PadBits} vs {b.PadBits}");
+        Wire.DiffBytes($"{path}.Tail", a.Tail, b.Tail, diffs);
+    }
+}
+
+internal sealed class PrefabWheelShaderEffectW
+{
+    public PrefabGuidW GuidTyreDeformMaterial { get; set; } = new();
+    public List<ulong> FgsCloneVisuals { get; set; } = [];
+    public List<PrefabColorAndDirtyW> ColorAndDirty { get; set; } = [];
+
+    internal static PrefabWheelShaderEffectW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabWheelShaderEffectW();
+        value.GuidTyreDeformMaterial = PrefabGuidW.ReadFrom(reader);
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.FgsCloneVisuals.Add(reader.ReadUInt64());
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.ColorAndDirty.Add(PrefabColorAndDirtyW.ReadFrom(reader));
+            }
+        }
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        GuidTyreDeformMaterial.WriteTo(writer);
+        Wire.WriteCount(writer, FgsCloneVisuals.Count);
+        foreach (ulong item in FgsCloneVisuals)
+        {
+            writer.Write(item);
+        }
+        Wire.WriteCount(writer, ColorAndDirty.Count);
+        foreach (PrefabColorAndDirtyW item in ColorAndDirty)
+        {
+            item.WriteTo(writer);
+        }
+    }
+
+    internal static void Diff(string path, PrefabWheelShaderEffectW a, PrefabWheelShaderEffectW b, List<string> diffs)
+    {
+        PrefabGuidW.Diff($"{path}.GuidTyreDeformMaterial", a.GuidTyreDeformMaterial, b.GuidTyreDeformMaterial, diffs);
+        if (a.FgsCloneVisuals.Count != b.FgsCloneVisuals.Count)
+        {
+            diffs.Add($"{path}.FgsCloneVisuals: count {a.FgsCloneVisuals.Count} vs {b.FgsCloneVisuals.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.FgsCloneVisuals.Count; i++)
+            {
+                if (a.FgsCloneVisuals[i] != b.FgsCloneVisuals[i]) diffs.Add($"{path}.FgsCloneVisuals[{i}]: {a.FgsCloneVisuals[i]} vs {b.FgsCloneVisuals[i]}");
+            }
+        }
+        if (a.ColorAndDirty.Count != b.ColorAndDirty.Count)
+        {
+            diffs.Add($"{path}.ColorAndDirty: count {a.ColorAndDirty.Count} vs {b.ColorAndDirty.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.ColorAndDirty.Count; i++)
+            {
+                PrefabColorAndDirtyW.Diff($"{path}.ColorAndDirty[{i}]", a.ColorAndDirty[i], b.ColorAndDirty[i], diffs);
+            }
+        }
+    }
+}
+
+internal sealed class PrefabWheelInitW
+{
+    public uint PrefabVersion { get; set; }
+    public List<PrefabDeformPartW> Parts { get; set; } = [];
+    public ulong WheelFrameName { get; set; }
+    public ulong TyreFrameName { get; set; }
+    public float WheelMass { get; set; }
+    public float RimMass { get; set; }
+    public float RimRadius { get; set; }
+    public float SpeedMin { get; set; }
+    public float SpeedMax { get; set; }
+    public List<PrefabWheelShaderEffectW> ShaderEffect { get; set; } = [];
+    public byte PadBits { get; set; }
+    public byte[] Tail { get; set; } = [];
+
+    internal static PrefabWheelInitW ReadFrom(BinaryReader reader)
+    {
+        var value = new PrefabWheelInitW();
+        value.PrefabVersion = reader.ReadUInt32();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.Parts.Add(PrefabDeformPartW.ReadFrom(reader));
+            }
+        }
+        value.WheelFrameName = reader.ReadUInt64();
+        value.TyreFrameName = reader.ReadUInt64();
+        value.WheelMass = reader.ReadSingle();
+        value.RimMass = reader.ReadSingle();
+        value.RimRadius = reader.ReadSingle();
+        value.SpeedMin = reader.ReadSingle();
+        value.SpeedMax = reader.ReadSingle();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.ShaderEffect.Add(PrefabWheelShaderEffectW.ReadFrom(reader));
+            }
+        }
+        value.PadBits = reader.ReadByte();
+        value.Tail = Wire.ReadBytes(reader);
+        return value;
+    }
+
+    internal void WriteTo(BinaryWriter writer)
+    {
+        writer.Write(PrefabVersion);
+        Wire.WriteCount(writer, Parts.Count);
+        foreach (PrefabDeformPartW item in Parts)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(WheelFrameName);
+        writer.Write(TyreFrameName);
+        writer.Write(WheelMass);
+        writer.Write(RimMass);
+        writer.Write(RimRadius);
+        writer.Write(SpeedMin);
+        writer.Write(SpeedMax);
+        Wire.WriteCount(writer, ShaderEffect.Count);
+        foreach (PrefabWheelShaderEffectW item in ShaderEffect)
+        {
+            item.WriteTo(writer);
+        }
+        writer.Write(PadBits);
+        Wire.WriteBytes(writer, Tail);
+    }
+
+    internal static void Diff(string path, PrefabWheelInitW a, PrefabWheelInitW b, List<string> diffs)
+    {
+        if (a.PrefabVersion != b.PrefabVersion) diffs.Add($"{path}.PrefabVersion: {a.PrefabVersion} vs {b.PrefabVersion}");
+        if (a.Parts.Count != b.Parts.Count)
+        {
+            diffs.Add($"{path}.Parts: count {a.Parts.Count} vs {b.Parts.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.Parts.Count; i++)
+            {
+                PrefabDeformPartW.Diff($"{path}.Parts[{i}]", a.Parts[i], b.Parts[i], diffs);
+            }
+        }
+        if (a.WheelFrameName != b.WheelFrameName) diffs.Add($"{path}.WheelFrameName: {a.WheelFrameName} vs {b.WheelFrameName}");
+        if (a.TyreFrameName != b.TyreFrameName) diffs.Add($"{path}.TyreFrameName: {a.TyreFrameName} vs {b.TyreFrameName}");
+        if (BitConverter.SingleToUInt32Bits(a.WheelMass) != BitConverter.SingleToUInt32Bits(b.WheelMass)) diffs.Add($"{path}.WheelMass: {a.WheelMass} vs {b.WheelMass}");
+        if (BitConverter.SingleToUInt32Bits(a.RimMass) != BitConverter.SingleToUInt32Bits(b.RimMass)) diffs.Add($"{path}.RimMass: {a.RimMass} vs {b.RimMass}");
+        if (BitConverter.SingleToUInt32Bits(a.RimRadius) != BitConverter.SingleToUInt32Bits(b.RimRadius)) diffs.Add($"{path}.RimRadius: {a.RimRadius} vs {b.RimRadius}");
+        if (BitConverter.SingleToUInt32Bits(a.SpeedMin) != BitConverter.SingleToUInt32Bits(b.SpeedMin)) diffs.Add($"{path}.SpeedMin: {a.SpeedMin} vs {b.SpeedMin}");
+        if (BitConverter.SingleToUInt32Bits(a.SpeedMax) != BitConverter.SingleToUInt32Bits(b.SpeedMax)) diffs.Add($"{path}.SpeedMax: {a.SpeedMax} vs {b.SpeedMax}");
+        if (a.ShaderEffect.Count != b.ShaderEffect.Count)
+        {
+            diffs.Add($"{path}.ShaderEffect: count {a.ShaderEffect.Count} vs {b.ShaderEffect.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.ShaderEffect.Count; i++)
+            {
+                PrefabWheelShaderEffectW.Diff($"{path}.ShaderEffect[{i}]", a.ShaderEffect[i], b.ShaderEffect[i], diffs);
+            }
+        }
+        if (a.PadBits != b.PadBits) diffs.Add($"{path}.PadBits: {a.PadBits} vs {b.PadBits}");
+        Wire.DiffBytes($"{path}.Tail", a.Tail, b.Tail, diffs);
+    }
+}
+
 internal sealed class PrefabEntryW
 {
     public ulong Hash { get; set; }
@@ -8249,6 +11885,10 @@ internal sealed class PrefabEntryW
     public int Unk0 { get; set; }
     public int PrefabSize { get; set; }
     public byte[] Data { get; set; } = [];
+    public int TypedKind { get; set; }
+    public List<PrefabPhysThingInitW> PhysThing { get; set; } = [];
+    public List<PrefabCarInitW> CarInit { get; set; } = [];
+    public List<PrefabWheelInitW> WheelInit { get; set; } = [];
 
     internal static PrefabEntryW ReadFrom(BinaryReader reader)
     {
@@ -8258,6 +11898,28 @@ internal sealed class PrefabEntryW
         value.Unk0 = reader.ReadInt32();
         value.PrefabSize = reader.ReadInt32();
         value.Data = Wire.ReadBytes(reader);
+        value.TypedKind = reader.ReadInt32();
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.PhysThing.Add(PrefabPhysThingInitW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.CarInit.Add(PrefabCarInitW.ReadFrom(reader));
+            }
+        }
+        {
+            uint count = Wire.ReadCount(reader);
+            for (uint i = 0; i < count; i++)
+            {
+                value.WheelInit.Add(PrefabWheelInitW.ReadFrom(reader));
+            }
+        }
         return value;
     }
 
@@ -8268,6 +11930,22 @@ internal sealed class PrefabEntryW
         writer.Write(Unk0);
         writer.Write(PrefabSize);
         Wire.WriteBytes(writer, Data);
+        writer.Write(TypedKind);
+        Wire.WriteCount(writer, PhysThing.Count);
+        foreach (PrefabPhysThingInitW item in PhysThing)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, CarInit.Count);
+        foreach (PrefabCarInitW item in CarInit)
+        {
+            item.WriteTo(writer);
+        }
+        Wire.WriteCount(writer, WheelInit.Count);
+        foreach (PrefabWheelInitW item in WheelInit)
+        {
+            item.WriteTo(writer);
+        }
     }
 
     internal static void Diff(string path, PrefabEntryW a, PrefabEntryW b, List<string> diffs)
@@ -8277,6 +11955,40 @@ internal sealed class PrefabEntryW
         if (a.Unk0 != b.Unk0) diffs.Add($"{path}.Unk0: {a.Unk0} vs {b.Unk0}");
         if (a.PrefabSize != b.PrefabSize) diffs.Add($"{path}.PrefabSize: {a.PrefabSize} vs {b.PrefabSize}");
         Wire.DiffBytes($"{path}.Data", a.Data, b.Data, diffs);
+        if (a.TypedKind != b.TypedKind) diffs.Add($"{path}.TypedKind: {a.TypedKind} vs {b.TypedKind}");
+        if (a.PhysThing.Count != b.PhysThing.Count)
+        {
+            diffs.Add($"{path}.PhysThing: count {a.PhysThing.Count} vs {b.PhysThing.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.PhysThing.Count; i++)
+            {
+                PrefabPhysThingInitW.Diff($"{path}.PhysThing[{i}]", a.PhysThing[i], b.PhysThing[i], diffs);
+            }
+        }
+        if (a.CarInit.Count != b.CarInit.Count)
+        {
+            diffs.Add($"{path}.CarInit: count {a.CarInit.Count} vs {b.CarInit.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.CarInit.Count; i++)
+            {
+                PrefabCarInitW.Diff($"{path}.CarInit[{i}]", a.CarInit[i], b.CarInit[i], diffs);
+            }
+        }
+        if (a.WheelInit.Count != b.WheelInit.Count)
+        {
+            diffs.Add($"{path}.WheelInit: count {a.WheelInit.Count} vs {b.WheelInit.Count}");
+        }
+        else
+        {
+            for (int i = 0; i < a.WheelInit.Count; i++)
+            {
+                PrefabWheelInitW.Diff($"{path}.WheelInit[{i}]", a.WheelInit[i], b.WheelInit[i], diffs);
+            }
+        }
     }
 }
 

@@ -28,4 +28,14 @@ public sealed class DecodedMesh
     public Vector3[]? Tangents { get; init; }
     public Vector3[]? Binormals { get; init; }
     public required uint[] Indices { get; init; }
+
+    /// <summary>
+    /// Four bone influences per vertex, flattened (vertex i owns [4i, 4i+4)); null unless the declaration
+    /// carries a skin. Straight off the wire — the ids still index a per-LOD remap pool at this point, not
+    /// the model's bone list.
+    /// </summary>
+    public byte[]? BoneIndices { get; init; }
+
+    /// <summary>Weights parallel to <see cref="BoneIndices"/>.</summary>
+    public float[]? BoneWeights { get; init; }
 }

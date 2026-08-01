@@ -10,19 +10,22 @@ using Silk.NET.DXGI;
 namespace Illusion.Rendering.Passes;
 
 [StructLayout(LayoutKind.Sequential)]
-public struct NavGraphConstants
+public struct LineOverlayConstants
 {
     public Matrix4x4 Wvp; // load as-is (reinterpret-as-column transposes)
     public Vector4 Color; // rgb + alpha
 }
 
 /// <summary>
-/// Debug pass: draws navigation graphs (.nov road graphs) as colored line lists — one immutable
-/// vertex buffer per resident district, keyed so streaming can drop a district's graph alone. Pure
-/// overlay: alpha blend, no depth test/write, so lines stay visible over the scene. The vertex list
-/// is edge endpoint pairs (A,B,A,B,...) in the same world space the meshes use.
+/// Overlay pass: draws coloured line lists — one immutable vertex buffer per key, so streaming can drop one
+/// district's lines alone. Pure overlay: alpha blend, no depth test/write, so lines stay visible over the
+/// scene. The vertex list is endpoint pairs (A,B,A,B,…) in the same world space the meshes use.
+/// <para>
+/// Used for the AI navigation graph and its mesh, the .nav path objects, and a skinned model's skeleton —
+/// four different meanings, one way of drawing them.
+/// </para>
 /// </summary>
-public sealed unsafe class NavGraphRenderer : IDisposable
+public sealed unsafe class LineOverlayRenderer : IDisposable
 {
     private const string Hlsl = @"
 cbuffer CB : register(b0) { float4x4 WVP; float4 Color; };
@@ -52,13 +55,13 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
     /// <summary>True while any district graph is uploaded.</summary>
     public bool HasData => _districts.Count > 0;
 
-    public NavGraphRenderer(GpuContext gpu)
+    public LineOverlayRenderer(GpuContext gpu)
     {
         _gpu = gpu;
 
         using D3DCompiler compiler = D3DCompiler.GetApi();
-        ComPtr<ID3D10Blob> vsCode = ShaderCompiler.Compile(compiler, Hlsl, "VSMain", "vs_5_0", "navgraph");
-        ComPtr<ID3D10Blob> psCode = ShaderCompiler.Compile(compiler, Hlsl, "PSMain", "ps_5_0", "navgraph");
+        ComPtr<ID3D10Blob> vsCode = ShaderCompiler.Compile(compiler, Hlsl, "VSMain", "vs_5_0", "lineoverlay");
+        ComPtr<ID3D10Blob> psCode = ShaderCompiler.Compile(compiler, Hlsl, "PSMain", "ps_5_0", "lineoverlay");
         (_vs, _ps) = ShaderCompiler.CreateShaders(gpu, vsCode, psCode);
 
         byte* posName = (byte*)SilkMarshal.StringToPtr("POSITION");
@@ -71,7 +74,7 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
         vsCode.Dispose();
         psCode.Dispose();
 
-        _cb = GpuBuffers.CreateConstant<NavGraphConstants>(gpu);
+        _cb = GpuBuffers.CreateConstant<LineOverlayConstants>(gpu);
 
         var bd = new BlendDesc();
         bd.RenderTarget[0] = new RenderTargetBlendDesc
@@ -142,7 +145,7 @@ float4 PSMain(PSIn i) : SV_TARGET { return Color; }";
         ctx.PSSetConstantBuffers(0, 1, &cb);
         ctx.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyLinelist);
 
-        var consts = new NavGraphConstants { Wvp = viewProj, Color = color };
+        var consts = new LineOverlayConstants { Wvp = viewProj, Color = color };
         GpuBuffers.UpdateConstant(ctx, _cb, ref consts);
 
         uint stride = 12, offset = 0;

@@ -7,6 +7,7 @@ using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Frames.Resources;
 using Illusion.Formats.Geometry;
+using Illusion.Formats.Hashing;
 using Illusion.Formats.Translokator;
 
 namespace Illusion.Assets.Sds;
@@ -268,6 +269,11 @@ public static class SdsMeshLoader
             if (md != null) { node.Mesh = md; meshes.Add(md); }
         }
 
+        // A skinned model brings its rig with it. For a car the bones ARE the parts — doors, covers, axles,
+        // a deform_ bone per panel — and the archive's collision hulls and interaction points hang off them,
+        // so this is the map of what the object is made of, not a rendering detail.
+        if (obj is FrameObjectModel model) node.Skeleton = TryReadSkeleton(model, document);
+
         // Claim descendants as we go: the caller uses the same set to decide what is still unplaced, and a
         // malformed hierarchy can otherwise reach the same frame twice (claimed also breaks any cycle).
         if (childrenOf.TryGetValue(obj, out List<FrameObjectBase>? kids))
@@ -276,6 +282,64 @@ public static class SdsMeshLoader
                     node.Children.Add(BuildNode(k, document, childrenOf, meshes, instanceMap, claimed));
 
         return node;
+    }
+
+    /// <summary>
+    /// The rig of a skinned model: bone names, who hangs off whom, and where each bone sits.
+    /// <para>
+    /// The rest transforms are taken as MODEL space and used as they are. The format offers three readings of
+    /// the same data and names none of them plainly; measured on the corpus, a car's <c>axleFL</c> and
+    /// <c>axleFR</c> come out mirrored about X and inside the body's own bounding box, while the skeleton's
+    /// <c>WorldTransforms</c> do not even invert (NaN). Accumulating the rest transforms down the hierarchy
+    /// would place every bone twice. See <c>--probe-cars</c>, which prints all three readings side by side.
+    /// </para>
+    /// Best-effort: a model whose skeleton block is missing or mis-indexed simply has no rig to show.
+    /// </summary>
+    private static SkeletonData? TryReadSkeleton(FrameObjectModel model, SceneDocumentAdapter document)
+    {
+        try
+        {
+            FrameSkeleton skeleton = model.GetSkeletonObject();
+            HashName[] names = skeleton.BoneNames ?? [];
+            Matrix4x4[] rest = model.RestTransform ?? [];
+            if (names.Length == 0 || rest.Length == 0) return null;
+
+            byte[] parents = model.GetSkeletonHierarchyObject().ParentIndices ?? [];
+            int count = Math.Min(names.Length, rest.Length);
+            var bones = new List<BoneData>(count);
+            for (int i = 0; i < count; i++)
+            {
+                // A bone whose parent is itself (the root's own convention) has no line to draw to.
+                int parent = i < parents.Length ? parents[i] : -1;
+                if (parent == i || parent >= count) parent = -1;
+                bones.Add(new BoneData(names[i].ToString() ?? "?", parent, rest[i], document.Bone(model, i)));
+            }
+
+            // What hangs off those bones. The attached frame's world is already joint-aware — the frame
+            // hierarchy places it through the joint (see FrameObjectBase.AttachedTo), so nothing is recomputed
+            // here and the tree, the overlay and a gizmo drag can never disagree about where it is.
+            var attachments = new List<BoneAttachment>();
+            foreach (FrameObjectModel.AttachmentReference a in model.AttachmentReferences ?? [])
+            {
+                if (a.Attachment is not { } frame || a.JointIndex >= count) continue;
+                string type = frame.GetType().Name;
+                if (type.StartsWith("FrameObject", StringComparison.Ordinal)) type = type[11..];
+                attachments.Add(new BoneAttachment(
+                    a.JointIndex, frame.Name?.ToString() ?? "?", type, frame.WorldTransform, document.Node(frame)));
+            }
+
+            return new SkeletonData
+            {
+                OwnerName = model.Name?.ToString() ?? "?",
+                Bones = bones,
+                World = model.WorldTransform,
+                Attachments = attachments,
+            };
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     // Scene category for streaming filters, from the majority season class of its mesh leaves (FrameNameTable
@@ -413,6 +477,27 @@ public static class SdsMeshLoader
             raw, numVerts, lod.VertexDeclaration, geom.DecompressionOffset, geom.DecompressionFactor,
             positions, normals, uvs, tangents, binormals);
 
+        // The skin, when there is one. This goes through the full-fidelity decode rather than the channel
+        // path above, which has no skin outputs — a second pass over the buffer, but only for skinned models,
+        // and those are single objects (a car, a character), never a district's millions of vertices.
+        byte[]? boneIndices = null;
+        float[]? boneWeights = null;
+        if (lod.VertexDeclaration.HasFlag(VertexFlags.Skin))
+        {
+            Vertex[] full = VertexTranslator.DecompressBuffer(
+                raw, numVerts, lod.VertexDeclaration, geom.DecompressionOffset, geom.DecompressionFactor);
+            boneIndices = new byte[numVerts * 4];
+            boneWeights = new float[numVerts * 4];
+            for (int i = 0; i < numVerts; i++)
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    boneIndices[(i * 4) + k] = full[i].BoneIDs[k];
+                    boneWeights[(i * 4) + k] = full[i].BoneWeights[k];
+                }
+            }
+        }
+
         return new DecodedMesh
         {
             Frame = mesh,
@@ -428,6 +513,8 @@ public static class SdsMeshLoader
             Tangents = tangents,
             Binormals = binormals,
             Indices = indexBuffer.GetData(),
+            BoneIndices = boneIndices,
+            BoneWeights = boneWeights,
         };
     }
 
@@ -459,6 +546,11 @@ public static class SdsMeshLoader
             // matrix moves the geometry.
             Matrix4x4 place = instances is { Length: > 0 } ? Matrix4x4.Identity : placement ?? Matrix4x4.Identity;
 
+            // A skinned model's bone ids only mean something once the per-face-group remap is applied.
+            byte[]? boneIndices = mesh is FrameObjectModel skinned
+                ? ResolveBoneRemap(skinned, parts, decoded)
+                : null;
+
             return new MeshData
             {
                 Name = mesh.Name?.ToString() ?? "mesh",
@@ -472,11 +564,111 @@ public static class SdsMeshLoader
                 Parts = parts,
                 Instances = instances,
                 InstanceDrawDistances = drawDistances,
+                BoneIndices = boneIndices,
+                BoneWeights = boneIndices != null ? decoded.BoneWeights : null,
+                Skeleton = boneIndices != null && mesh is FrameObjectModel m ? TryReadSkeletonBones(m) : null,
             };
         }
         catch
         {
             // Skip a broken/non-standard mesh, don't crash the rest of the scene.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Turns a skinned mesh's per-vertex bone ids into indices of the model's OWN bone list.
+    /// <para>
+    /// On the wire they are not that. Each LOD carries a set of remap pools — a flat table of global bone
+    /// indices cut into slices by <c>BonesPerRemapPool</c> — and a vertex's id indexes the slice belonging to
+    /// the face group it is drawn in. Face groups are the LOD0 material splits, in the same order as
+    /// <paramref name="parts"/>. Measured on the corpus by <c>--probe-skinning</c>: every id resolves, and
+    /// pools really are used (a car splits its body across two).
+    /// </para>
+    /// Null when there is nothing to resolve, or when the blend info does not line up with the mesh — a
+    /// half-remapped skin would put triangles on the wrong bones, which is worse than not skinning at all.
+    /// </summary>
+    private static byte[]? ResolveBoneRemap(FrameObjectModel model, MeshPart[] parts, DecodedMesh decoded)
+    {
+        if (decoded.BoneIndices is not { } ids || decoded.BoneWeights == null) return null;
+
+        FrameBlendInfo blend;
+        try { blend = model.GetBlendInfoObject(); }
+        catch (Exception) { return null; }
+        if (blend.BoneIndexInfos is not { Length: > 0 } lods) return null;
+
+        FrameBlendInfo.BoneIndexInfo info = lods[0];
+        byte[] pools = info.BonesPerRemapPool ?? [];
+        byte[] remap = info.BoneRemapIDs ?? [];
+        var groups = info.SkinnedMaterialInfo ?? [];
+        if (pools.Length == 0 || remap.Length == 0 || groups.Length < parts.Length) return null;
+
+        // Where each pool's slice starts in the flat remap table.
+        var poolStart = new int[pools.Length];
+        int at = 0;
+        for (int p = 0; p < pools.Length; p++) { poolStart[p] = at; at += pools[p]; }
+        if (at > remap.Length) return null;
+
+        var resolved = new byte[ids.Length];
+        Array.Copy(ids, resolved, ids.Length);
+        var claimed = new bool[decoded.Positions.Length];
+
+        for (int part = 0; part < parts.Length; part++)
+        {
+            int pool = groups[part].AssignedPoolIndex;
+            if (pool >= pools.Length) return null;
+
+            int end = Math.Min(parts[part].StartIndex + parts[part].IndexCount, decoded.Indices.Length);
+            for (int i = parts[part].StartIndex; i < end; i++)
+            {
+                int vertex = (int)decoded.Indices[i];
+                // A vertex shared between two groups is remapped once, by the first group that draws it —
+                // remapping twice would resolve an already-global index a second time.
+                if (vertex < 0 || vertex >= claimed.Length || claimed[vertex]) continue;
+                claimed[vertex] = true;
+
+                for (int k = 0; k < 4; k++)
+                {
+                    int slot = poolStart[pool] + ids[(vertex * 4) + k];
+                    if (slot >= remap.Length) return null;
+                    resolved[(vertex * 4) + k] = remap[slot];
+                }
+            }
+        }
+
+        return resolved;
+    }
+
+    /// <summary>The rig a skinned mesh is bound to, without the attachment list — geometry does not need it,
+    /// and building it here would duplicate work the scene tree already does.</summary>
+    private static SkeletonData? TryReadSkeletonBones(FrameObjectModel model)
+    {
+        try
+        {
+            HashName[] names = model.GetSkeletonObject().BoneNames ?? [];
+            Matrix4x4[] rest = model.RestTransform ?? [];
+            if (names.Length == 0 || rest.Length == 0) return null;
+
+            byte[] parents = model.GetSkeletonHierarchyObject().ParentIndices ?? [];
+            int count = Math.Min(names.Length, rest.Length);
+            var bones = new List<BoneData>(count);
+            for (int i = 0; i < count; i++)
+            {
+                int parent = i < parents.Length ? parents[i] : -1;
+                if (parent == i || parent >= count) parent = -1;
+                bones.Add(new BoneData(names[i].ToString() ?? "?", parent, rest[i]));
+            }
+
+            return new SkeletonData
+            {
+                OwnerName = model.Name?.ToString() ?? "?",
+                Bones = bones,
+                World = model.WorldTransform,
+                Attachments = [],
+            };
+        }
+        catch (Exception)
+        {
             return null;
         }
     }

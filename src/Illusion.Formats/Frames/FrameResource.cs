@@ -276,6 +276,19 @@ public class FrameResource
         _frameScenes.Values.CopyTo(scenes, 0);
         int blockCount = GetBlockCount;
 
+        // Attachments first, in a pass of their own: an attached frame is placed by the joint it names rather
+        // than by its hierarchy parent, and the model that owns it can appear anywhere in the list — resolving
+        // both in one pass placed every attachment that came before its model as if it hung off nothing.
+        foreach (object entry in objects)
+        {
+            if (entry is not FrameObjectModel model) continue;
+            foreach (var attachment in model.AttachmentReferences)
+            {
+                attachment.Attachment = (objects[attachment.AttachmentIndex - blockCount] as FrameObjectBase)!;
+                attachment.Attachment?.SetAttachedJoint(model, attachment.JointIndex);
+            }
+        }
+
         for (int i = 0; i < objects.Length; i++)
         {
             FrameObjectBase? obj = (objects[i] as FrameObjectBase);
@@ -283,16 +296,6 @@ public class FrameResource
             if (obj == null)
             {
                 continue;
-            }
-
-            if (obj is FrameObjectModel)
-            {
-                FrameObjectModel model = (obj as FrameObjectModel)!;
-
-                foreach (var attachment in model.AttachmentReferences)
-                {
-                    attachment.Attachment = (objects[attachment.AttachmentIndex - blockCount] as FrameObjectBase)!;
-                }
             }
 
             if (obj.ParentIndex1.Index > -1)

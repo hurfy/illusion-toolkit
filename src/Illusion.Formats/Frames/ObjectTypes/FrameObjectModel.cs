@@ -191,6 +191,26 @@ public class FrameObjectModel : FrameObjectSingleMesh
         return _skeleton;
     }
 
+    /// <summary>
+    /// Where one of this model's joints stands in the world: its rest transform carried through the model's
+    /// own placement, composed the same way <see cref="FrameObjectBase.SetWorldTransform"/> composes a child
+    /// with its parent. Out-of-range joints fall back to the model's own transform, so a mis-indexed
+    /// attachment lands on the object rather than at the origin.
+    /// <para>
+    /// The rest transforms are read as MODEL space, which is the reading <c>--probe-cars</c> settled on.
+    /// </para>
+    /// </summary>
+    public Matrix4x4 GetJointWorldTransform(int joint)
+    {
+        Matrix4x4 model = WorldTransform;
+        if (restTransform == null || joint < 0 || joint >= restTransform.Length) return model;
+
+        MatrixExtensions.TryDecomposeRS(restTransform[joint], out Vector3 scale, out Quaternion rotation, out Vector3 position);
+        MatrixExtensions.TryDecomposeRS(model, out _, out Quaternion modelRotation, out _);
+        return MatrixExtensions.SetMatrix(
+            modelRotation * rotation, scale, Vector3Extensions.TransformCoordinate(position, model));
+    }
+
     public override string ToString()
     {
         return string.Format("{0}", Name.ToString());

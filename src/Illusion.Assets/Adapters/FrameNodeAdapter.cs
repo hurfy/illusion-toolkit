@@ -47,11 +47,19 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
     /// <summary>Parent's world, falling back to the scene root's world for parentless frames — the same
     /// lookup the vendor's SetWorldTransform decomposition uses, and likewise placement-aware. For the frame
     /// an actor targets there is no parent, and the placement itself is the frame it lives in — which is what
-    /// keeps a drag of such an object landing where the cursor is.</summary>
+    /// keeps a drag of such an object landing where the cursor is.
+    /// <para>
+    /// A frame attached to a joint of a skinned model is placed by that joint (see
+    /// <see cref="FrameObjectBase.AttachedTo"/>), so that is what a drag has to be measured against — dragging
+    /// a door handle otherwise writes back a matrix in the wrong space and the handle jumps.
+    /// </para></summary>
     public Matrix4x4 ParentWorldTransform
     {
         get
         {
+            if (_frame.AttachedTo is { } model)
+                return model.GetJointWorldTransform(_frame.AttachedJoint) * _document.Placements.For(model);
+
             FrameObjectBase? parent = _frame.Parent ?? _frame.Root;
             return parent != null
                 ? parent.WorldTransform * _document.Placements.For(parent)

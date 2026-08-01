@@ -212,4 +212,17 @@ public sealed class SceneDocumentAdapter : ISceneDocument
         }
         return node;
     }
+
+    private readonly Dictionary<(FrameObjectModel Model, int Index), BoneNodeAdapter> _bones = new();
+
+    /// <summary>The canonical adapter for one bone of a skinned model — canonical for the same reason frame
+    /// objects are: selection and the undo history key by reference identity.</summary>
+    public BoneNodeAdapter Bone(FrameObjectModel model, int index)
+    {
+        if (!_bones.TryGetValue((model, index), out BoneNodeAdapter? bone))
+        {
+            _bones[(model, index)] = bone = new BoneNodeAdapter(model, index, this);
+        }
+        return bone;
+    }
 }

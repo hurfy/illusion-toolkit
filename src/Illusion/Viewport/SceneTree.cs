@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Illusion.Domain;
 using Illusion.Scene;
 
 namespace Illusion.Viewport;
@@ -42,10 +43,56 @@ internal sealed class SceneTree
 
     public static SceneNode BuildSceneTree(Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves)
     {
-        var node = new SceneNode(fn.Name, fn.Kind, fn.Children.Count > 0) { Category = fn.Category, Source = fn.Source };
+        bool hasChildren = fn.Children.Count > 0 || fn.Skeleton != null;
+        var node = new SceneNode(fn.Name, fn.Kind, hasChildren) { Category = fn.Category, Source = fn.Source };
         if (fn.Mesh != null) { node.Pending = fn.Mesh; meshLeaves.Add(node); }
+        if (fn.Skeleton is { } skeleton) node.AddChild(BuildSkeletonTree(skeleton));
         foreach (Assets.Sds.SdsFrameNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves));
         return node;
+    }
+
+    /// <summary>
+    /// The rig under its model, as a tree: one branch per root bone, children nested by the hierarchy's parent
+    /// indices. For a car this is the list of its parts — <c>doorFL</c>, <c>coverF</c>, <c>axleFR</c> — which
+    /// nothing else in the scene tree shows, because they are not frames but weight groups inside one mesh.
+    /// </summary>
+    private static SceneNode BuildSkeletonTree(SkeletonData skeleton)
+    {
+        var root = new SceneNode($"Skeleton ({skeleton.Bones.Count})", "Skeleton", true);
+        var nodes = new SceneNode[skeleton.Bones.Count];
+        for (int i = 0; i < skeleton.Bones.Count; i++)
+        {
+            bool hasChildren = skeleton.Bones.Any(b => b.Parent == i) ||
+                               skeleton.Attachments.Any(a => a.Joint == i);
+            nodes[i] = new SceneNode(skeleton.Bones[i].Name, "Bone", hasChildren)
+            {
+                Source = skeleton.Bones[i].Source,   // selectable and draggable like any other object
+            };
+        }
+
+        // Parents come before children in every rig in the corpus, but a forward reference must not lose a
+        // bone: anything whose parent is not placed yet hangs off the branch root instead of vanishing.
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            int parent = skeleton.Bones[i].Parent;
+            SceneNode host = parent >= 0 && parent < i ? nodes[parent] : root;
+            // The bone becomes a branch the moment it gains a child; the flag is set at construction, so
+            // a parent bone is built as a container up front (a leaf just never grows one).
+            host.AddChild(nodes[i]);
+        }
+
+        // What hangs off each bone, under that bone. The frames themselves appear elsewhere in the tree too,
+        // in their own place in the hierarchy — but that place is a grouping node at the origin and says
+        // nothing about which part they belong to, whereas this does.
+        foreach (BoneAttachment a in skeleton.Attachments)
+        {
+            if (a.Joint < 0 || a.Joint >= nodes.Length) continue;
+            nodes[a.Joint].AddChild(new SceneNode($"{a.Name}  ({a.TypeName})", "Attachment", false)
+            {
+                Source = a.Source,
+            });
+        }
+        return root;
     }
 
     // True while every link up to a current root is still a real child — i.e. the node was not detached by a

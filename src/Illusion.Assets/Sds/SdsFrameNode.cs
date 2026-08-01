@@ -9,6 +9,10 @@ public sealed class SdsFrameNode
     public string Kind { get; set; } = null!;
     public string Category { get; set; } = "Normal"; // for scenes: Proxy / Normal (filters during streaming)
     public MeshData? Mesh { get; set; }         // non-null only on mesh nodes
+
+    /// <summary>The rig, on a skinned model (<c>FrameObjectModel</c>) that has one. For a car its bones are
+    /// the parts — doors, covers, axles — and the archive's collision hulls and points hang off them.</summary>
+    public SkeletonData? Skeleton { get; set; }
     /// <summary>Backing source: an <see cref="IFrameNode"/> (frame/mesh) or an <see cref="IFrameScene"/>
     /// (scene folder). Carried to the UI node — the UI only ever sees these Domain ports.</summary>
     public ISceneSource? Source { get; set; }

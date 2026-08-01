@@ -598,17 +598,46 @@ internal static class ProbeRunner
             case "--probe-cars":
                 CarProbes.RunCarsProbe(args.Length >= 2 ? args[1] : "shubert_38");
                 return true;
-            // The Cars half of the resource library: a car staged with the shared car library, every car's
-            // materials resolved against it, the paint that is a colour rather than a texture, and an edit
-            // through save + pack. Optional arg = the car to focus on.
-            // Output: %TEMP%\illusion_library_cars.txt
             // Book-keeping that used to lose edits: which window holds which archive (there is one extracted
             // working copy per archive, shared). Output: %TEMP%\illusion_pending.txt
             case "--probe-pending":
                 PendingBuildProbes.RunPendingProbe();
                 return true;
+            // The Cars half of the resource library: a car staged with the shared car library, every car's
+            // materials resolved against it, the paint that is a colour rather than a texture, and an edit
+            // through save + pack. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_library_cars.txt
             case "--probe-library-cars":
                 CarLibraryProbes.RunCarsLibraryProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // What hangs off a bone: every attachment reference of every car, measured against the joint it
+            // names — which space the attached frame's own matrix is in, and therefore what has to move with
+            // the bone. Optional arg = the archive to dump in full.
+            // Output: %TEMP%\illusion_attachments.txt
+            case "--probe-attachments":
+                CarProbes.RunAttachmentsProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // A bone as an editable object: drag doorFL and see the door's hull, lock and handle go with it,
+            // undo, then save and reload. Optional arg = the car. Output: %TEMP%\illusion_bones.txt
+            case "--probe-bones":
+                BoneProbes.RunBonesProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // How a skinned mesh's vertices reach the rig: the per-LOD remap pools, which pool each face group
+            // draws from, how many weights it uses, and whether the blend info's bone matrix is the inverse of
+            // the rest transform. Optional arg = the car. Output: %TEMP%\illusion_skinning.txt
+            case "--probe-skinning":
+                BoneProbes.RunSkinningProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // The skin on screen: a car rendered as authored and again with one bone moved, with the two
+            // frames diffed. Optional arg = the car. Output: %TEMP%\illusion_skin_render.txt + two PNGs.
+            case "--probe-skin-render":
+                BoneProbes.RunSkinRenderProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // What the PREFAB containers hold, game-wide: which init-data types exist, how many, how big, and
+            // which folders carry them — plus one car's container in full. Optional arg = the car.
+            // Output: %TEMP%\illusion_prefabs.txt
+            case "--probe-prefabs":
+                PrefabProbes.RunPrefabsProbe(args.Length >= 2 ? args[1] : "shubert_38");
                 return true;
             default:
                 return false;

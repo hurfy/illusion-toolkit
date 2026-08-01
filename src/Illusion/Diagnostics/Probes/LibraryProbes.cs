@@ -439,7 +439,7 @@ internal static class LibraryProbes
                 min.X <= 0 && max.X >= 0 && min.Y <= 0 && max.Y >= 0,
                 $"x {min.X:F2}..{max.X:F2}, y {min.Y:F2}..{max.Y:F2}");
 
-            RenderStage(meshes, folders, min, max, sb);
+            RenderStage(meshes, folders, min, max, sb, roots);
 
             sb.Insert(0, $"LIBRARY STAGE PROBE ({relative}): {pass} passed, {fail} failed\n\n");
         }
@@ -454,7 +454,7 @@ internal static class LibraryProbes
     /// never a bone transform. Best-effort: a machine with no usable device leaves the assertions above green.
     /// </summary>
     private static void RenderStage(List<MeshData> meshes, IReadOnlyList<string> textureFolders,
-        Vector3 min, Vector3 max, StringBuilder sb)
+        Vector3 min, Vector3 max, StringBuilder sb, IReadOnlyList<SdsFrameNode> roots)
     {
         string png = Path.Combine(Path.GetTempPath(), "illusion_library_stage.png");
         Rendering.Gpu.GpuContext? gpu = null;
@@ -481,6 +481,22 @@ internal static class LibraryProbes
             renderer.Render(target);
             GpuProbes.SavePng(Rendering.Gpu.RenderTargetReadback.Read(gpu, target), w, h, png);
             sb.AppendLine($"rendered {w}x{h}px -> {png}");
+
+            // A second frame with the rig on. Bones are the only place a car's doors and axles exist, and a
+            // line list that lands in the wrong space still looks like a plausible tangle in the numbers —
+            // only a picture over the body says whether it sits where the parts are.
+            // Built by the streamer itself, not by a copy of it here — a second implementation would be free
+            // to drift, and this picture is the only thing that says the first one is right.
+            if (Viewport.DistrictStreamer.BuildRigLines(Viewport.DistrictStreamer.CollectSkeletons(roots)) is { } rig)
+            {
+                renderer.ShowSkeleton = true;
+                renderer.SetSkeletonDistrict("probe", rig);
+                renderer.Render(target);
+                string rigPng = Path.Combine(Path.GetTempPath(), "illusion_library_stage_rig.png");
+                GpuProbes.SavePng(Rendering.Gpu.RenderTargetReadback.Read(gpu, target), w, h, rigPng);
+                sb.AppendLine($"rig: {rig.Bones.Count / 2} bone segments, {rig.Joints.Count / 6} joints, " +
+                              $"{rig.Attachments.Count / 8} attachments -> {rigPng}");
+            }
         }
         catch (Exception ex) { sb.AppendLine("render skipped — " + ex.Message); }
         finally
@@ -491,6 +507,7 @@ internal static class LibraryProbes
         }
     }
 
+    // Bone→parent segments plus a tick at every joint, in world space — the same list the viewport uploads.
     private static void Walk(SdsFrameNode n, int depth, StringBuilder sb, Dictionary<string, int> kinds,
         ref int nodes, ref int meshNodes)
     {

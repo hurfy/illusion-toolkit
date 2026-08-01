@@ -23,6 +23,30 @@ public class FrameObjectBase : FrameEntry
     FrameObjectBase? root;
     List<FrameObjectBase> _children = new List<FrameObjectBase>();
 
+    /// <summary>
+    /// The skinned model this frame hangs off, and which of its joints — set from the model's
+    /// <see cref="FrameObjectModel.AttachmentReferences"/> when the hierarchy is resolved, null for the
+    /// overwhelming majority of frames, which hang off nothing.
+    /// <para>
+    /// An attached frame's own matrix is in the JOINT's space, not the hierarchy parent's: measured over
+    /// 3152 attachments across 86 cars (<c>--probe-attachments</c>), reading it as the joint's child keeps
+    /// every named left/right pair mirrored to 0.14 m, while reading it as model space — which is what the
+    /// hierarchy alone gives — is out by 1.10 m. This is what puts a door's collision hull on the door and
+    /// what makes the hull follow when the bone moves.
+    /// </para>
+    /// </summary>
+    public FrameObjectModel? AttachedTo { get; private set; }
+
+    /// <summary>Joint index within <see cref="AttachedTo"/>; meaningless while that is null.</summary>
+    public byte AttachedJoint { get; private set; }
+
+    /// <summary>Records the joint this frame hangs off. Called only while resolving the frame hierarchy.</summary>
+    internal void SetAttachedJoint(FrameObjectModel model, byte joint)
+    {
+        AttachedTo = model;
+        AttachedJoint = joint;
+    }
+
     public FrameObjectBase? Parent
     {
         get { return parent; }
@@ -151,7 +175,20 @@ public class FrameObjectBase : FrameEntry
 
     protected virtual void SanitizeOnSave() { }
 
+    // Re-entrancy guard. Reading a parent's world recomputes it, and an attachment reaches SIDEWAYS in the
+    // graph (to a model that is not an ancestor), so a shipped file with a cycle — or an attachment whose
+    // model happens to sit under the attached frame — would otherwise recurse until the stack ran out.
+    private bool computingWorldTransform;
+
     public void SetWorldTransform()
+    {
+        if (computingWorldTransform) return;
+        computingWorldTransform = true;
+        try { ComputeWorldTransform(); }
+        finally { computingWorldTransform = false; }
+    }
+
+    private void ComputeWorldTransform()
     {
         //The world transform is calculated and then decomposed because some reason,
         //the renderer does not update on the first startup of the editor.
@@ -163,7 +200,15 @@ public class FrameObjectBase : FrameEntry
         MatrixExtensions.TryDecomposeRS(localTransform, out scale, out rotation, out position);
         worldTransform = Matrix4x4.Identity;
 
-        if (parent != null)
+        // A frame attached to a joint is placed by that joint and by nothing else — its hierarchy parent is a
+        // grouping node that sits at the origin, and honouring it instead leaves every door handle, lock and
+        // collision hull piled up around the car's centre.
+        bool placed = true;
+        if (AttachedTo != null)
+        {
+            parentTransform = AttachedTo.GetJointWorldTransform(AttachedJoint);
+        }
+        else if (parent != null)
         {
             parentTransform = parent.worldTransform;
         }
@@ -171,8 +216,12 @@ public class FrameObjectBase : FrameEntry
         {
             parentTransform = root.worldTransform;
         }
+        else
+        {
+            placed = false;
+        }
 
-        if (parent != null || root != null)
+        if (placed)
         {
             MatrixExtensions.TryDecomposeRS(parentTransform, out _, out Quaternion parentRotation, out _);
 
