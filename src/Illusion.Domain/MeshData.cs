@@ -37,6 +37,18 @@ public sealed class MeshData
     /// <summary>The rig this mesh is skinned to, in the pose it was authored in. Null when there is no skin.</summary>
     public SkeletonData? Skeleton { get; init; }
 
+    /// <summary>
+    /// The rig's rest transforms as the document holds them — the LIVE array, not a copy. The renderer reads
+    /// it every frame, so a bone moved by anything at all shows up without that thing having to say so.
+    /// <para>
+    /// This exists because the notification route did not survive contact: a bone edited through the gizmo,
+    /// through an undo, or through a push from Blender each had to remember to refresh the pose, and each
+    /// found a new way not to. Reading the source of truth costs one small matrix multiply per bone per
+    /// frame and cannot go stale.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<Matrix4x4>? LiveRest { get; init; }
+
     /// <summary>True when the mesh carries everything a skinned draw needs.</summary>
     public bool IsSkinned => BoneIndices != null && BoneWeights != null && Skeleton != null;
 

@@ -89,8 +89,24 @@ def export_scene(reason):
 
     survivors = [o for o in bpy.data.objects
                  if importer.ID_PROP in o.keys() and o.type == 'MESH']
-    present_ids = {o[importer.ID_PROP] for o in survivors}
+    # What gets PUSHED is the meshes; what counts as still PRESENT is every object carrying an id. A rig is
+    # an ARMATURE, so scoping presence to meshes reported it deleted on the first push after every load — and
+    # a deletion the toolkit acts on takes the whole model, its bones and its attachments with it.
+    present_ids = {o[importer.ID_PROP] for o in bpy.data.objects if importer.ID_PROP in o.keys()}
     deleted = sorted(server.state.get("loaded_ids", set()) - present_ids)
+
+    # A posed armature must NOT bake into the geometry that goes home. The toolkit keeps the pose in the
+    # rig's own transforms (the rig is pushed separately), so a mesh evaluated with its Armature modifier
+    # live would send the door's vertices in their swung-open position AND move the bone — applying the
+    # same motion twice. Modifiers are muted for the evaluation and restored right after.
+    muted = []
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        for modifier in obj.modifiers:
+            if modifier.type == 'ARMATURE' and modifier.show_viewport:
+                modifier.show_viewport = False
+                muted.append(modifier)
 
     server.log(f"export_scene: {len(survivors)} survivors, evaluating depsgraph")
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -98,15 +114,32 @@ def export_scene(reason):
     objects = []
     blocks = []
     pushed_ids = []
-    for obj in survivors:
-        try:
-            server.log(f"export_scene: exporting {obj.name}")
-            entry = _export_object(obj, depsgraph, blocks)
-        except Exception as exc:
-            server.log(f"push: failed to export '{obj.get(importer.ID_PROP, obj.name)}': {exc}")
-            continue
-        objects.append(entry)
-        pushed_ids.append(entry["id"])
+    try:
+        for obj in survivors:
+            try:
+                server.log(f"export_scene: exporting {obj.name}")
+                entry = _export_object(obj, depsgraph, blocks)
+            except Exception as exc:
+                server.log(f"push: failed to export '{obj.get(importer.ID_PROP, obj.name)}': {exc}")
+                continue
+            objects.append(entry)
+            pushed_ids.append(entry["id"])
+
+        # The rigs. A bone posed in Blender is what the toolkit stores as that bone's rest transform, so a
+        # door swung open here comes back as a door swung open there. Sent whether or not it was touched —
+        # the toolkit compares against what it exported and only records what actually moved.
+        for arm in [o for o in bpy.data.objects
+                    if importer.ID_PROP in o.keys() and o.type == 'ARMATURE']:
+            try:
+                entry = _export_armature(arm, blocks)
+            except Exception as exc:
+                server.log(f"push: failed to export rig '{arm.get(importer.ID_PROP, arm.name)}': {exc}")
+                continue
+            objects.append(entry)
+            pushed_ids.append(entry["id"])
+    finally:
+        for modifier in muted:
+            modifier.show_viewport = True
 
     if not pushed_ids and not deleted and new_count == 0:
         server.log("export_scene: nothing to push")
@@ -131,6 +164,108 @@ def export_scene(reason):
     # baseline forgets them (re-sending would delete-fail forever after).
     server.state["loaded_ids"] = present_ids
     return len(pushed_ids), len(deleted), new_count
+
+
+def _export_armature(obj, blocks):
+    """Read one rig back: per bone, where it stands NOW in armature space.
+
+    The toolkit stores a bone's placement as its rest transform, and posing is how anyone moves a
+    bone in Blender — so a pose bone's armature-space matrix IS the rest transform to send back. Bones
+    go in the toolkit's own index order (BONES_PROP), which is not Blender's.
+    """
+    try:
+        bone_names = json.loads(obj.get(importer.BONES_PROP) or "[]")
+    except ValueError:
+        bone_names = []
+    if not bone_names:
+        raise RuntimeError("rig carries no bone order")
+
+    rest = np.zeros((len(bone_names), 16), dtype=np.float32)
+    parents = np.full(len(bone_names), -1, dtype=np.int32)
+    index_of = {name: i for i, name in enumerate(bone_names)}
+    for i, name in enumerate(bone_names):
+        pose_bone = obj.pose.bones.get(name)
+        if pose_bone is None:
+            raise RuntimeError(f"bone '{name}' is gone from the rig")
+        rest[i] = _row_major(pose_bone.matrix)
+        parent = pose_bone.parent
+        if parent is not None:
+            parents[i] = index_of.get(parent.name, -1)
+
+    return {
+        "kind": "skeleton",
+        "id": obj[importer.ID_PROP],
+        "name": obj.name,
+        "parentId": None,
+        "world": _row_major(obj.matrix_world),
+        "local": _row_major(obj.matrix_local),
+        "meta": {"boneNames": bone_names},
+        "arrays": {
+            "boneParents": _add_block(blocks, "i32", 1, len(bone_names), parents),
+            "boneRest": _add_block(blocks, "f32", 16, len(bone_names), rest),
+        },
+    }
+
+
+def _export_skin(obj, me, n_verts, blocks, arrays):
+    """Send the vertex groups home as bone influences, four per vertex.
+
+    Without this the toolkit has no idea which bone a vertex belongs to, and geometry added in Blender
+    takes the skin of whatever vertex happens to be NEAREST — put a new part on the hood and it rides the
+    left door because the door was closer. The groups are named after the bones (that is how they were
+    built on import), so a name is what identifies a bone; indices go out in the toolkit's own bone order,
+    which is the one it carries on the armature as BONES_PROP.
+
+    Silent no-op for a mesh with no rig, and for any vertex in no group at all — the toolkit falls back to
+    what it already knows for those, which is better than an empty skin.
+    """
+    armature = obj.parent if obj.parent is not None and obj.parent.type == 'ARMATURE' else None
+    if armature is None or not obj.vertex_groups:
+        return
+    try:
+        bone_names = json.loads(armature.get(importer.BONES_PROP) or "[]")
+    except ValueError:
+        return
+    if not bone_names:
+        return
+
+    bone_of_name = {name: i for i, name in enumerate(bone_names)}
+    bone_of_group = {}
+    for group in obj.vertex_groups:
+        bone = bone_of_name.get(group.name)
+        if bone is not None and bone <= 255:
+            bone_of_group[group.index] = bone
+    if not bone_of_group:
+        return
+
+    # The evaluated mesh carries the groups; fall back to the object's own when it does not (and only
+    # when the counts still line up, or the two would be talking about different vertices).
+    source = me
+    if n_verts and not any(v.groups for v in me.vertices[:1]):
+        if len(obj.data.vertices) == n_verts:
+            source = obj.data
+
+    ids = np.zeros((n_verts, 4), dtype=np.uint8)
+    weights = np.zeros((n_verts, 4), dtype=np.float32)
+    for vertex in source.vertices:
+        influences = [(bone_of_group[g.group], g.weight)
+                      for g in vertex.groups
+                      if g.group in bone_of_group and g.weight > 0.0]
+        if not influences:
+            continue
+        # The format holds four; the heaviest four are the ones that matter, renormalized so they still
+        # sum to one — the game's blend assumes it.
+        influences.sort(key=lambda pair: -pair[1])
+        del influences[4:]
+        total = sum(weight for _, weight in influences)
+        if total <= 0.0:
+            continue
+        for slot, (bone, weight) in enumerate(influences):
+            ids[vertex.index][slot] = bone
+            weights[vertex.index][slot] = weight / total
+
+    arrays["boneIndices"] = _add_block(blocks, "u8", 4, n_verts, ids)
+    arrays["boneWeights"] = _add_block(blocks, "f32", 4, n_verts, weights)
 
 
 def _export_object(obj, depsgraph, blocks):
@@ -196,6 +331,7 @@ def _export_object(obj, depsgraph, blocks):
             "origIndex": _add_block(blocks, "i32", 1, n_tris * 3, orig[tri_loops]),
             "faceMaterials": _add_block(blocks, "u16", 1, n_tris, face_mats[tri_polys]),
         }
+        _export_skin(obj, me, n_verts, blocks, arrays)
     finally:
         ob_eval.to_mesh_clear()
 

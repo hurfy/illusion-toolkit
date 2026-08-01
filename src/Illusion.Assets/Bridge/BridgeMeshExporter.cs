@@ -7,6 +7,7 @@ using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Frames.Resources;
 using Illusion.Formats.Geometry;
+using Illusion.Formats.Hashing;
 
 namespace Illusion.Assets.Bridge;
 
@@ -30,9 +31,11 @@ public static class BridgeMeshExporter
             skipReason = "not a frame-backed object";
             return null;
         }
-        // Exact type: FrameObjectModel (skinned) derives from FrameObjectSingleMesh and its extra
-        // blend data would not survive a plain-mesh roundtrip.
-        if (adapter.Frame is not FrameObjectSingleMesh frame || frame.GetType() != typeof(FrameObjectSingleMesh))
+        // A skinned model (FrameObjectModel) rides too, with its rig and weights — that is the whole
+        // point on a car, whose parts exist only as bones. Anything else derived from SingleMesh does
+        // not: its extra blocks would not survive the roundtrip.
+        if (adapter.Frame is not FrameObjectSingleMesh frame
+            || (frame.GetType() != typeof(FrameObjectSingleMesh) && frame is not FrameObjectModel))
         {
             skipReason = $"unsupported frame type {adapter.Frame.GetType().Name}";
             return null;
@@ -53,14 +56,13 @@ public static class BridgeMeshExporter
             skipReason = "mesh has no usable LOD0 buffers";
             return null;
         }
-        if (decoded.Declaration.HasFlag(VertexFlags.Skin))
+        if (decoded.Declaration.HasFlag(VertexFlags.Skin) && frame is not FrameObjectModel)
         {
-            skipReason = "skinned vertex data";
+            skipReason = "skinned vertex data on a frame that carries no rig";
             return null;
         }
 
-        WeldedMesh welded = WeldMapBuilder.Build(
-            BuildWeldKeys(decoded), decoded.Positions, decoded.Normals, FlipV(decoded.UVs), decoded.Indices);
+        WeldedMesh welded = WeldFor(decoded);
 
         List<MeshMaterialInfo> materials = ResolveMaterials(frame, document, decoded.Indices.Length);
 
@@ -70,9 +72,39 @@ public static class BridgeMeshExporter
         for (int i = 0; i < faceMaterials.Length; i++)
             faceMaterials[i] = perSourceTriangle[welded.KeptTriangles[i]];
 
+        // The skin, welded the same way the geometry was: split vertices that merged came from one
+        // source vertex and carry one set of influences, so the first source vertex to claim a welded
+        // slot decides it.
+        byte[] boneIndices = [];
+        float[] boneWeights = [];
+        string? skeletonId = null;
+        if (frame is FrameObjectModel model && decoded.BoneIndices is { } ids && decoded.BoneWeights is { } weights)
+        {
+            byte[] resolved = ResolveSkin(model, decoded, ids);
+            boneIndices = new byte[welded.Positions.Length * 4];
+            boneWeights = new float[welded.Positions.Length * 4];
+            var claimed = new bool[welded.Positions.Length];
+            for (int split = 0; split < welded.SplitToWelded.Length; split++)
+            {
+                int target = welded.SplitToWelded[split];
+                if (target < 0 || target >= claimed.Length || claimed[target]) continue;
+                if (((split * 4) + 3) >= resolved.Length) continue;
+                claimed[target] = true;
+                for (int k = 0; k < 4; k++)
+                {
+                    boneIndices[(target * 4) + k] = resolved[(split * 4) + k];
+                    boneWeights[(target * 4) + k] = weights[(split * 4) + k];
+                }
+            }
+            skeletonId = SkeletonId(model, document);
+        }
+
         return new MeshObjectPayload
         {
             Id = MakeId(frame, document),
+            BoneIndices = boneIndices,
+            BoneWeights = boneWeights,
+            SkeletonId = skeletonId,
             Name = frame.Name?.ToString() ?? "mesh",
             // The NODE's world, not the frame's: an actor-placed object is a prototype parked at the origin,
             // and its spawn matrix lives in the .act. Sending the frame's own world would drop it at (0,0,0)
@@ -97,6 +129,64 @@ public static class BridgeMeshExporter
         };
     }
 
+    /// <summary>
+    /// The rig of a skinned model as its own exchange object, or null when the node carries none. Emitted
+    /// beside the mesh that points at it through <see cref="MeshObjectPayload.SkeletonId"/>.
+    /// </summary>
+    public static SkeletonObjectPayload? TryExportSkeleton(IFrameNode node, ISceneDocument document)
+    {
+        if (node is not FrameNodeAdapter adapter || adapter.Frame is not FrameObjectModel model) return null;
+
+        HashName[] names;
+        byte[] parents;
+        try
+        {
+            names = model.GetSkeletonObject().BoneNames ?? [];
+            parents = model.GetSkeletonHierarchyObject().ParentIndices ?? [];
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        Matrix4x4[] rest = model.RestTransform ?? [];
+        int count = Math.Min(names.Length, rest.Length);
+        if (count == 0) return null;
+
+        var boneParents = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            int parent = i < parents.Length ? parents[i] : -1;
+            // A root is its own parent in this format; Blender needs the absence spelled out.
+            boneParents[i] = parent == i || parent >= count ? -1 : parent;
+        }
+
+        return new SkeletonObjectPayload
+        {
+            Id = SkeletonId(model, document),
+            Name = model.Name?.ToString() ?? "rig",
+            World = adapter.WorldTransform,
+            BoneNames = [.. Enumerable.Range(0, count).Select(i => names[i].ToString() ?? $"bone{i}")],
+            BoneParents = boneParents,
+            BoneRest = [.. rest.Take(count)],
+        };
+    }
+
+    /// <summary>The skinned model's bone ids resolved to its own bone list — on the wire they index a
+    /// per-LOD remap pool instead (see <c>--probe-skinning</c>). Falls back to the raw ids when the blend
+    /// info does not line up, which is the same "leave it alone" the loader does.</summary>
+    private static byte[] ResolveSkin(FrameObjectModel model, DecodedMesh decoded, byte[] raw) =>
+        SdsMeshLoader.ResolveBoneRemap(model, SdsMeshLoader.BuildParts(model, decoded.Indices.Length), decoded)
+        ?? raw;
+
+    private static string SkeletonId(FrameObjectModel model, ISceneDocument document)
+    {
+        string rel = MafiaEnvironment.IsInitialized
+            ? Path.GetRelativePath(MafiaEnvironment.GameRoot, document.SourceArchive.FullName)
+            : document.SourceArchive.Name;
+        return $"{rel.Replace('\\', '/')}|{model.Name}|rig";
+    }
+
     /// <summary>Stable-within-session object id: archive-relative path + frame name + runtime RefID.
     /// RefID is NOT stable across toolkit runs — the session controller resolves ids only through its
     /// own export map, and the session GUID guards against stale pushes.</summary>
@@ -110,6 +200,44 @@ public static class BridgeMeshExporter
 
     // Weld key = the raw quantized position triple (x | y<<16 | z<<32) with the binormal-handedness
     // top bit of Z masked off — two split vertices weld iff the game data itself agrees on position.
+    /// <summary>
+    /// The weld this mesh is exported with. Shared so a diagnostic can reproduce it exactly rather than
+    /// approximate it — a weld that differs by one vertex tells you nothing about the one that shipped.
+    /// </summary>
+    public static WeldedMesh WeldFor(DecodedMesh decoded) =>
+        WeldMapBuilder.Build(
+            BuildWeldKeys(decoded), decoded.Positions, decoded.Normals, FlipV(decoded.UVs), decoded.Indices,
+            BuildSkinKeys(decoded));
+
+    /// <summary>
+    /// One key per split vertex identifying its SKIN — the four bone ids and their weights — or null when the
+    /// mesh has none. Two vertices sharing a position but not a skin must not be welded: on a car the door's
+    /// edge and the body's edge sit at the same point and answer to different bones, and merging them binds
+    /// body geometry to the door.
+    /// <para>
+    /// Weights are quantized to a byte, which is what the vertex buffer stores them as anyway, so two skins
+    /// that differ by less than that were never distinguishable in the first place.
+    /// </para>
+    /// </summary>
+    internal static ulong[]? BuildSkinKeys(DecodedMesh decoded)
+    {
+        if (decoded.BoneIndices is not { } ids || decoded.BoneWeights is not { } weights) return null;
+
+        var keys = new ulong[decoded.NumVerts];
+        for (int i = 0; i < keys.Length && ((i * 4) + 3) < ids.Length; i++)
+        {
+            ulong key = 0;
+            for (int k = 0; k < 4; k++)
+            {
+                key |= (ulong)ids[(i * 4) + k] << (k * 8);
+                byte w = (byte)Math.Clamp((int)MathF.Round(weights[(i * 4) + k] * 255f), 0, 255);
+                key |= (ulong)w << (32 + (k * 8));
+            }
+            keys[i] = key;
+        }
+        return keys;
+    }
+
     // Internal: the applier re-derives the exported face set from the same keys to detect topology
     // changes (deleted/reshaped faces) in a pushed mesh.
     internal static ulong[] BuildWeldKeys(DecodedMesh decoded)

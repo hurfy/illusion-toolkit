@@ -91,6 +91,60 @@ public class FrameObjectModel : FrameObjectSingleMesh
         set { physSplitSize = value.PhysSplitSize; hitBoxSize = value.HitBoxSize; nPhysSplits = value.NPhysSplits; }
     }
 
+    /// <summary>
+    /// The byte size the split block serializes to, computed from the table as it stands. The counter is
+    /// stored in the file and written back verbatim, so a rebuilt table has to bring it along — a size that
+    /// no longer matches the bytes after it desynchronizes everything the game reads next, and the model
+    /// simply does not appear.
+    /// <para>
+    /// The layout is a count, then per split a blend index and a piece count, then per piece a burst count,
+    /// then per burst a material index and a face-range count, then four bytes per range. Verified against
+    /// every shipped car by <c>--probe-skinning</c>.
+    /// </para>
+    /// </summary>
+    /// <summary>The split-block size as the FILE holds it — for checking a rebuild against
+    /// <see cref="ComputeSplitBlockSize"/>.</summary>
+    public int SplitBlockSizeStored => physSplitSize;
+
+    public int ComputeSplitBlockSize()
+    {
+        if (blendMeshSplits is not { Length: > 0 }) return 0;
+
+        int size = sizeof(short); // the split count itself
+        foreach (WeightedByMeshSplit split in blendMeshSplits)
+        {
+            size += sizeof(ushort) + sizeof(ushort); // blend index + piece count
+            foreach (BlendMeshSplitInfo piece in split.Data ?? [])
+            {
+                size += sizeof(short); // burst count
+                foreach (MiniMaterialBurst burst in piece.Data ?? [])
+                {
+                    size += sizeof(ushort) + sizeof(ushort); // material index + range count
+                    size += (burst.Data?.Length ?? 0) * (sizeof(ushort) + sizeof(ushort));
+                }
+            }
+        }
+        return size;
+    }
+
+    /// <summary>
+    /// Brings the three stored counters back in step with the tables they describe. Call after rebuilding
+    /// the splits — the hit-box counter is sixteen bytes per PIECE (the reader takes the piece count as the
+    /// hit-box count), and the split count is simply how many there are.
+    /// </summary>
+    public void RecomputeSplitCounters()
+    {
+        int pieces = 0;
+        foreach (WeightedByMeshSplit split in blendMeshSplits ?? [])
+        {
+            pieces += split.Data?.Length ?? 0;
+        }
+
+        physSplitSize = ComputeSplitBlockSize();
+        hitBoxSize = pieces * 16;
+        nPhysSplits = (short)(blendMeshSplits?.Length ?? 0);
+    }
+
     public FrameObjectModel(FrameResource OwningResource) : base(OwningResource) { }
 
     public FrameObjectModel(FrameObjectSingleMesh other) : base(other)
@@ -383,7 +437,7 @@ public class FrameObjectModel : FrameObjectSingleMesh
         }
 
         /// <summary>Empty burst for the native-boundary mapper.</summary>
-        internal MiniMaterialBurst()
+        public MiniMaterialBurst()
         {
         }
 
@@ -412,8 +466,9 @@ public class FrameObjectModel : FrameObjectSingleMesh
             set { numFaces = value; }
         }
 
-        /// <summary>Empty burst for the native-boundary mapper.</summary>
-        internal FacesBurst()
+        /// <summary>Empty burst — for the native-boundary mapper and for rebuilding the table after a
+        /// re-topologised mesh comes back from Blender.</summary>
+        public FacesBurst()
         {
         }
 

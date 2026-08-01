@@ -245,6 +245,50 @@ internal sealed class BridgeSessionController : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Takes one pushed rig and works out what it does to the model it belongs to. The scene lookup and the
+    /// matching happen here; the writing waits for the UI thread, where the scene is owned.
+    /// </summary>
+    private (SceneNode Node, BonePosePush.Result Pose)? ApplyRigPush(
+        ExchangeObject obj, ExchangeContainer container, PushAckMessage ack)
+    {
+        SkeletonObjectPayload rig;
+        try { rig = MeshPayloadCodec.ReadSkeleton(container, obj); }
+        catch (Exception ex) when (ex is InvalidDataException or IndexOutOfRangeException)
+        {
+            ack.Skipped.Add(new PushSkip { Id = obj.Id, Reason = "unreadable rig: " + ex.Message });
+            return null;
+        }
+
+        // The rig's id is the model's id with a "|rig" tail — the model is what carries the bones.
+        SceneNode? node = _host.Dispatcher.Invoke(() =>
+            _exported.Values.FirstOrDefault(n =>
+                n.Source is IFrameNode f && FindDocument(n) is { } d
+                && BridgeMeshExporter.TryExportSkeleton(f, d)?.Id == rig.Id));
+        if (node?.Source is not IFrameNode frame)
+        {
+            ack.Skipped.Add(new PushSkip { Id = rig.Id, Reason = "the rig's model is not part of this bridge scene" });
+            return null;
+        }
+
+        BonePosePush.Result? pose = BonePosePush.TryApply(frame, rig);
+        if (pose == null)
+        {
+            ack.Skipped.Add(new PushSkip { Id = rig.Id, Reason = "no bone of this rig matched the model" });
+            return null;
+        }
+        if (pose.Unknown.Count > 0)
+        {
+            ack.Skipped.Add(new PushSkip
+            {
+                Id = rig.Id,
+                Reason = $"{pose.Unknown.Count} bone(s) the model does not have: "
+                    + string.Join(", ", pose.Unknown.Take(6)),
+            });
+        }
+        return pose.Moved.Count > 0 ? (node, pose) : null;
+    }
+
     private static SceneNode? DocumentNodeOf(SceneNode node)
     {
         for (SceneNode? n = node; n != null; n = n.Parent)
@@ -270,6 +314,7 @@ internal sealed class BridgeSessionController : IDisposable
             };
 
             var exported = new List<(string Id, SceneNode Leaf)>();
+            var rigs = new HashSet<string>(StringComparer.Ordinal); // one skeleton object per model
             foreach (ExportRequest request in requests)
             {
                 if (request.Collision is { } placement)
@@ -292,6 +337,15 @@ internal sealed class BridgeSessionController : IDisposable
                     skips.Add(request.Leaf.Name + " — " + reason);
                     continue;
                 }
+
+                // A skinned model's rig travels with it, once per model — the mesh points at it by id.
+                // Without it Blender gets a car as one solid body, which is exactly what it is not.
+                if (payload.SkeletonId != null && rigs.Add(payload.SkeletonId)
+                    && BridgeMeshExporter.TryExportSkeleton(request.Node, request.Document) is { } rig)
+                {
+                    MeshPayloadCodec.Add(container, rig);
+                }
+
                 MeshPayloadCodec.Add(container, payload);
                 exported.Add((payload.Id, request.Leaf));
             }
@@ -535,6 +589,7 @@ internal sealed class BridgeSessionController : IDisposable
             var reshapes = new List<ReshapedHull>();
             var newHulls = new List<NewHull>();
             var newPayloads = new List<MeshObjectPayload>();
+            var rigEdits = new List<(SceneNode Node, BonePosePush.Result Pose)>();
             foreach (ExchangeObject obj in container.Objects)
             {
                 if (staleSession)
@@ -561,6 +616,12 @@ internal sealed class BridgeSessionController : IDisposable
                         continue;
                     }
                     if (ApplyCollisionPush(obj, container, placementNode, transforms, reshapes, ack)) collisionMoved++;
+                    continue;
+                }
+
+                if (obj.Kind == ExchangeSchema.KindSkeleton)
+                {
+                    if (ApplyRigPush(obj, container, ack) is { } posed) rigEdits.Add(posed);
                     continue;
                 }
 
@@ -672,6 +733,22 @@ internal sealed class BridgeSessionController : IDisposable
                         });
                         continue;
                     }
+                    // A SKINNED MODEL is never deleted by a push. This list is a DIFF — ids the addon no
+                    // longer sees — not an intent, and an ordinary Blender edit (joining meshes, replacing an
+                    // object, converting it) makes an id disappear without anyone asking for a deletion.
+                    // Deleting the model cascades: the rig goes, and every hull, lock and point hanging off
+                    // its bones goes with it. That is a whole car destroyed by a diff, so it takes an
+                    // explicit deletion in the toolkit.
+                    if (node.Source is FrameNodeAdapter { Frame: FrameObjectModel })
+                    {
+                        ack.Skipped.Add(new PushSkip
+                        {
+                            Id = id,
+                            Reason = "a skinned model is deleted in the toolkit, not by disappearing from "
+                                + "Blender — its rig and everything attached to its bones would go with it",
+                        });
+                        continue;
+                    }
                     deleteNodes.Add(node);
                 }
                 var set = new HashSet<SceneNode>(deleteNodes);
@@ -680,6 +757,26 @@ internal sealed class BridgeSessionController : IDisposable
                     for (SceneNode? p = n.Parent; p != null; p = p.Parent)
                         if (set.Contains(p)) return true;
                     return false;
+                });
+            }
+
+            // The rigs come back before anything else touches the scene: a bone pose is what the file
+            // stores as a rest transform, and the meshes pushed alongside were evaluated against it.
+            int bonesMoved = 0;
+            if (rigEdits.Count > 0)
+            {
+                _host.Dispatcher.Invoke(() =>
+                {
+                    foreach ((SceneNode node, BonePosePush.Result pose) in rigEdits)
+                    {
+                        if (!_host.Tree.IsInScene(node)) continue;
+                        _host.Editing.History.Push(new BonePoseEdit(_host, node, pose));
+                        BonePosePush.Write(pose, undo: false);
+                        _host.Streamer.RefreshRig(node);
+                        _host.Persistence.MarkFrameModified(node);
+                        bonesMoved += pose.Moved.Count;
+                    }
+                    _host.RaiseSelectionTransformChanged();
                 });
             }
 
@@ -782,6 +879,15 @@ internal sealed class BridgeSessionController : IDisposable
                     }
                 }
                 foreach (string id in push.Deleted) _exported.Remove(id);
+
+                // LAST, after the geometry applies: a mesh that came back gets a brand-new GpuMesh, and a
+                // fresh one starts at the identity pose. Posing before that point put the body in its new
+                // shape and the re-upload put it straight back — the bone moved on screen and the geometry
+                // did not.
+                foreach ((SceneNode node, _) in rigEdits)
+                {
+                    if (_host.Tree.IsInScene(node)) _host.Streamer.RefreshRig(node);
+                }
                 RefreshEditFocus(); // meshes were swapped/created/deleted — recompute the ghost set
             });
 

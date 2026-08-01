@@ -334,6 +334,7 @@ public static class SdsMeshLoader
                 Bones = bones,
                 World = model.WorldTransform,
                 Attachments = attachments,
+                InverseBind = InverseBindOf(model, count),
             };
         }
         catch (Exception)
@@ -547,9 +548,7 @@ public static class SdsMeshLoader
             Matrix4x4 place = instances is { Length: > 0 } ? Matrix4x4.Identity : placement ?? Matrix4x4.Identity;
 
             // A skinned model's bone ids only mean something once the per-face-group remap is applied.
-            byte[]? boneIndices = mesh is FrameObjectModel skinned
-                ? ResolveBoneRemap(skinned, parts, decoded)
-                : null;
+            var skin = SkinOf(mesh, decoded, parts);
 
             return new MeshData
             {
@@ -564,9 +563,11 @@ public static class SdsMeshLoader
                 Parts = parts,
                 Instances = instances,
                 InstanceDrawDistances = drawDistances,
-                BoneIndices = boneIndices,
-                BoneWeights = boneIndices != null ? decoded.BoneWeights : null,
-                Skeleton = boneIndices != null && mesh is FrameObjectModel m ? TryReadSkeletonBones(m) : null,
+                BoneIndices = skin.Indices,
+                BoneWeights = skin.Weights,
+                Skeleton = skin.Rig,
+                // The document's OWN array, so a bone moved anywhere is seen here without being announced.
+                LiveRest = skin.LiveRest,
             };
         }
         catch
@@ -588,7 +589,7 @@ public static class SdsMeshLoader
     /// Null when there is nothing to resolve, or when the blend info does not line up with the mesh — a
     /// half-remapped skin would put triangles on the wrong bones, which is worse than not skinning at all.
     /// </summary>
-    private static byte[]? ResolveBoneRemap(FrameObjectModel model, MeshPart[] parts, DecodedMesh decoded)
+    internal static byte[]? ResolveBoneRemap(FrameObjectModel model, MeshPart[] parts, DecodedMesh decoded)
     {
         if (decoded.BoneIndices is not { } ids || decoded.BoneWeights == null) return null;
 
@@ -639,6 +640,70 @@ public static class SdsMeshLoader
         return resolved;
     }
 
+    /// <summary>
+    /// The four fields that make a <see cref="MeshData"/> skinned, for a frame that is a skinned model —
+    /// resolved bone ids, their weights, the rig, and the LIVE rest-transform array the renderer reads every
+    /// frame. All null for anything else.
+    /// <para>
+    /// Shared because forgetting it is not hypothetical: a mesh rebuilt after a Blender push once came back
+    /// without any of it, and a body that quietly stops being skinned looks exactly like a bone that moves
+    /// while the geometry stays put — through the gizmo, through undo and through every later push, for the
+    /// rest of the session.
+    /// </para>
+    /// </summary>
+    /// <summary>The model's rig, without its attachment list — what a rebuilt mesh needs to stay skinned.</summary>
+    internal static SkeletonData? RigOf(FrameObjectModel model) => TryReadSkeletonBones(model);
+
+    internal static (byte[]? Indices, float[]? Weights, SkeletonData? Rig, IReadOnlyList<Matrix4x4>? LiveRest)
+        SkinOf(FrameObjectSingleMesh mesh, DecodedMesh decoded, MeshPart[] parts)
+    {
+        if (mesh is not FrameObjectModel model) return (null, null, null, null);
+        byte[]? indices = ResolveBoneRemap(model, parts, decoded);
+        if (indices == null) return (null, null, null, null);
+        return (indices, decoded.BoneWeights, TryReadSkeletonBones(model), model.RestTransform);
+    }
+
+    /// <summary>
+    /// The pose the geometry was skinned in, from the skeleton's own table. Measured on the corpus
+    /// (<c>--probe-skinning</c>): <c>WorldTransforms[i]</c> is the inverse of bone i's rest transform, on 82
+    /// of 83 bones — and unlike the rest table, the editor never rewrites it, which is exactly why it is the
+    /// one to read. Falls back to inverting the rest for a bone the table does not cover.
+    /// </summary>
+    private static Matrix4x4[] InverseBindOf(FrameObjectModel model, int count)
+    {
+        Matrix4x4[] table;
+        try { table = model.GetSkeletonObject().WorldTransforms ?? []; }
+        catch (Exception) { table = []; }
+
+        Matrix4x4[] rest = model.RestTransform ?? [];
+        var result = new Matrix4x4[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (i < table.Length && Affine(table[i]) is { } bind && bind.GetDeterminant() != 0)
+            {
+                result[i] = bind;
+            }
+            else
+            {
+                result[i] = i < rest.Length && Matrix4x4.Invert(Affine(rest[i]), out Matrix4x4 inverse)
+                    ? inverse
+                    : Matrix4x4.Identity;
+            }
+        }
+        return result;
+    }
+
+    // A frame matrix rides as 4x3: its fourth column is not (0,0,0,1) until it is put there, and until then
+    // it neither inverts nor multiplies correctly.
+    private static Matrix4x4 Affine(Matrix4x4 m)
+    {
+        m.M14 = 0;
+        m.M24 = 0;
+        m.M34 = 0;
+        m.M44 = 1;
+        return m;
+    }
+
     /// <summary>The rig a skinned mesh is bound to, without the attachment list — geometry does not need it,
     /// and building it here would duplicate work the scene tree already does.</summary>
     private static SkeletonData? TryReadSkeletonBones(FrameObjectModel model)
@@ -665,6 +730,7 @@ public static class SdsMeshLoader
                 Bones = bones,
                 World = model.WorldTransform,
                 Attachments = [],
+                InverseBind = InverseBindOf(model, count),
             };
         }
         catch (Exception)

@@ -86,6 +86,17 @@ public sealed unsafe class GpuMesh : IDisposable
     /// palette entry is <c>BindInverse[i] * currentRest[i]</c> and nothing else.</summary>
     public Matrix4x4[]? BindInverse;
 
+    /// <summary>The rig's rest transforms as the document holds them (see <see cref="MeshData.LiveRest"/>) —
+    /// read at draw time so a moved bone needs no notification to show up.</summary>
+    public IReadOnlyList<Matrix4x4>? LiveRest;
+
+    /// <summary>Recomputes the palette from the live rest transforms. Called once per draw; a no-op for a
+    /// mesh with no skin or no live source.</summary>
+    public void RefreshPose()
+    {
+        if (LiveRest is { } rest) SetPose(rest);
+    }
+
     /// <summary>True when the mesh has everything a skinned draw needs.</summary>
     public bool IsSkinned => SkinBuffer.Handle != null;
 
@@ -232,15 +243,28 @@ public sealed unsafe class GpuMesh : IDisposable
                 result.SkinBuffer = GpuBuffers.CreateImmutable(
                     gpu, pSkin, (uint)(n * sizeof(SkinVertex)), BindFlag.VertexBuffer);
 
-            // The bind pose. A frame matrix arrives with a fourth column that is not (0,0,0,1), so it has to be
-            // made affine before it will invert at all — see --probe-skinning.
+            // The bind pose comes from the rig's OWN table, not from inverting the current rest transforms.
+            // The rest table is the live pose and the editor rewrites it: derive the bind from it and, after
+            // any reload, the two agree again, the skinning matrix comes out as the identity and the model
+            // snaps back to the shape it was authored in — a bone that moved with geometry that did not.
             var bindInverse = new Matrix4x4[mesh.Skeleton.Bones.Count];
+            IReadOnlyList<Matrix4x4> table = mesh.Skeleton.InverseBind;
             for (int i = 0; i < bindInverse.Length; i++)
             {
+                if (i < table.Count)
+                {
+                    bindInverse[i] = table[i];
+                    continue;
+                }
                 Matrix4x4 rest = Affine(mesh.Skeleton.Bones[i].Rest);
                 bindInverse[i] = Matrix4x4.Invert(rest, out Matrix4x4 inverse) ? inverse : Matrix4x4.Identity;
             }
             result.BindInverse = bindInverse;
+            result.LiveRest = mesh.LiveRest;
+            // Start in the pose the rest transforms describe rather than at the identity. For a file nobody
+            // has edited the two are the same thing; for one saved with a bone moved they are not, and the
+            // identity would draw the model in its authored shape while the game draws it moved.
+            result.SetPose(mesh.LiveRest ?? [.. mesh.Skeleton.Bones.Select(b => b.Rest)]);
         }
 
         return result;

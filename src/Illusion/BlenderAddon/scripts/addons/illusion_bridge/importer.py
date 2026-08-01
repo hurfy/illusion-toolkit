@@ -14,6 +14,9 @@ COLLECTION_NAME = "Illusion Bridge"
 ID_PROP = "illusion_id"
 SESSION_PROP = "illusion_session"
 KIND_PROP = "illusion_kind"
+# Bone names in the toolkit's index order, on the armature object. Blender's own bone collection is not
+# in creation order and renames collisions, so this is the only thing a bone INDEX may be resolved through.
+BONES_PROP = "illusion_bones"
 
 
 def handle_load_scene(client, msg):
@@ -26,9 +29,25 @@ def handle_load_scene(client, msg):
 
     built = []
     warnings = []
+    # Rigs first: a skinned mesh needs its armature to exist before it can be bound to it.
+    armatures = {}
+    for desc in header.get("objects", []):
+        if desc.get("kind") != "skeleton":
+            continue
+        try:
+            arm = _build_armature(desc, header, blocks, session)
+        except Exception as exc:
+            warnings.append(f"Failed to build rig '{desc.get('id', '')}': {exc}")
+            continue
+        collection.objects.link(arm)
+        armatures[desc.get("id", "")] = arm
+        built.append(desc.get("id", ""))
+
     for desc in header.get("objects", []):
         obj_id = desc.get("id", "")
         kind = desc.get("kind", "")
+        if kind == "skeleton":
+            continue
         if kind not in ("mesh", "collision"):
             warnings.append(f"Skipped object '{obj_id}': unknown kind '{kind}'.")
             continue
@@ -38,6 +57,7 @@ def handle_load_scene(client, msg):
             warnings.append(f"Failed to build object '{obj_id}': {exc}")
             continue
         collection.objects.link(obj)
+        _bind_skin(obj, desc, header, blocks, armatures, warnings)
         built.append(obj_id)
 
     server.state["scene_loaded"] = True
@@ -131,6 +151,126 @@ def _build_mesh_object(desc, header, blocks, session, warnings):
     return obj
 
 
+def _to_blender_matrix(values):
+    """16 floats row-major in the toolkit's row-vector convention → Blender's column-vector Matrix."""
+    return Matrix((values[0:4], values[4:8], values[8:12], values[12:16])).transposed()
+
+
+def _build_armature(desc, header, blocks, session):
+    """Build one armature from a kind='skeleton' object.
+
+    Rest transforms are MODEL space, not relative to the parent bone, so every bone is placed
+    absolutely and the parent link is set without connecting (a Mafia rig is not a chain of
+    lengths — a car's doorFL sits on its hinge, nowhere near its parent's tip).
+    """
+    arrays = payload.get_object_arrays(header, blocks, desc)
+    parents = arrays.get("boneParents")
+    rest = arrays.get("boneRest")
+    if parents is None or rest is None:
+        raise ValueError("missing 'boneParents' or 'boneRest' array")
+
+    meta = desc.get("meta") or {}
+    names = list(meta.get("boneNames") or [])
+    count = min(len(parents), len(rest), len(names) if names else len(parents))
+    if not names:
+        names = [f"bone{i}" for i in range(count)]
+
+    name = desc.get("name") or "Rig"
+    armature = bpy.data.armatures.new(name)
+    obj = bpy.data.objects.new(name, armature)
+    obj[ID_PROP] = desc.get("id", "")
+    obj[SESSION_PROP] = session
+    obj[KIND_PROP] = "skeleton"
+
+    # Edit bones only exist while the armature is in edit mode, and that needs the object in a
+    # collection and active — so link it first and unlink nothing afterwards.
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    created = []
+    try:
+        edit = []
+        for i in range(count):
+            bone = armature.edit_bones.new(names[i])
+            m = _to_blender_matrix(rest[i].tolist() if hasattr(rest[i], "tolist") else list(rest[i]))
+            # A bone needs a non-zero length to survive; the direction is the rest basis' Y axis and
+            # the length is arbitrary — the matrix is what carries the pose.
+            bone.head = (0.0, 0.0, 0.0)
+            bone.tail = (0.0, 0.1, 0.0)
+            bone.matrix = m
+            edit.append(bone)
+            # The name Blender ACTUALLY gave it: new() uniquifies a name that collides, and a rig with
+            # two bones of one name is not hypothetical.
+            created.append(bone.name)
+        for i in range(count):
+            p = int(parents[i])
+            if 0 <= p < count and p != i:
+                edit[i].parent = edit[p]
+                edit[i].use_connect = False
+    finally:
+        bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.scene.collection.objects.unlink(obj)
+
+    # The toolkit's bone ORDER, kept explicitly. armature.data.bones is not in creation order — Blender
+    # keeps its own — so indexing it by a payload bone index binds vertices to the wrong bones, which
+    # looks like dragging a door and watching the headlights move.
+    obj[BONES_PROP] = json.dumps(created)
+
+    world = desc.get("world")
+    if isinstance(world, (list, tuple)) and len(world) == 16:
+        obj.matrix_world = _to_blender_matrix(world)
+    return obj
+
+
+def _bind_skin(obj, desc, header, blocks, armatures, warnings):
+    """Turn a mesh's bone influences into vertex groups and bind it to its armature."""
+    meta = desc.get("meta") or {}
+    rig_id = meta.get("skeletonId")
+    if not rig_id:
+        return
+    armature = armatures.get(rig_id)
+    if armature is None:
+        warnings.append(f"Object '{desc.get('id', '')}': its rig '{rig_id}' is not in this scene.")
+        return
+
+    arrays = payload.get_object_arrays(header, blocks, desc)
+    indices = arrays.get("boneIndices")
+    weights = arrays.get("boneWeights")
+    if indices is None or weights is None:
+        return
+
+    # Bone names in the TOOLKIT's index order (see BONES_PROP), never armature.data.bones' own order.
+    try:
+        bone_names = json.loads(armature.get(BONES_PROP) or "[]")
+    except Exception:
+        bone_names = []
+    if not bone_names:
+        warnings.append(f"Object '{desc.get('id', '')}': its rig has no bone order; skin not bound.")
+        return
+
+    groups = {}
+    for v in range(min(len(indices), len(weights))):
+        for k in range(4):
+            w = float(weights[v][k])
+            if w <= 0.0:
+                continue
+            b = int(indices[v][k])
+            if b >= len(bone_names):
+                continue
+            group = groups.get(b)
+            if group is None:
+                group = groups[b] = obj.vertex_groups.new(name=bone_names[b])
+            group.add((v,), w, 'REPLACE')
+
+    obj.parent = armature
+    modifier = obj.modifiers.new(name="Illusion Rig", type='ARMATURE')
+    modifier.object = armature
+    modifier.use_vertex_groups = True
+    # Envelopes deform by PROXIMITY, ignoring the weights entirely — with them on, moving a door drags
+    # whatever body geometry happens to be near it. The game's skin is the four weights and nothing else.
+    modifier.use_bone_envelopes = False
+
+
 def handle_clear_scene():
     """The toolkit ended the edit session — despawn the bridge objects; Blender stays up."""
     _clear_previous()
@@ -149,12 +289,15 @@ def _ensure_collection():
 
 
 def _clear_previous():
-    """Remove every object a previous bridge load created, plus its mesh data."""
+    """Remove every object a previous bridge load created, plus its mesh or armature data."""
     for obj in [o for o in bpy.data.objects if ID_PROP in o]:
         mesh = obj.data if obj.type == 'MESH' else None
+        armature = obj.data if obj.type == 'ARMATURE' else None
         bpy.data.objects.remove(obj, do_unlink=True)
         if mesh is not None and mesh.users == 0:
             bpy.data.meshes.remove(mesh)
+        if armature is not None and armature.users == 0:
+            bpy.data.armatures.remove(armature)
 
 
 def _frame_view():

@@ -23,6 +23,18 @@ public sealed class SkeletonData
 
     /// <summary>The frames hanging off these bones, in the file's own order. Empty for a rig that carries none.</summary>
     public required IReadOnlyList<BoneAttachment> Attachments { get; init; }
+
+    /// <summary>
+    /// The inverse BIND pose, one matrix per bone — the pose the geometry was authored in, read from the
+    /// skeleton's own table rather than derived from <see cref="BoneData.Rest"/>.
+    /// <para>
+    /// The difference matters the moment a bone is moved. The rest transforms are the CURRENT pose and the
+    /// editor rewrites them; deriving the bind from them means that after a reload the two agree again, the
+    /// skinning matrix comes out as the identity, and the model snaps back to the shape it was authored in —
+    /// a bone that visibly moved with geometry that did not. Empty when the archive carries no such table.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<Matrix4x4> InverseBind { get; init; } = [];
 }
 
 /// <summary>

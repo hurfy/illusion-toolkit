@@ -90,12 +90,56 @@ public sealed class BoneNodeAdapter : IFrameNode, IPropertySource
                 }
             }
 
+            // The rig's pose is stored TWICE: once model-space in the rest table and once relative to the
+            // parent in the skeleton's joint transforms. Writing only the first leaves the file
+            // self-contradictory — and the game reads the second, which is why a bone moved in the editor
+            // changed nothing once the archive was packed.
+            SyncJointTransform(_index);
+            foreach (int child in descendants) SyncJointTransform(child);
+
             // Everything attached to a joint that moved derives its world from that joint, so it only has to
             // be asked again — which is what refreshing the attached frames does.
             foreach (FrameObjectModel.AttachmentReference a in _model.AttachmentReferences ?? [])
             {
                 if (a.JointIndex == _index || descendants.Contains(a.JointIndex)) a.Attachment?.SetWorldTransform();
             }
+        }
+    }
+
+    /// <summary>
+    /// Rewrites one bone's joint transform from the rest table it must agree with. Measured on the corpus
+    /// (<c>--probe-skinning</c>): <c>JointTransforms[i]</c> is bone i's rest expressed against its parent's,
+    /// on 82 of 82 bones that have a parent. The INVERSE-BIND tables — the skeleton's world transforms and
+    /// the blend info's bone matrices — are deliberately left alone: they describe the pose the mesh was
+    /// skinned in, and moving them with the pose would cancel the motion exactly.
+    /// </summary>
+    private void SyncJointTransform(int bone)
+    {
+        Matrix4x4[] rest = Rest;
+        if (bone < 0 || bone >= rest.Length) return;
+
+        Matrix4x4[] joints;
+        byte[] parents;
+        try
+        {
+            joints = _model.GetSkeletonObject().JointTransforms ?? [];
+            parents = _model.GetSkeletonHierarchyObject().ParentIndices ?? [];
+        }
+        catch (Exception)
+        {
+            return;
+        }
+        if (bone >= joints.Length) return;
+
+        int parent = bone < parents.Length ? parents[bone] : -1;
+        if (parent == bone || parent < 0 || parent >= rest.Length)
+        {
+            joints[bone] = Affine(rest[bone]); // a root's joint transform is its rest, there is nothing above it
+            return;
+        }
+        if (Matrix4x4.Invert(Affine(rest[parent]), out Matrix4x4 inverse))
+        {
+            joints[bone] = Affine(rest[bone]) * inverse;
         }
     }
 

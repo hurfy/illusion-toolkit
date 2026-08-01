@@ -5,6 +5,7 @@ using Illusion.Bridge.Geometry;
 using Illusion.Bridge.Payload;
 using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.Frames.Resources;
 using Illusion.Formats.Geometry;
 using Illusion.Formats.Mathematics;
 
@@ -48,7 +49,6 @@ public static class BridgeMeshApplier
         internal BoundingBox OldMaterialBounds;
         internal Vector3 OldDecompressionOffset;
         internal float OldDecompressionFactor;
-        internal Vector3 NewDecompressionOffset;
 
         /// <summary>Pre-push packed vertex bytes (diagnostics/probes; also the undo payload).</summary>
         public byte[] OldVertexData { get; internal set; } = null!;
@@ -59,10 +59,18 @@ public static class BridgeMeshApplier
         /// <summary>The quantization scale after the push (same as before unless <see cref="Requantized"/>).</summary>
         public float NewDecompressionFactor { get; internal set; }
 
+        /// <summary>The quantization origin after the push — with the scale, what
+        /// <see cref="NewVertexData"/> has to be decoded against.</summary>
+        public Vector3 NewDecompressionOffset { get; internal set; }
+
         /// <summary>Fresh render-ready mesh (null when <see cref="Unchanged"/>).</summary>
         public MeshData? NewMesh { get; internal set; }
 
         public int TouchedVertices { get; internal set; }
+
+        /// <summary>How many vertices took their bone influences from Blender's vertex groups rather than
+        /// from a donor. Zero when the push carried no weights (an older addon, or a mesh with no rig).</summary>
+        public int SkinFromBlender { get; internal set; }
 
         /// <summary>The whole position range was re-quantized (the edit outgrew the old AABB).</summary>
         public bool Requantized { get; internal set; }
@@ -134,9 +142,12 @@ public static class BridgeMeshApplier
     public static ApplyResult? TryApplyCountPreserving(IFrameNode node, MeshObjectPayload payload, out string? skipReason)
     {
         skipReason = null;
+        // A skinned model is accepted HERE and only here: this path keeps the vertex count, so every vertex
+        // has a donor to take its four bone influences from and the skin survives untouched. The rebuild
+        // path below cannot say the same.
         if (node is not FrameNodeAdapter adapter
             || adapter.Frame is not FrameObjectSingleMesh frame
-            || frame.GetType() != typeof(FrameObjectSingleMesh))
+            || (frame.GetType() != typeof(FrameObjectSingleMesh) && frame is not FrameObjectModel))
         {
             skipReason = "unsupported object";
             return null;
@@ -198,6 +209,49 @@ public static class BridgeMeshApplier
             vertices[i].Position = newPositions[i];
             vertices[i].Normal = newNormals[i];
             vertices[i].UVs[0] = new Half2(newUvs[i].X, newUvs[i].Y);
+        }
+
+        // Re-weighting without touching a single vertex position comes through HERE, and ignoring the
+        // vertex groups on this path would leave the same silence that made a hood panel ride the door.
+        int fromBlender = 0;
+        byte[]? reweighted = null;
+        if (frame is FrameObjectModel weighted
+            && decoded.Declaration.HasFlag(VertexFlags.Skin)
+            && payload.BoneIndices is { } pushedIds && payload.BoneWeights is { } pushedWeights
+            && pushedIds.Length >= payload.Positions.Length * 4
+            && pushedWeights.Length >= payload.Positions.Length * 4
+            && BoneCountOf(weighted) is int rigBones and > 0)
+        {
+            MaterialStruct[] mats = frame.Material.Materials[0];
+            byte[]? currentGlobal = SdsMeshLoader.ResolveBoneRemap(
+                weighted, SdsMeshLoader.BuildParts(weighted, decoded.Indices.Length), decoded);
+            if (currentGlobal != null)
+            {
+                var global = new byte[decoded.NumVerts * 4];
+                Array.Copy(currentGlobal, global, Math.Min(currentGlobal.Length, global.Length));
+                for (int i = 0; i < decoded.NumVerts; i++)
+                {
+                    if (!resplit.Seen[i]) continue;
+                    if (TakePushedSkin(pushedIds, pushedWeights, resplit.Welded[i], rigBones,
+                            vertices[i], global, i))
+                    {
+                        fromBlender++;
+                    }
+                }
+                // Back into the model's own pools. The material set did not change on this path, so this
+                // only re-localizes the ids — but a weight moved onto a bone the pool cannot name has to
+                // be refused rather than written as whatever sits at that offset.
+                if (fromBlender > 0)
+                {
+                    if (!RemapBlendInfo(weighted, vertices, global, decoded.Indices, mats, mats,
+                            out string? weightReason))
+                    {
+                        skipReason = weightReason;
+                        return null;
+                    }
+                    reweighted = global;
+                }
+            }
         }
         byte[] candidate = VertexCompressor.CompressBuffer(
             original, vertices, decoded.Declaration,
@@ -279,6 +333,7 @@ public static class BridgeMeshApplier
             NewDecompressionOffset = newOffset,
             NewDecompressionFactor = newFactor,
             TouchedVertices = touchedCount,
+            SkinFromBlender = fromBlender,
             Requantized = requantize,
         };
 
@@ -294,6 +349,23 @@ public static class BridgeMeshApplier
                 binormals[i] = touched[i] ? regenB![i] : decoded.Binormals![i];
             }
         }
+        // The replacement mesh must stay SKINNED. A count-preserving reshape does not touch a vertex's
+        // influences, but the mesh handed to the renderer is built from scratch — and one built without them
+        // is uploaded without a skin buffer, after which the body silently stops following its bones for the
+        // rest of the session while the rig still moves.
+        MeshPart[] countParts = SdsMeshLoader.BuildParts(frame, decoded.Indices.Length);
+        var countSkin = SdsMeshLoader.SkinOf(frame, decoded, countParts);
+        byte[]? countIds = countSkin.Indices;
+        float[]? countWeights = countSkin.Weights;
+        if (reweighted != null)
+        {
+            // The renderer has to see what Blender said, not what is still on the wire — the wire bytes are
+            // only replaced when the caller commits, and reading them here would show the OLD binding.
+            countIds = reweighted;
+            countWeights = new float[decoded.NumVerts * 4];
+            for (int i = 0; i < decoded.NumVerts; i++)
+                for (int k = 0; k < 4; k++) countWeights[(i * 4) + k] = vertices[i].BoneWeights[k];
+        }
         result.NewMesh = new MeshData
         {
             Name = frame.Name?.ToString() ?? "mesh",
@@ -304,7 +376,11 @@ public static class BridgeMeshApplier
             Tangents = tangents,
             Binormals = binormals,
             Indices = decoded.Indices,
-            Parts = SdsMeshLoader.BuildParts(frame, decoded.Indices.Length),
+            Parts = countParts,
+            BoneIndices = countIds,
+            BoneWeights = countWeights,
+            Skeleton = countSkin.Rig,
+            LiveRest = countSkin.LiveRest,
         };
         return result;
     }
@@ -320,9 +396,12 @@ public static class BridgeMeshApplier
     private static ApplyResult? TryApplyRebuild(IFrameNode node, MeshObjectPayload payload, out string? skipReason)
     {
         skipReason = null;
+        // A skinned model may be re-topologised: below, its remap pools AND its per-bone face ranges
+        // (BlendMeshSplits) are rebuilt from the geometry that came back. Leaving either stale is what
+        // smeared a repacked car across the horizon.
         if (node is not FrameNodeAdapter adapter
             || adapter.Frame is not FrameObjectSingleMesh frame
-            || frame.GetType() != typeof(FrameObjectSingleMesh))
+            || (frame.GetType() != typeof(FrameObjectSingleMesh) && frame is not FrameObjectModel))
         {
             skipReason = "unsupported object";
             return null;
@@ -406,6 +485,8 @@ public static class BridgeMeshApplier
         var normals = new List<Vector3>();
         var uvs = new List<Vector2>();
         var donors = new List<int>();
+        // Which WELDED vertex each split vertex came from — the row the pushed skin is indexed by.
+        var welds = new List<int>();
         var loopSplit = new int[loops];
         for (int i = 0; i < loops; i++)
         {
@@ -428,6 +509,7 @@ public static class BridgeMeshApplier
                 normals.Add(normal);
                 uvs.Add(uv);
                 donors.Add(orig);
+                welds.Add((int)welded);
             }
             loopSplit[i] = split;
         }
@@ -506,6 +588,30 @@ public static class BridgeMeshApplier
             decoded.RawVertexData, decoded.NumVerts, decoded.Declaration,
             decoded.DecompressionOffset, decoded.DecompressionFactor);
 
+        bool isSkinned = decoded.Declaration.HasFlag(VertexFlags.Skin);
+        // The donors' bone ids as they sit in the buffer are POOL-LOCAL — an index into whichever remap pool
+        // the face group they were drawn in uses. Resolving them to the model's own bone list gives a reading
+        // that survives regrouping, which is what the renderer and the face-range rebuild below both need.
+        // The ids written back to the FILE stay the donors' own, re-localized against the pool of whichever
+        // group ends up drawing them.
+        byte[]? globalIds = isSkinned && frame is FrameObjectModel skinnedModel
+            ? SdsMeshLoader.ResolveBoneRemap(
+                skinnedModel, SdsMeshLoader.BuildParts(skinnedModel, decoded.Indices.Length), decoded)
+            : null;
+        byte[]? newGlobal = globalIds != null ? new byte[newCount * 4] : null;
+
+        // The skin Blender is sending back, if it sent one: four influences per WELDED vertex, naming bones
+        // of the model's own list. This is what a vertex group means — assign a new part to the hood and it
+        // must ride the hood, not whatever bone the nearest old vertex happened to use.
+        int rigBones = frame is FrameObjectModel boned ? BoneCountOf(boned) : 0;
+        byte[]? pushedIds = payload.BoneIndices;
+        float[]? pushedWeights = payload.BoneWeights;
+        bool pushedSkin = isSkinned && rigBones > 0
+            && pushedIds != null && pushedWeights != null
+            && pushedIds.Length >= payload.Positions.Length * 4
+            && pushedWeights.Length >= payload.Positions.Length * 4;
+        int fromBlender = 0;
+
         var outVerts = new Vertex[newCount];
         var baseData = new byte[newCount * stride];
         int touched = 0;
@@ -534,6 +640,7 @@ public static class BridgeMeshApplier
                 donorVert.UVs.CopyTo(vert.UVs, 0);
                 donorVert.BoneWeights.CopyTo(vert.BoneWeights, 0);
                 donorVert.BoneIDs.CopyTo(vert.BoneIDs, 0);
+                CopyGlobalBones(globalIds, donor, newGlobal, v);
                 donorVert.Color0.CopyTo(vert.Color0, 0);
                 donorVert.Color1.CopyTo(vert.Color1, 0);
                 vert.UVs[0] = new Half2(newUvs[v].X, newUvs[v].Y);
@@ -555,6 +662,26 @@ public static class BridgeMeshApplier
                     Binormal = hasTangent ? regenB![v] : Vector3.Zero,
                 };
                 vert.UVs[0] = new Half2(newUvs[v].X, newUvs[v].Y);
+
+                // On a SKINNED mesh a vertex with no influences is not merely unshaded — it collapses
+                // onto the first bone, which on a car drags the new geometry to the model's origin. A
+                // vertex Blender added has no donor to inherit from, so it takes the skin of the
+                // nearest source vertex, which is the only answer that keeps it attached to the part it
+                // was modelled on. Its DAMAGE GROUP comes from there too: the channel is what says which
+                // panel a vertex crumples with (measured on shubert_38 by --probe-damage — 39 groups, each
+                // one a panel and its deform_ bone), and no group at all is not one of the answers.
+                if (isSkinned)
+                {
+                    int near = NearestSourceVertex(decoded.Positions, newPositions[v]);
+                    if (near >= 0)
+                    {
+                        donorAll[near].BoneWeights.CopyTo(vert.BoneWeights, 0);
+                        donorAll[near].BoneIDs.CopyTo(vert.BoneIDs, 0);
+                        CopyGlobalBones(globalIds, near, newGlobal, v);
+                        vert.DamageGroup = donorAll[near].DamageGroup;
+                        vert.BBCoeffs = donorAll[near].BBCoeffs;
+                    }
+                }
                 touched++;
                 if (hasTangent)
                 {
@@ -562,8 +689,45 @@ public static class BridgeMeshApplier
                     meshBinormals![v] = vert.Binormal;
                 }
             }
+            // Blender's own weights win wherever it has them. A vertex group is an INSTRUCTION — the part
+            // the modeller says this vertex belongs to — while the donor and nearest-vertex fills are only
+            // guesses at one, and a guess is what put a new hood panel on the left door.
+            if (pushedSkin && TakePushedSkin(pushedIds!, pushedWeights!, welds[v], rigBones, vert, newGlobal, v))
+                fromBlender++;
+
             outVerts[v] = vert;
         }
+
+        // The skin's own bookkeeping, all of it driven by the GLOBAL reading collected above.
+        byte[]? renderIds = null;
+        float[]? renderWeights = null;
+        SkeletonData? renderRig = null;
+        if (newGlobal != null && frame is FrameObjectModel rebuiltModel)
+        {
+            if (!RebuildMeshSplits(rebuiltModel, outVerts, newGlobal, newIndexData, newMats,
+                    decoded.Indices, donors, out string? splitReason))
+            {
+                skipReason = splitReason;
+                return null;
+            }
+
+            // What the RENDERER gets — it addresses the model's own bone list, not a remap pool. Without it
+            // the replacement mesh uploads unskinned and the body stops following its bones for the rest of
+            // the session.
+            renderIds = newGlobal;
+            renderWeights = new float[outVerts.Length * 4];
+            for (int v = 0; v < outVerts.Length; v++)
+                for (int k = 0; k < 4; k++) renderWeights[(v * 4) + k] = outVerts[v].BoneWeights[k];
+            renderRig = SdsMeshLoader.RigOf(rebuiltModel);
+
+            if (!RemapBlendInfo(rebuiltModel, outVerts, newGlobal, newIndexData, newMats, existingMats,
+                    out string? blendReason))
+            {
+                skipReason = blendReason;
+                return null;
+            }
+        }
+
         byte[] newData = VertexCompressor.CompressBuffer(
             baseData, outVerts, decoded.Declaration, newOffset, newFactor);
 
@@ -605,6 +769,7 @@ public static class BridgeMeshApplier
             NewDecompressionOffset = newOffset,
             NewDecompressionFactor = newFactor,
             TouchedVertices = touched,
+            SkinFromBlender = fromBlender,
             Requantized = requantize,
             Rebuild = new RebuildData
             {
@@ -641,6 +806,11 @@ public static class BridgeMeshApplier
             Binormals = meshBinormals,
             Indices = newIndexData,
             Parts = parts,
+            // Captured above, before the ids were localized into the remap pool.
+            BoneIndices = renderIds,
+            BoneWeights = renderWeights,
+            Skeleton = renderRig,
+            LiveRest = frame is FrameObjectModel posed ? posed.RestTransform : null,
         };
         return result;
     }
@@ -675,8 +845,11 @@ public static class BridgeMeshApplier
     private static bool FaceSetMatches(DecodedMesh decoded, MeshObjectPayload payload, out string? reason)
     {
         reason = null;
+        // The SAME weld the export used, skin key included — a weld that splits differently here would
+        // report a topology change on a mesh nobody touched.
         WeldedMesh exported = WeldMapBuilder.Build(
-            BridgeMeshExporter.BuildWeldKeys(decoded), decoded.Positions, decoded.Normals, null, decoded.Indices);
+            BridgeMeshExporter.BuildWeldKeys(decoded), decoded.Positions, decoded.Normals, null,
+            decoded.Indices, BridgeMeshExporter.BuildSkinKeys(decoded));
 
         if (payload.LoopOrigIndex.Length != exported.LoopOrigIndex.Length)
         {
@@ -756,6 +929,397 @@ public static class BridgeMeshApplier
         if (b > c) (b, c) = (c, b);
         if (a > b) (a, b) = (b, a);
         return (a, b, c);
+    }
+
+    // Records a source vertex's GLOBAL bone ids against the new vertex that inherited from it. Kept beside the
+    // vertices rather than on them: the ids the FILE wants are the donor's own pool-local ones, and overwriting
+    // those with a global reading is what put a repacked car's bones out of range. No-op for an unskinned mesh.
+    private static void CopyGlobalBones(byte[]? globalIds, int source, byte[]? into, int target)
+    {
+        if (globalIds == null || into == null || source < 0
+            || ((source * 4) + 3) >= globalIds.Length || ((target * 4) + 3) >= into.Length)
+        {
+            return;
+        }
+        for (int k = 0; k < 4; k++) into[(target * 4) + k] = globalIds[(source * 4) + k];
+    }
+
+    /// <summary>
+    /// Rewrites a re-topologised skinned model's BlendMeshSplits — per bone, per material, the ranges of
+    /// faces the game deforms as one piece. Stale ranges are what smear a repacked car across the horizon:
+    /// they name faces the mesh no longer has.
+    /// <para>
+    /// Measured on the shipped cars (<c>--probe-skinning</c>): a split is a BONE (BlendIndex is its index),
+    /// a burst's StartIndex is an index-buffer offset and NumFaces a triangle count, and the ranges of all
+    /// splits together partition the triangle list — on shubert_38 exactly, on ascot_baileys200_pha not
+    /// quite, so nothing here relies on being handed a clean partition.
+    /// </para>
+    /// <para>
+    /// The splits and their PIECES are kept exactly as they ship — each piece carries a hit box (the core
+    /// reads one per piece) whose quantization is not understood, and the pieces are the units the damage
+    /// system deforms. Only the face RANGES move, and a face keeps the piece it already belonged to: it is
+    /// matched to the original triangle it came from through its donor vertices. A face the mesh did not have
+    /// before has no such answer and falls back to the bone carrying most of its weight, first piece.
+    /// </para>
+    /// </summary>
+    private static bool RebuildMeshSplits(
+        FrameObjectModel model, Vertex[] vertices, byte[] globalOf, uint[] indices, MaterialStruct[] mats,
+        uint[] oldIndices, IReadOnlyList<int> donors, out string? reason)
+    {
+        reason = null;
+        FrameObjectModel.WeightedByMeshSplit[] splits = model.BlendMeshSplits ?? [];
+        if (splits.Length == 0) return true; // nothing to keep in step
+
+        // Which split (if any) speaks for each bone.
+        var splitOfBone = new Dictionary<int, int>(splits.Length);
+        for (int s = 0; s < splits.Length; s++) splitOfBone.TryAdd(splits[s].BlendIndex, s);
+
+        // The piece each ORIGINAL face sat in, read off the shipped table before it is rewritten, plus a way
+        // to find the original face a new one came from (its three donor vertices, in any order).
+        int oldFaces = oldIndices.Length / 3;
+        var oldOwner = new (int Split, int Piece)[oldFaces];
+        Array.Fill(oldOwner, (-1, -1));
+        for (int s = 0; s < splits.Length; s++)
+        {
+            FrameObjectModel.BlendMeshSplitInfo[] pieces = splits[s].Data ?? [];
+            for (int p = 0; p < pieces.Length; p++)
+            {
+                foreach (FrameObjectModel.MiniMaterialBurst burst in pieces[p].Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        int from = range.StartIndex / 3;
+                        for (int f = from; f < from + range.NumFaces && f < oldFaces; f++)
+                            if (oldOwner[f].Split < 0) oldOwner[f] = (s, p);
+                    }
+                }
+            }
+        }
+        var oldOfFace = new Dictionary<(int, int, int), int>(oldFaces);
+        for (int f = 0; f < oldFaces; f++)
+        {
+            oldOfFace.TryAdd(
+                Sort3((int)oldIndices[f * 3], (int)oldIndices[(f * 3) + 1], (int)oldIndices[(f * 3) + 2]), f);
+        }
+
+        // face -> (split, piece, material slot).
+        int faces = mats.Sum(m => m.NumFaces);
+        var owner = new (int Split, int Piece, int Slot)[faces];
+        var weightOfBone = new Dictionary<int, float>(8);
+        for (int slot = 0; slot < mats.Length; slot++)
+        {
+            int first = mats[slot].StartIndex / 3;
+            for (int f = first; f < first + mats[slot].NumFaces && f < faces; f++)
+            {
+                int split = -1, piece = -1;
+
+                // The original triangle this one came from, if it is one the mesh already had.
+                int a = DonorOf(indices, donors, (f * 3) + 0);
+                int b = DonorOf(indices, donors, (f * 3) + 1);
+                int c = DonorOf(indices, donors, (f * 3) + 2);
+                if (a >= 0 && b >= 0 && c >= 0 && oldOfFace.TryGetValue(Sort3(a, b, c), out int wasFace))
+                {
+                    (split, piece) = oldOwner[wasFace];
+                }
+
+                if (split < 0)
+                {
+                    weightOfBone.Clear();
+                    for (int corner = 0; corner < 3; corner++)
+                    {
+                        int at = (f * 3) + corner;
+                        if (at >= indices.Length) continue;
+                        int vertex = (int)indices[at];
+                        if (vertex < 0 || vertex >= vertices.Length) continue;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            float weight = vertices[vertex].BoneWeights[k];
+                            if (weight <= 0f) continue;
+                            int bone = globalOf[(vertex * 4) + k];
+                            weightOfBone[bone] = weightOfBone.GetValueOrDefault(bone) + weight;
+                        }
+                    }
+                    foreach ((int bone, float _) in weightOfBone.OrderByDescending(p => p.Value))
+                    {
+                        if (splitOfBone.TryGetValue(bone, out split)) break;
+                        split = -1;
+                    }
+                    piece = 0;
+                }
+
+                // A face whose bones all lack a split still has to land somewhere: the shipped shubert_38
+                // covers every triangle exactly once, and leaving holes in the table is untested territory.
+                // The first split takes them.
+                if (split < 0) (split, piece) = (0, 0);
+                if (piece < 0 || piece >= (splits[split].Data?.Length ?? 0)) piece = 0;
+                owner[f] = (split, piece, slot);
+            }
+        }
+
+        // Runs of consecutive faces sharing a split, a piece and a slot become one burst.
+        var runs = new Dictionary<(int Split, int Piece, int Slot), List<(int First, int Count)>>();
+        for (int f = 0; f < faces;)
+        {
+            int end = f;
+            while (end + 1 < faces && owner[end + 1] == owner[f]) end++;
+            if (((long)f * 3) + ((end - f + 1) * 3) > ushort.MaxValue)
+            {
+                reason = "the mesh has more triangles than a face range can address (65535 indices)";
+                return false;
+            }
+            if (!runs.TryGetValue(owner[f], out List<(int, int)>? list)) runs[owner[f]] = list = [];
+            list.Add((f, end - f + 1));
+            f = end + 1;
+        }
+
+        // Write them back, piece by piece — a piece with no faces left is emptied rather than left pointing
+        // at triangles that are gone.
+        for (int s = 0; s < splits.Length; s++)
+        {
+            FrameObjectModel.BlendMeshSplitInfo[] pieces = splits[s].Data ?? [];
+            for (int p = 0; p < pieces.Length; p++)
+            {
+                var bursts = new List<FrameObjectModel.MiniMaterialBurst>();
+                for (int slot = 0; slot < mats.Length; slot++)
+                {
+                    if (!runs.TryGetValue((s, p, slot), out List<(int First, int Count)>? list)) continue;
+                    bursts.Add(new FrameObjectModel.MiniMaterialBurst
+                    {
+                        MaterialIndex = (ushort)slot,
+                        Data = [.. list.Select(r => new FrameObjectModel.FacesBurst
+                        {
+                            StartIndex = (ushort)(r.First * 3),
+                            NumFaces = (ushort)r.Count,
+                        })],
+                    });
+                }
+                pieces[p].Data = [.. bursts];
+            }
+        }
+
+        // The stored size of the block we just rewrote. Everything the file holds after it is found by
+        // walking past it, so a size left at the old table's makes the whole model unreadable — the car
+        // stops appearing in game altogether. The formula reproduces the shipped value on 92 of 92 models
+        // (--probe-skinning), which is what makes recomputing it safe rather than a guess.
+        model.RecomputeSplitCounters();
+        return true;
+    }
+
+    /// <summary>
+    /// Re-points a re-topologised skinned model's vertices at the remap pools it already ships with, and says
+    /// which pool each new face group draws from. Returns false with a reason when the pools cannot answer for
+    /// the geometry that came back.
+    /// <para>
+    /// The pools themselves are NOT rebuilt. A car does not put its whole rig in one pool — shubert_38 ships
+    /// 59 bones in pool 0 and 33 in pool 1 for 83 bones total (<c>--probe-skinning</c>) — and replacing that
+    /// with a single pool over every bone is what tore a repacked car apart: a draw can only reach so far into
+    /// the palette, so ids past the end came back as garbage transforms. Keeping the shipped pools also keeps
+    /// the skin channel byte-identical for every vertex that kept its material, which is the common case.
+    /// </para>
+    /// </summary>
+    private static bool RemapBlendInfo(
+        FrameObjectModel model, Vertex[] vertices, byte[] globalOf, uint[] indices,
+        MaterialStruct[] newMats, MaterialStruct[] oldMats, out string? reason)
+    {
+        reason = null;
+        FrameBlendInfo blend;
+        try { blend = model.GetBlendInfoObject(); }
+        catch (Exception) { reason = "the model's blend info cannot be read"; return false; }
+
+        FrameBlendInfo.BoneIndexInfo[] lods = blend.BoneIndexInfos ?? [];
+        if (lods.Length == 0) { reason = "the model carries no remap pools"; return false; }
+        FrameBlendInfo.BoneIndexInfo lod0 = lods[0];
+        byte[] sizes = lod0.BonesPerRemapPool ?? [];
+        byte[] remap = lod0.BoneRemapIDs ?? [];
+        FrameBlendInfo.SkinnedMaterialInfo[] oldGroups = lod0.SkinnedMaterialInfo ?? [];
+
+        // Pool p is a run of sizes[p] ids in the flat remap table.
+        var poolStart = new int[sizes.Length];
+        int poolCount = 0, at = 0;
+        for (int p = 0; p < sizes.Length; p++)
+        {
+            poolStart[p] = at;
+            at += sizes[p];
+            if (sizes[p] > 0) poolCount = p + 1;
+        }
+        if (at > remap.Length) { reason = "the model's remap pools overrun its remap table"; return false; }
+        if (poolCount == 0) { reason = "the model carries no remap pools"; return false; }
+
+        var localOf = new Dictionary<byte, byte>[poolCount];
+        for (int p = 0; p < poolCount; p++)
+        {
+            var map = new Dictionary<byte, byte>(sizes[p]);
+            for (int i = 0; i < sizes[p]; i++) map.TryAdd(remap[poolStart[p] + i], (byte)i);
+            localOf[p] = map;
+        }
+
+        // A slot that kept its material keeps that material's pool — draw order is what ties a face group to
+        // a pool, so the shipped answer is the right one wherever it still applies.
+        var groups = new FrameBlendInfo.SkinnedMaterialInfo[newMats.Length];
+        for (int slot = 0; slot < newMats.Length; slot++)
+        {
+            int was = Array.FindIndex(oldMats, m => m.MaterialHash == newMats[slot].MaterialHash);
+            FrameBlendInfo.SkinnedMaterialInfo donor = was >= 0 && was < oldGroups.Length
+                ? oldGroups[was]
+                : new FrameBlendInfo.SkinnedMaterialInfo { AssignedPoolIndex = 0, NumWeightsPerVertex = 1 };
+            groups[slot] = new FrameBlendInfo.SkinnedMaterialInfo
+            {
+                AssignedPoolIndex = donor.AssignedPoolIndex < poolCount ? donor.AssignedPoolIndex : (byte)0,
+                NumWeightsPerVertex = Math.Clamp(donor.NumWeightsPerVertex, (byte)1, (byte)4),
+            };
+        }
+
+        // Which bones each slot actually draws, and how many influences its heaviest vertex carries.
+        var bonesOfSlot = new HashSet<byte>[newMats.Length];
+        for (int slot = 0; slot < newMats.Length; slot++)
+        {
+            HashSet<byte> set = bonesOfSlot[slot] = [];
+            int influences = 1;
+            int from = newMats[slot].StartIndex;
+            int to = Math.Min(from + (newMats[slot].NumFaces * 3), indices.Length);
+            for (int i = from; i < to; i++)
+            {
+                int v = (int)indices[i];
+                if (v < 0 || v >= vertices.Length) continue;
+                int here = 0;
+                for (int k = 0; k < 4; k++)
+                {
+                    if (vertices[v].BoneWeights[k] <= 0f) continue;
+                    here++;
+                    set.Add(globalOf[(v * 4) + k]);
+                }
+                influences = Math.Max(influences, here);
+            }
+            groups[slot].NumWeightsPerVertex =
+                Math.Clamp(Math.Max(groups[slot].NumWeightsPerVertex, (byte)influences), (byte)1, (byte)4);
+
+            // A slot whose bones its inherited pool cannot name (Blender moved faces between materials, or
+            // the slot is new) takes any pool that can.
+            if (set.All(b => localOf[groups[slot].AssignedPoolIndex].ContainsKey(b))) continue;
+            int fit = -1;
+            for (int p = 0; p < poolCount && fit < 0; p++) if (set.All(b => localOf[p].ContainsKey(b))) fit = p;
+            if (fit < 0)
+            {
+                reason = "the pushed mesh weights a material to bones no single remap pool of the model "
+                    + "covers — move those faces back onto the material they came from";
+                return false;
+            }
+            groups[slot].AssignedPoolIndex = (byte)fit;
+        }
+
+        // A vertex carries one set of ids, so every group drawing it must read them against the same pool.
+        var poolOfVertex = new int[vertices.Length];
+        Array.Fill(poolOfVertex, -1);
+        for (int slot = 0; slot < newMats.Length; slot++)
+        {
+            int pool = groups[slot].AssignedPoolIndex;
+            int from = newMats[slot].StartIndex;
+            int to = Math.Min(from + (newMats[slot].NumFaces * 3), indices.Length);
+            for (int i = from; i < to; i++)
+            {
+                int v = (int)indices[i];
+                if (v < 0 || v >= vertices.Length) continue;
+                if (poolOfVertex[v] >= 0 && poolOfVertex[v] != pool)
+                {
+                    reason = "a vertex is shared by two materials that read their bones from different "
+                        + "pools — split the mesh along that material boundary and push again";
+                    return false;
+                }
+                poolOfVertex[v] = pool;
+            }
+        }
+
+        // Ids back to pool-local. A zero-weight slot keeps the donor's byte: it names nothing, and rewriting
+        // it would move bytes for no reason.
+        for (int v = 0; v < vertices.Length; v++)
+        {
+            int pool = poolOfVertex[v];
+            if (pool < 0) continue; // nothing draws this vertex
+            for (int k = 0; k < 4; k++)
+            {
+                if (vertices[v].BoneWeights[k] <= 0f) continue;
+                if (!localOf[pool].TryGetValue(globalOf[(v * 4) + k], out byte local))
+                {
+                    reason = "a vertex came back weighted to a bone its material's remap pool does not name";
+                    return false;
+                }
+                vertices[v].BoneIDs[k] = local;
+            }
+        }
+
+        // LOD0 only: the other LODs keep their own vertex buffers and the pools that go with them. The pools
+        // and the remap table go back exactly as they came.
+        lods[0] = new FrameBlendInfo.BoneIndexInfo
+        {
+            BonesPerRemapPool = sizes,
+            BoneRemapIDs = remap,
+            SkinnedMaterialInfo = groups,
+        };
+        blend.BoneIndexInfos = lods;
+        return true;
+    }
+
+    /// <summary>How many bones the model's rig has, or 0 when it cannot be read.</summary>
+    private static int BoneCountOf(FrameObjectModel model)
+    {
+        try { return model.GetSkeletonObject().BoneNames?.Length ?? 0; }
+        catch (Exception) { return 0; }
+    }
+
+    /// <summary>
+    /// Puts the influences Blender sent for one welded vertex onto the new vertex, renormalized. False —
+    /// leaving whatever the donor fill worked out — when the vertex is in no group at all, or names a bone
+    /// this model does not have: a partial answer is worse than the guess it would replace.
+    /// </summary>
+    private static bool TakePushedSkin(
+        byte[] ids, float[] weights, int welded, int boneCount, Vertex vert, byte[]? global, int target)
+    {
+        int at = welded * 4;
+        if (welded < 0 || at + 3 >= ids.Length || at + 3 >= weights.Length) return false;
+
+        float total = 0f;
+        for (int k = 0; k < 4; k++)
+        {
+            if (weights[at + k] <= 0f) continue;
+            if (ids[at + k] >= boneCount) return false;
+            total += weights[at + k];
+        }
+        if (total <= 0f) return false;
+
+        for (int k = 0; k < 4; k++)
+        {
+            float weight = weights[at + k];
+            vert.BoneWeights[k] = weight > 0f ? weight / total : 0f;
+            if (global != null) global[(target * 4) + k] = weight > 0f ? ids[at + k] : (byte)0;
+        }
+        return true;
+    }
+
+    /// <summary>The original vertex a new mesh's corner descends from, or -1 when Blender made it up.</summary>
+    private static int DonorOf(uint[] indices, IReadOnlyList<int> donors, int corner)
+    {
+        if (corner < 0 || corner >= indices.Length) return -1;
+        int v = (int)indices[corner];
+        return v >= 0 && v < donors.Count ? donors[v] : -1;
+    }
+
+    /// <summary>Index of the source vertex closest to <paramref name="to"/>, or -1 when there are none.
+    /// Linear: this runs only for vertices Blender ADDED to a skinned mesh, which is a handful next to a
+    /// body's thousands, and a spatial index would be more machinery than the case is worth.</summary>
+    private static int NearestSourceVertex(Vector3[] source, Vector3 to)
+    {
+        int best = -1;
+        float bestDistance = float.MaxValue;
+        for (int i = 0; i < source.Length; i++)
+        {
+            float d = Vector3.DistanceSquared(source[i], to);
+            if (d < bestDistance)
+            {
+                bestDistance = d;
+                best = i;
+            }
+        }
+        return best;
     }
 
     // Same direction within far less than the byte lattice can express (≈0.5°) — covers Blender's

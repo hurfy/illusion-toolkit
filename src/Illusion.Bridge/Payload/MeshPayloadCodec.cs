@@ -54,6 +54,41 @@ public sealed class MeshObjectPayload
     public uint VertexDeclaration { get; set; }
     public Vector3 DecompressionOffset { get; set; }
     public float DecompressionFactor { get; set; }
+
+    /// <summary>
+    /// The skin, when the mesh has one: four bone influences per welded vertex, flattened (vertex i owns
+    /// [4i, 4i+4)). The indices address the bones of <see cref="SkeletonId"/>, in its order. Empty for
+    /// everything that is not a skinned model.
+    /// </summary>
+    public byte[] BoneIndices { get; set; } = Array.Empty<byte>();
+
+    /// <summary>Weights parallel to <see cref="BoneIndices"/>; they sum to one per vertex.</summary>
+    public float[] BoneWeights { get; set; } = Array.Empty<float>();
+
+    /// <summary>Id of the kind="skeleton" object this mesh is skinned to; null when it has no skin.</summary>
+    public string? SkeletonId { get; set; }
+}
+
+/// <summary>
+/// Typed view of one kind="skeleton" object: a rig, as names, a parent per bone and a rest transform per
+/// bone in the MODEL's space. On a Mafia II car the bones ARE the parts — <c>doorFL</c>, <c>coverF</c>,
+/// <c>axleFR</c> — so this is what makes the thing riggable in Blender rather than one solid body.
+/// </summary>
+public sealed class SkeletonObjectPayload
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+
+    /// <summary>The owning model's world transform — where the whole rig stands.</summary>
+    public Matrix4x4 World { get; set; } = Matrix4x4.Identity;
+
+    public string[] BoneNames { get; set; } = Array.Empty<string>();
+
+    /// <summary>Parent bone per bone, -1 for a root.</summary>
+    public int[] BoneParents { get; set; } = Array.Empty<int>();
+
+    /// <summary>Rest transform per bone, in the model's space (NOT relative to the parent bone).</summary>
+    public Matrix4x4[] BoneRest { get; set; } = Array.Empty<Matrix4x4>();
 }
 
 /// <summary>Converts <see cref="MeshObjectPayload"/> to and from the generic container encoding.
@@ -95,7 +130,79 @@ public static class MeshPayloadCodec
         obj.Arrays[ExchangeSchema.ArrayFaceMaterials] = container.AddBlock(
             ExchangeSchema.DtypeU16, 1, mesh.FaceMaterials.Length, ToBytes(mesh.FaceMaterials));
 
+        // The skin rides only when there is one — a reader that predates it simply never sees the arrays,
+        // which is what the container's additive versioning is for.
+        if (mesh.SkeletonId != null && mesh.BoneIndices.Length > 0)
+        {
+            obj.Meta["skeletonId"] = mesh.SkeletonId;
+            obj.Arrays[ExchangeSchema.ArrayBoneIndices] = container.AddBlock(
+                ExchangeSchema.DtypeU8, 4, mesh.BoneIndices.Length / 4, mesh.BoneIndices);
+            obj.Arrays[ExchangeSchema.ArrayBoneWeights] = container.AddBlock(
+                ExchangeSchema.DtypeF32, 4, mesh.BoneWeights.Length / 4, ToBytes(mesh.BoneWeights));
+        }
+
         container.Objects.Add(obj);
+    }
+
+    /// <summary>Adds a kind="skeleton" object — the rig a skinned mesh points at through its skeletonId.</summary>
+    public static void Add(ExchangeContainer container, SkeletonObjectPayload skeleton)
+    {
+        var obj = new ExchangeObject
+        {
+            Kind = ExchangeSchema.KindSkeleton,
+            Id = skeleton.Id,
+            Name = skeleton.Name,
+            World = ToFloats(skeleton.World),
+            Local = ToFloats(Matrix4x4.Identity),
+            Meta = new JsonObject
+            {
+                ["boneNames"] = new JsonArray([.. skeleton.BoneNames.Select(n => JsonValue.Create(n))]),
+            },
+        };
+
+        obj.Arrays[ExchangeSchema.ArrayBoneParents] = container.AddBlock(
+            ExchangeSchema.DtypeI32, 1, skeleton.BoneParents.Length, ToBytes(skeleton.BoneParents));
+
+        var rest = new float[skeleton.BoneRest.Length * 16];
+        for (int i = 0; i < skeleton.BoneRest.Length; i++)
+        {
+            ToFloats(skeleton.BoneRest[i]).CopyTo(rest, i * 16);
+        }
+        obj.Arrays[ExchangeSchema.ArrayBoneRest] = container.AddBlock(
+            ExchangeSchema.DtypeF32, 16, skeleton.BoneRest.Length, ToBytes(rest));
+
+        container.Objects.Add(obj);
+    }
+
+    /// <summary>Materializes a kind="skeleton" object; throws on a malformed rig.</summary>
+    public static SkeletonObjectPayload ReadSkeleton(ExchangeContainer container, ExchangeObject obj)
+    {
+        if (obj.Kind != ExchangeSchema.KindSkeleton)
+            throw new InvalidDataException($"Object '{obj.Id}' is kind '{obj.Kind}', not a skeleton.");
+
+        int[] parents = FromBytes<int>(Block(container, obj, ExchangeSchema.ArrayBoneParents));
+        float[] flat = FromBytes<float>(Block(container, obj, ExchangeSchema.ArrayBoneRest));
+        var rest = new Matrix4x4[flat.Length / 16];
+        for (int i = 0; i < rest.Length; i++)
+        {
+            rest[i] = FromFloats(flat.AsSpan(i * 16, 16).ToArray());
+        }
+
+        var names = new List<string>();
+        if (obj.Meta?["boneNames"] is JsonArray array)
+        {
+            foreach (JsonNode? node in array) names.Add((string?)node ?? "");
+        }
+
+        return new SkeletonObjectPayload
+        {
+            Id = obj.Id,
+            Name = obj.Name,
+            World = FromFloats(obj.World),
+            BoneNames = [.. names],
+            BoneParents = parents,
+            BoneRest = rest,
+        };
     }
 
     /// <summary>Materializes a kind="mesh" object; throws on a malformed mesh (missing arrays).</summary>
@@ -129,7 +236,15 @@ public static class MeshPayloadCodec
                 mesh.DecompressionOffset = new Vector3((float?)off[0] ?? 0f, (float?)off[1] ?? 0f, (float?)off[2] ?? 0f);
             if (meta["materials"] is JsonNode mats)
                 mesh.Materials = mats.Deserialize<List<MeshMaterialInfo>>() ?? new List<MeshMaterialInfo>();
+            mesh.SkeletonId = (string?)meta["skeletonId"];
         }
+
+        // Optional: a container written before the skin existed, or a mesh that has none.
+        if (obj.Arrays.ContainsKey(ExchangeSchema.ArrayBoneIndices))
+            mesh.BoneIndices = Block(container, obj, ExchangeSchema.ArrayBoneIndices).Data;
+        if (obj.Arrays.ContainsKey(ExchangeSchema.ArrayBoneWeights))
+            mesh.BoneWeights = FromBytes<float>(Block(container, obj, ExchangeSchema.ArrayBoneWeights));
+
         return mesh;
     }
 

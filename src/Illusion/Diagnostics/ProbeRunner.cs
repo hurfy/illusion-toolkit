@@ -364,6 +364,12 @@ internal static class ProbeRunner
             case "--probe-bridge-payload":
                 BridgeProbes.RunPayloadProbe();
                 return true;
+            // Blender bridge: a car's rig and skin across the exchange container — the skinned model the
+            // bridge used to refuse, its four influences per vertex and the skeleton object they address.
+            // Optional arg = the car. Output: %TEMP%\illusion_bridge_skin.txt
+            case "--probe-bridge-skin":
+                BridgeSkinProbes.RunBridgeSkinProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // Blender bridge: weld/split export fidelity against a real district (per-loop attrs
             // match the viewport decode bit-exactly, UV V-flip, determinism).
             case "--probe-bridge-weld":
@@ -627,6 +633,12 @@ internal static class ProbeRunner
             // the rest transform. Optional arg = the car. Output: %TEMP%\illusion_skinning.txt
             case "--probe-skinning":
                 BoneProbes.RunSkinningProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // What makes a panel crumple: the deform bones, the per-vertex damage group and the BBCoeffs
+            // beside it — which of them the shipped cars carry, and what a damage group lines up with.
+            // Optional arg = the car. Output: %TEMP%\illusion_damage.txt
+            case "--probe-damage":
+                BoneProbes.RunDamageProbe(args.Length >= 2 ? args[1] : "shubert_38");
                 return true;
             // The skin on screen: a car rendered as authored and again with one bone moved, with the two
             // frames diffed. Optional arg = the car. Output: %TEMP%\illusion_skin_render.txt + two PNGs.

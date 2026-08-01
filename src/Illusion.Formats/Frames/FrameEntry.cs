@@ -18,6 +18,10 @@ public class FrameEntry
     protected Dictionary<FrameEntryRefTypes, int> refs = new Dictionary<FrameEntryRefTypes, int>();
 
     protected FrameResource OwningResource;
+
+    /// <summary>The resource this entry belongs to — the whole file it will be written back into.</summary>
+    public FrameResource Resource => OwningResource;
+
     public int RefID
     {
         set { refID = value; }

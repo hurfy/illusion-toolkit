@@ -543,6 +543,10 @@ public sealed unsafe class SceneRenderer : IDisposable
 
             if (mesh.IsSkinned)
             {
+                // Straight from the document's rest transforms. Nothing has to tell the renderer a bone
+                // moved — the gizmo, an undo and a push from Blender all edit the same array, and each of
+                // them found its own way to forget to say so.
+                mesh.RefreshPose();
                 _skinnedShader.UpdateConstants(ctx, ref consts);
                 _skinnedShader.UpdateBones(ctx, ref mesh.Palette);
             }

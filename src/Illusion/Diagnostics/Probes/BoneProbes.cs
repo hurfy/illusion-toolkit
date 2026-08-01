@@ -61,7 +61,11 @@ internal static class BoneProbes
             int remapSumMatches = 0, remapIdsInRange = 0, poolIndexInRange = 0, weightsInRange = 0;
             int transformsMatchBones = 0, weightsSumToOne = 0, verticesChecked = 0;
             var weightCounts = new Dictionary<int, int>();
+            int splitSizeChecked = 0, splitSizeMatches = 0;
+            var splitSizeOff = new List<string>();
             var poolCounts = new Dictionary<int, int>();
+            int largestPool = 0, modelsSplittingTheirRig = 0, modelsBiggerThanAPool = 0;
+            string largestPoolAt = "";
 
             foreach (FileInfo sds in archives)
             {
@@ -91,6 +95,21 @@ internal static class BoneProbes
                     byte[] remap = lod0.BoneRemapIDs ?? [];
                     poolsTotal += pools.Length;
 
+                    // How wide a single pool ever gets, and how often a rig is too big for one. A draw reads
+                    // its bones out of ONE pool, so this is the ceiling a rebuild has to respect — putting a
+                    // whole 83-bone car rig in one pool is what tore a repacked car apart.
+                    int widest = 0;
+                    foreach (FrameBlendInfo.BoneIndexInfo lod in lods)
+                    {
+                        foreach (byte size in lod.BonesPerRemapPool ?? [])
+                        {
+                            widest = Math.Max(widest, size);
+                            if (size > largestPool) { largestPool = size; largestPoolAt = sds.Name; }
+                        }
+                    }
+                    if (pools.Count(p => p > 0) > 1) modelsSplittingTheirRig++;
+                    if (boneCount > widest) modelsBiggerThanAPool++;
+
                     if (pools.Sum(p => (int)p) == remap.Length) remapSumMatches++;
                     if (remap.All(id => id < boneCount)) remapIdsInRange++;
 
@@ -106,6 +125,18 @@ internal static class BoneProbes
                     }
                     if (poolOk) poolIndexInRange++;
                     if (weightOk) weightsInRange++;
+
+                    // The stored counter against the table it describes. Everything a rebuild writes after
+                    // the split block is found by walking past it, so a counter that no longer matches the
+                    // bytes makes the whole model unreadable — it simply stops appearing in game. Proving
+                    // the formula on every shipped car is what makes it safe to recompute.
+                    splitSizeChecked++;
+                    if (model.ComputeSplitBlockSize() == model.SplitCounters.Item1) splitSizeMatches++;
+                    else if (splitSizeOff.Count < 6)
+                    {
+                        splitSizeOff.Add($"{sds.Name}: {model.ComputeSplitBlockSize()} vs stored "
+                            + $"{model.SplitCounters.Item1}");
+                    }
 
                     // The vertices themselves: weights must sum to 1 for the shader to be a plain blend.
                     foreach (Vertex v in SampleVertices(model, 64))
@@ -127,11 +158,18 @@ internal static class BoneProbes
                 poolIndexInRange == models, $"{poolIndexInRange} of {models}");
             Check("every face group's weight count is 1..4",
                 weightsInRange == models, $"{weightsInRange} of {models}");
+            Check("the split block size can be recomputed from the table",
+                splitSizeChecked > 0 && splitSizeMatches == splitSizeChecked,
+                $"{splitSizeMatches} of {splitSizeChecked}"
+                    + (splitSizeOff.Count > 0 ? "; " + string.Join("; ", splitSizeOff) : ""));
             Check("vertex weights sum to one",
                 verticesChecked > 0 && weightsSumToOne == verticesChecked,
                 $"{weightsSumToOne} of {verticesChecked} sampled vertices");
 
             sb.AppendLine($"\n  {poolsTotal} remap pools, {groupsTotal} face groups over LOD 0");
+            sb.AppendLine($"  widest pool the game ships: {largestPool} bones ({largestPoolAt}); "
+                + $"{modelsSplittingTheirRig} of {models} models cut their rig across more than one pool, "
+                + $"{modelsBiggerThanAPool} have more bones than any one pool holds");
             sb.AppendLine("  weights per vertex, by how many face groups declare it:");
             foreach ((int n, int count) in weightCounts.OrderBy(p => p.Key))
                 sb.AppendLine($"    {n,3} weights  {count,6} groups");
@@ -306,13 +344,16 @@ internal static class BoneProbes
         byte[] rest = Rendering.Gpu.RenderTargetReadback.Read(gpu, target);
         GpuProbes.SavePng(rest, W, H, restPng);
 
+        // The DOCUMENT's own rest transforms, which is what the renderer reads — a probe posing a private
+        // copy would prove nothing about the editor, where every path (gizmo, undo, a push from Blender)
+        // writes exactly this array.
+        Matrix4x4[] pose = model!.RestTransform;
+        var original = (Matrix4x4[])pose.Clone();
+
         // Move the bone a long way, so the difference is unmistakable rather than a few pixels of shading.
-        var pose = new Matrix4x4[boneCount];
-        for (int i = 0; i < boneCount; i++) pose[i] = body.Skeleton!.Bones[i].Rest;
         Matrix4x4 moved = pose[bone];
         moved.Translation += new Vector3(0f, 0f, 1.5f);
         pose[bone] = moved;
-        skinned.SetPose(pose);
 
         renderer.Render(target);
         byte[] posed = Rendering.Gpu.RenderTargetReadback.Read(gpu, target);
@@ -329,8 +370,7 @@ internal static class BoneProbes
 
         // And back: the identity palette must reproduce the original picture exactly, which is the proof that
         // skinning at rest is a no-op rather than a small constant distortion nobody notices.
-        for (int i = 0; i < boneCount; i++) pose[i] = body.Skeleton!.Bones[i].Rest;
-        skinned.SetPose(pose);
+        Array.Copy(original, pose, pose.Length);
         renderer.Render(target);
         byte[] again = Rendering.Gpu.RenderTargetReadback.Read(gpu, target);
         check("posing back to rest reproduces the original frame", again.AsSpan().SequenceEqual(rest),
@@ -348,9 +388,8 @@ internal static class BoneProbes
             Matrix4x4 delta = Rendering.Gizmos.TransformOps.RotateDelta(
                 oldWorld.Translation, Vector3.UnitZ, MathF.PI / 4f);
 
-            for (int i = 0; i < boneCount; i++) pose[i] = body.Skeleton!.Bones[i].Rest;
+            Array.Copy(original, pose, pose.Length);
             pose[bone] = Rendering.Gizmos.TransformOps.WorldDeltaToLocal(oldWorld, parentWorld, delta);
-            skinned.SetPose(pose);
             renderer.Render(target);
             byte[] rotated = Rendering.Gpu.RenderTargetReadback.Read(gpu, target);
             string rotatedPng = Path.Combine(Path.GetTempPath(), "illusion_skin_rotated.png");
@@ -375,12 +414,52 @@ internal static class BoneProbes
                 $"{bind.Translation} -> {pivotAfter}");
 
             sb.AppendLine($"\n    rotation: local before {Fmt(bind)}\n              local after  {Fmt(Affine(pose[bone]))}");
+
+            // The app's frame is not this probe's frame: it draws overlays and a selection silhouette around
+            // the mesh pass, and every one of those binds its own shader, input layout and constant buffers.
+            // If any of them leaves the pipeline in a state the skinned draw does not restore, the body stops
+            // following its bones in the application while a bare render like the one above keeps working —
+            // which is exactly the difference being hunted.
+            renderer.ShowSkeleton = true;
+            renderer.ShowActors = true;
+            renderer.ShowNov = true;
+            renderer.ShowNavWorld = true;
+            renderer.SetSkeletonDistrict(
+                "probe", Viewport.DistrictStreamer.BuildRigLines([body.Skeleton!]) ?? default);
+            renderer.SetSelectionMeshes([skinned]);
+
+            Matrix4x4 overlayPose = pose[bone];
+            Array.Copy(original, pose, pose.Length);
+            renderer.Render(target);
+            byte[] overlaidRest = Rendering.Gpu.RenderTargetReadback.Read(gpu, target);
+
+            pose[bone] = overlayPose;
+            renderer.Render(target);
+            byte[] overlaidPosed = Rendering.Gpu.RenderTargetReadback.Read(gpu, target);
+
+            int overlaidDiff = 0;
+            for (int i = 0; i + 3 < overlaidRest.Length && i + 3 < overlaidPosed.Length; i += 4)
+            {
+                if (overlaidRest[i] != overlaidPosed[i] || overlaidRest[i + 1] != overlaidPosed[i + 1]
+                    || overlaidRest[i + 2] != overlaidPosed[i + 2])
+                {
+                    overlaidDiff++;
+                }
+            }
+            string overlaidPng = Path.Combine(Path.GetTempPath(), "illusion_skin_overlaid.png");
+            GpuProbes.SavePng(overlaidPosed, W, H, overlaidPng);
+            check("the body still follows its bone with the overlays and the outline drawn",
+                overlaidDiff > 500, $"{overlaidDiff} pixels -> {overlaidPng}");
             sb.AppendLine($"              palette      {Fmt(skinned.Palette.Get(bone))}");
 
             // The same rotation again, but driven through the editor's own objects rather than through the
             // maths by hand: the bone adapter supplies the two matrices, exactly as a gizmo drag reads them.
             // Anything the adapter adds on top — an actor placement, a parent that is not what we assumed —
             // shows up here and nowhere else.
+            // Back to rest first: the renders above wrote into the document's own array, and an adapter
+            // reading an already-rotated bone would be handed the delta a second time.
+            Matrix4x4 byHand = pose[bone];
+            Array.Copy(original, pose, pose.Length);
             Illusion.Assets.Adapters.BoneNodeAdapter adapter = document.Bone(model, bone);
             sb.AppendLine($"\n    adapter: world  {Fmt(adapter.WorldTransform)}");
             sb.AppendLine($"             parent {Fmt(adapter.ParentWorldTransform)}");
@@ -391,8 +470,8 @@ internal static class BoneProbes
             Matrix4x4 viaAdapter = Rendering.Gizmos.TransformOps.WorldDeltaToLocal(
                 adapter.WorldTransform, adapter.ParentWorldTransform, delta);
             check("driving the drag through the adapter gives the same matrix as by hand",
-                BasisApprox(Affine(viaAdapter), Affine(pose[bone]), 1e-3f)
-                && Approx(viaAdapter.Translation, pose[bone].Translation, 1e-3f),
+                BasisApprox(Affine(viaAdapter), Affine(byHand), 1e-3f)
+                && Approx(viaAdapter.Translation, byHand.Translation, 1e-3f),
                 Fmt(Affine(viaAdapter)));
 
             // Every bone, not just the door. A rotation must come out of the write path as a RIGID motion:
@@ -446,7 +525,6 @@ internal static class BoneProbes
                 stayed.Count > 0 ? "left behind: " + string.Join(", ", stayed) : $"{kids.Count} carried");
 
             // The picture of it: the door open with its own window and deform panel still in it.
-            skinned.SetPose(model.RestTransform);
             renderer.Render(target);
             string carriedPng = Path.Combine(Path.GetTempPath(), "illusion_skin_carried.png");
             GpuProbes.SavePng(Rendering.Gpu.RenderTargetReadback.Read(gpu, target), W, H, carriedPng);
@@ -472,6 +550,206 @@ internal static class BoneProbes
             if (root.Mesh is { } mesh) yield return mesh;
             foreach (MeshData child in Meshes(root.Children)) yield return child;
         }
+    }
+
+    /// <summary>
+    /// What actually makes a car panel crumple. Three candidates ride on a vertex or beside it — the
+    /// <c>deform_*</c> bones it is weighted to, the per-vertex <c>DamageGroup</c> channel, and the
+    /// <c>BBCoeffs</c> beside it — and a modder adding geometry needs to know which of them they have to fill
+    /// in by hand. This measures the wiring on the shipped cars instead of assuming it.
+    /// <para>Output: %TEMP%\illusion_damage.txt</para>
+    /// </summary>
+    internal static void RunDamageProbe(string focus)
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_damage.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        try
+        {
+            if (!InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
+
+            string folder = Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars");
+            FileInfo[] archives = new DirectoryInfo(folder).GetFiles("*.sds");
+            Array.Sort(archives, (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+            // ── Census: which of the three channels the shipped cars even carry ──
+            int models = 0, withDamageGroup = 0, withBBCoeffs = 0, withDeformBones = 0, deformAndGroup = 0;
+            foreach (FileInfo sds in archives)
+            {
+                string extracted = MafiaEnvironment.ExtractedDir(sds);
+                if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+                FrameResource? fr;
+                try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+                catch (Exception) { continue; }
+                if (fr?.FrameObjects == null) continue;
+
+                foreach (FrameObjectModel model in fr.FrameObjects.Values.OfType<FrameObjectModel>())
+                {
+                    if (model.Geometry?.LOD is not { Length: > 0 } lods) continue;
+                    if (!lods[0].VertexDeclaration.HasFlag(VertexFlags.Skin)) continue;
+                    models++;
+                    bool group = lods[0].VertexDeclaration.HasFlag(VertexFlags.DamageGroup);
+                    bool deform = DeformBones(model).Count > 0;
+                    if (group) withDamageGroup++;
+                    if (lods[0].VertexDeclaration.HasFlag(VertexFlags.BBCoeffs)) withBBCoeffs++;
+                    if (deform) withDeformBones++;
+                    if (deform && group) deformAndGroup++;
+                }
+            }
+
+            sb.AppendLine($"DAMAGE CENSUS: {models} skinned car models\n");
+            // The two channels come together: a model that can crumple declares the group its vertices belong
+            // to. Neither is universal — a car archive also carries skinned models that never deform.
+            Check("a model with deform bones always carries the damage-group channel too",
+                withDeformBones > 0 && deformAndGroup == withDeformBones,
+                $"{deformAndGroup} of {withDeformBones} (damage group on {withDamageGroup} of {models} models)");
+            // Not a defect, a fact worth pinning: BBCoeffs is declared by NO car, so it plays no part here.
+            Check("no car declares BBCoeffs — it is not part of a car's damage wiring",
+                withBBCoeffs == 0, $"{withBBCoeffs} of {models}");
+
+            // ── One car in full: what a damage group corresponds to ──
+            var car = new FileInfo(Path.Combine(folder, focus + ".sds"));
+            if (car.Exists)
+            {
+                string extracted = MafiaEnvironment.ExtractedDir(car);
+                FrameResource fr = SdsMeshLoader.OpenScene(extracted).FrameResource!;
+                FrameObjectModel? body = fr.FrameObjects.Values.OfType<FrameObjectModel>()
+                    .FirstOrDefault(m => m.Geometry?.LOD is { Length: > 0 } l
+                        && l[0].VertexDeclaration.HasFlag(VertexFlags.Skin));
+
+                // The resolved skin comes off the loader's own path — the ids on the wire are pool-local and
+                // the probe has no business re-deriving that here.
+                (_, List<MeshData> meshes, _) = SdsMeshLoader.LoadHierarchy(car);
+                MeshData? loaded = meshes.FirstOrDefault(m => m.IsSkinned
+                    && m.Positions.Length == (body?.Geometry.LOD[0].NumVerts ?? -1));
+                if (body != null && loaded?.Skeleton != null && loaded.BoneIndices != null)
+                {
+                    Vertex[] verts = [.. SampleVertices(body, body.Geometry.LOD[0].NumVerts)];
+                    IReadOnlyList<BoneData> bones = loaded.Skeleton.Bones;
+
+                    sb.AppendLine($"\n════ {focus} ════");
+                    sb.AppendLine($"declaration: {body.Geometry.LOD[0].VertexDeclaration}");
+                    sb.AppendLine($"{verts.Length} vertices decoded, rig {bones.Count} bones");
+
+                    // Damage group -> the bones those vertices ride, heaviest first.
+                    var bonesOfGroup = new Dictionary<int, Dictionary<string, int>>();
+                    var sizeOfGroup = new Dictionary<int, int>();
+                    int zeroCoeffs = 0, onDeform = 0;
+                    for (int v = 0; v < verts.Length; v++)
+                    {
+                        int group = verts[v].DamageGroup;
+                        sizeOfGroup[group] = sizeOfGroup.GetValueOrDefault(group) + 1;
+                        if (verts[v].BBCoeffs == Vector3.Zero) zeroCoeffs++;
+                        if (!bonesOfGroup.TryGetValue(group, out Dictionary<string, int>? named))
+                            bonesOfGroup[group] = named = [];
+                        bool deformed = false;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            if (verts[v].BoneWeights[k] <= 0f) continue;
+                            int id = loaded.BoneIndices[(v * 4) + k];
+                            if (id >= bones.Count) continue;
+                            named[bones[id].Name] = named.GetValueOrDefault(bones[id].Name) + 1;
+                            deformed |= bones[id].Name.StartsWith("deform", StringComparison.OrdinalIgnoreCase);
+                        }
+                        if (deformed) onDeform++;
+                    }
+
+                    Check("geometry is actually weighted to the deform bones", onDeform > 0,
+                        $"{onDeform} of {verts.Length} vertices");
+                    Check("the damage-group channel is used, not left blank",
+                        sizeOfGroup.Keys.Any(g => g != 0), $"{sizeOfGroup.Count} distinct groups");
+
+                    sb.AppendLine($"damage groups: {sizeOfGroup.Count} distinct; "
+                        + $"{onDeform} of {verts.Length} vertices ride a deform bone "
+                        + $"({zeroCoeffs} carry no BBCoeffs — the channel is undeclared)");
+
+                    // How RIGIDLY a panel holds its geometry. A vertex follows a weighted blend of bones, so
+                    // "welded to the hood" means one bone at full weight; anything less and the vertex drifts
+                    // between its bones as they move. This says what the shipped panels actually do, which is
+                    // the answer to "my new part is not firmly attached".
+                    var rigidOf = new Dictionary<string, (int Rigid, int Blended, string Partners)>();
+                    for (int v = 0; v < verts.Length; v++)
+                    {
+                        int heavy = -1;
+                        float best = 0f, sum = 0f;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            float weight = verts[v].BoneWeights[k];
+                            if (weight <= 0f) continue;
+                            sum += weight;
+                            if (weight > best) { best = weight; heavy = loaded.BoneIndices[(v * 4) + k]; }
+                        }
+                        if (heavy < 0 || heavy >= bones.Count || sum <= 0f) continue;
+                        string owner = bones[heavy].Name;
+                        (int rigid, int blended, string? seen) = rigidOf.GetValueOrDefault(owner);
+                        string partners = seen ?? "";
+                        if (best / sum > 0.999f) rigid++;
+                        else
+                        {
+                            blended++;
+                            for (int k = 0; k < 4 && partners.Length < 40; k++)
+                            {
+                                if (verts[v].BoneWeights[k] <= 0f) continue;
+                                int id = loaded.BoneIndices[(v * 4) + k];
+                                if (id >= bones.Count || bones[id].Name == owner) continue;
+                                if (!partners.Contains(bones[id].Name, StringComparison.Ordinal))
+                                    partners += (partners.Length > 0 ? "+" : "") + bones[id].Name;
+                            }
+                        }
+                        rigidOf[owner] = (rigid, blended, partners);
+                    }
+
+                    int rigidTotal = rigidOf.Values.Sum(p => p.Rigid);
+                    int blendedTotal = rigidOf.Values.Sum(p => p.Blended);
+                    Check("panels hold most of their geometry rigidly — one bone at full weight",
+                        rigidTotal > blendedTotal, $"{rigidTotal} rigid vs {blendedTotal} blended");
+                    sb.AppendLine($"\nhow firmly each part holds its vertices "
+                        + $"({rigidTotal} rigid, {blendedTotal} blended):");
+                    foreach ((string owner, (int rigid, int blended, string partners)) in
+                        rigidOf.OrderByDescending(p => p.Value.Rigid + p.Value.Blended).Take(14))
+                    {
+                        sb.AppendLine($"    {owner,-22} {rigid,5} rigid {blended,5} blended"
+                            + (partners.Length > 0 ? $"  (shared with {partners})" : ""));
+                    }
+                    foreach ((int group, int size) in sizeOfGroup.OrderByDescending(p => p.Value).Take(20))
+                    {
+                        string named = bonesOfGroup.TryGetValue(group, out Dictionary<string, int>? b)
+                            ? string.Join(", ", b.OrderByDescending(p => p.Value).Take(5).Select(p => p.Key))
+                            : "";
+                        sb.AppendLine($"    group {group,4}  {size,5} vertices  → {named}");
+                    }
+                }
+            }
+
+            sb.Insert(0, $"DAMAGE PROBE ({focus}): {pass} passed, {fail} failed\n\n");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("EXCEPTION: " + ex);
+            sb.Insert(0, "DAMAGE PROBE: FAIL\n\n");
+        }
+        finally { File.WriteAllText(outFile, sb.ToString()); }
+    }
+
+    /// <summary>Indices of the model's <c>deform_*</c> bones — the ones a car's damage system moves.</summary>
+    private static HashSet<int> DeformBones(FrameObjectModel model)
+    {
+        var found = new HashSet<int>();
+        Formats.Hashing.HashName[] names;
+        try { names = model.GetSkeletonObject().BoneNames ?? []; }
+        catch (Exception) { return found; }
+        for (int i = 0; i < names.Length; i++)
+        {
+            if (names[i].ToString().StartsWith("deform", StringComparison.OrdinalIgnoreCase)) found.Add(i);
+        }
+        return found;
     }
 
     /// <summary>The first <paramref name="count"/> vertices of a skinned model's LOD 0, fully decoded (the
@@ -519,6 +797,52 @@ internal static class BoneProbes
 
         sb.AppendLine($"bones {names.Count}, bone transforms {blend.BoneTransforms?.Length ?? 0}, " +
                       $"LODs {blend.BoneIndexInfos?.Length ?? 0}");
+
+        // The table that blocks re-topologising a skinned body: per bone, per material, ranges of FACES the
+        // game deforms as one piece. Rebuilding it needs the rule it is built by, and the rule is only
+        // legible from the shipped data — how many splits there are, what indexes what, and whether the
+        // ranges partition the mesh or overlap.
+        var splits = model.BlendMeshSplits ?? [];
+        sb.AppendLine($"\n— blend mesh splits — {splits.Length} splits, " +
+                      $"{model.SplitCounters.Item1} phys split bytes, {model.SplitCounters.Item2} hit-box bytes");
+        int totalFaces = 0, bursts = 0, maxFace = 0;
+        var facesSeen = new Dictionary<int, int>();       // face -> how many splits claim it
+        var blendIndexes = new SortedSet<int>();
+        foreach (FrameObjectModel.WeightedByMeshSplit split in splits)
+        {
+            blendIndexes.Add(split.BlendIndex);
+            foreach (FrameObjectModel.BlendMeshSplitInfo info in split.Data ?? [])
+            {
+                foreach (FrameObjectModel.MiniMaterialBurst burst in info.Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        bursts++;
+                        totalFaces += range.NumFaces;
+                        maxFace = Math.Max(maxFace, range.StartIndex + range.NumFaces);
+                        for (int f = range.StartIndex; f < range.StartIndex + range.NumFaces; f++)
+                            facesSeen[f] = facesSeen.GetValueOrDefault(f) + 1;
+                    }
+                }
+            }
+        }
+        int meshFaces = 0;
+        if (model.Geometry?.LOD is { Length: > 0 } geomLods) meshFaces = geomLods[0].NumVerts;
+        sb.AppendLine($"    {bursts} face bursts covering {totalFaces} faces; highest face named {maxFace}");
+        sb.AppendLine($"    distinct faces covered {facesSeen.Count}; claimed by more than one split " +
+                      $"{facesSeen.Count(p => p.Value > 1)}");
+        sb.AppendLine($"    blend indexes used: {string.Join(", ", blendIndexes.Take(20))}" +
+                      (blendIndexes.Count > 20 ? $", … ({blendIndexes.Count})" : ""));
+        sb.AppendLine($"    LOD0 has {meshFaces} vertices; its index buffer holds " +
+                      $"{(model.GetIndexBuffer(0)?.GetData().Length ?? 0) / 3} triangles");
+        foreach (FrameObjectModel.WeightedByMeshSplit split in splits.Take(6))
+        {
+            int faces = (split.Data ?? []).SelectMany(i => i.Data ?? [])
+                .SelectMany(b => b.Data ?? []).Sum(r => (int)r.NumFaces);
+            var mats = (split.Data ?? []).SelectMany(i => i.Data ?? []).Select(b => b.MaterialIndex).Distinct();
+            sb.AppendLine($"        blend {split.BlendIndex,3} \"{split.JointName}\" — {faces,5} faces, " +
+                          $"materials {string.Join("/", mats)}");
+        }
 
         // Who hangs off whom. A bone with children is a bone whose rotation has to carry them, and the rest
         // transforms are MODEL space — moving one changes nothing about the others unless something makes it.
@@ -614,6 +938,40 @@ internal static class BoneProbes
         check("inverse(rest) * rest is identity — skinning at rest is a no-op",
             restIdentity == rest.Length, $"{restIdentity} of {rest.Length}");
 
+        // WHICH table is the bind pose the game reads? Editing the rest transforms moves the model in this
+        // viewport, but a car packed back into the game showed no change — so the rig's placement must also
+        // (or instead) live in one of the other per-bone tables. Each candidate is scored against the rest
+        // transforms; the ones that are a function of them have to be rewritten when a bone moves.
+        Matrix4x4[] joint = skeleton.JointTransforms ?? [];
+        Matrix4x4[] world = skeleton.WorldTransforms ?? [];
+        var relations = new (string Name, Func<int, Matrix4x4?> Pair)[]
+        {
+            ("skeleton.JointTransforms[i] == rest[i]",
+                i => i < joint.Length ? Delta(Affine(joint[i]), Affine(rest[i])) : null),
+            ("skeleton.JointTransforms[i] == rest relative to parent",
+                i => i < joint.Length && i < parents.Length && parents[i] != i && parents[i] < rest.Length
+                    ? Delta(Affine(joint[i]), Relative(rest[i], rest[parents[i]]))
+                    : null),
+            ("skeleton.WorldTransforms[i] == inverse(rest[i])",
+                i => i < world.Length ? Delta(Affine(world[i]), Inverse(rest[i])) : null),
+            ("skeleton.WorldTransforms[i] == rest[i]",
+                i => i < world.Length ? Delta(Affine(world[i]), Affine(rest[i])) : null),
+            ("blend.BoneTransforms[i-1] == inverse(rest[i])",
+                i => At(blend.BoneTransforms, i - 1) is { } m ? Delta(Affine(m), Inverse(rest[i])) : null),
+        };
+        sb.AppendLine("\n    which per-bone table is a function of the rest transforms:");
+        foreach ((string relation, Func<int, Matrix4x4?> pair) in relations)
+        {
+            int same = 0, tried = 0;
+            for (int i = 0; i < rest.Length; i++)
+            {
+                if (pair(i) is not { } d) continue;
+                tried++;
+                if (IsIdentity(d)) same++;
+            }
+            sb.AppendLine($"        {relation,-48} holds on {same,3} of {tried,3}");
+        }
+
         // Can the editor's write path even express these matrices? A gizmo drag decomposes the new world
         // transform into rotation + scale and composes it back (TransformOps.WorldDeltaToLocal). That is exact
         // only for a matrix that already IS rotation·scale with a right-handed basis — and a rig is full of
@@ -671,6 +1029,17 @@ internal static class BoneProbes
         m.M44 = 1;
         return m;
     }
+
+    // "Are these the same matrix?" as something IsIdentity can answer: a * inverse(b).
+    private static Matrix4x4? Delta(Matrix4x4 a, Matrix4x4? b) =>
+        b is { } other && Matrix4x4.Invert(other, out Matrix4x4 inverse) ? a * inverse : null;
+
+    private static Matrix4x4? Inverse(Matrix4x4 m) =>
+        Matrix4x4.Invert(Affine(m), out Matrix4x4 inverse) ? inverse : null;
+
+    // A bone's rest expressed against its parent's, which is the other way a rig can store a pose.
+    private static Matrix4x4? Relative(Matrix4x4 child, Matrix4x4 parent) =>
+        Matrix4x4.Invert(Affine(parent), out Matrix4x4 inverse) ? Affine(child) * inverse : null;
 
     private static Matrix4x4? At(FrameBlendInfo.BoneTransform[]? table, int index) =>
         table != null && index >= 0 && index < table.Length ? table[index].Transform : null;

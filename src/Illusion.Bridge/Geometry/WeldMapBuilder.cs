@@ -42,22 +42,32 @@ public sealed class WeldedMesh
 /// </summary>
 public static class WeldMapBuilder
 {
+    /// <param name="skinKeys">
+    /// Optional second key, one per split vertex: two vertices merge only when this agrees as well. It exists
+    /// for skinned meshes, where the position alone is not enough — a door's edge and the body's edge sit at
+    /// the same point and belong to different bones, and welding them makes one of the two skins win. In
+    /// Blender that shows up as moving the door and watching the front of the car come with it.
+    /// </param>
     public static WeldedMesh Build(
-        ulong[] weldKeys, Vector3[] positions, Vector3[] normals, Vector2[]? uvs, uint[] indices)
+        ulong[] weldKeys, Vector3[] positions, Vector3[] normals, Vector2[]? uvs, uint[] indices,
+        ulong[]? skinKeys = null)
     {
         if (weldKeys.Length != positions.Length)
             throw new ArgumentException("One weld key per split vertex is required.", nameof(weldKeys));
+        if (skinKeys != null && skinKeys.Length != positions.Length)
+            throw new ArgumentException("One skin key per split vertex is required.", nameof(skinKeys));
 
-        var keyToWelded = new Dictionary<ulong, int>(positions.Length);
+        var keyToWelded = new Dictionary<(ulong Position, ulong Skin), int>(positions.Length);
         var splitToWelded = new int[positions.Length];
         var weldedPositions = new List<Vector3>(positions.Length);
 
         for (int i = 0; i < positions.Length; i++)
         {
-            if (!keyToWelded.TryGetValue(weldKeys[i], out int welded))
+            (ulong, ulong) key = (weldKeys[i], skinKeys != null ? skinKeys[i] : 0UL);
+            if (!keyToWelded.TryGetValue(key, out int welded))
             {
                 welded = weldedPositions.Count;
-                keyToWelded[weldKeys[i]] = welded;
+                keyToWelded[key] = welded;
                 weldedPositions.Add(positions[i]);
             }
             splitToWelded[i] = welded;

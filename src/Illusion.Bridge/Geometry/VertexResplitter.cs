@@ -12,6 +12,10 @@ public sealed class ResplitResult
     public required Vector3[] Normals { get; init; }
     public required Vector2[] Uvs { get; init; }
     public required bool[] Seen { get; init; }
+
+    /// <summary>The WELDED vertex each source vertex came from — the row Blender's own per-vertex data
+    /// (vertex groups, and so the skin) is indexed by. -1 where <see cref="Seen"/> is false.</summary>
+    public required int[] Welded { get; init; }
 }
 
 /// <summary>
@@ -43,6 +47,8 @@ public static class VertexResplitter
         var normalCounts = new int[splitVertexCount];
         var uvs = new Vector2[splitVertexCount];
         var seen = new bool[splitVertexCount];
+        var weldedOf = new int[splitVertexCount];
+        Array.Fill(weldedOf, -1);
 
         for (int i = 0; i < loops; i++)
         {
@@ -72,6 +78,7 @@ public static class VertexResplitter
                 seen[orig] = true;
                 positions[orig] = pos;
                 uvs[orig] = uv;
+                weldedOf[orig] = (int)welded;
             }
             else
             {
@@ -100,6 +107,9 @@ public static class VertexResplitter
             normals[v] = normalSums[v] / normalCounts[v];
         }
 
-        return new ResplitResult { Positions = positions, Normals = normals, Uvs = uvs, Seen = seen };
+        return new ResplitResult
+        {
+            Positions = positions, Normals = normals, Uvs = uvs, Seen = seen, Welded = weldedOf,
+        };
     }
 }
