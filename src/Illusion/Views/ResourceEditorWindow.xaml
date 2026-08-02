@@ -209,7 +209,32 @@
                 </v:ToolbarRowPanel>
 
                 <Grid Grid.Row="1">
-                    <vp:D3DImageHost x:Name="Stage" IsMapViewport="False" />
+                    <!-- Deferred on purpose: a window that opens on nothing to draw should not pay for a GPU
+                         device, a shared render target and a per-frame callback to draw it. StageEntry starts
+                         the viewport the first time there is something to put on it. -->
+                    <vp:D3DImageHost x:Name="Stage" IsMapViewport="False" StartsOnDemand="True" />
+
+                    <!-- What the window IS until then: the render surface is not running, so this is not an
+                         overlay over a viewport, it is the whole of what the stage column shows. -->
+                    <Border x:Name="EmptyStage">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                                <GradientStop Color="#212227" Offset="0" />
+                                <GradientStop Color="#17181B" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Path Width="76" Height="76" Stretch="Uniform" Fill="Transparent"
+                                  Stroke="#33383F" StrokeThickness="1.3" StrokeLineJoin="Round"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Data="{StaticResource IconMesh}" HorizontalAlignment="Center" />
+                            <TextBlock Text="Nothing on the stage" Foreground="#B0FFFFFF" FontSize="15"
+                                       FontWeight="SemiBold" HorizontalAlignment="Center"
+                                       Margin="0,24,0,0" />
+                            <TextBlock Text="Double-click an archive below to open it" Foreground="#59FFFFFF"
+                                       FontSize="12" HorizontalAlignment="Center" Margin="0,7,0,0" />
+                        </StackPanel>
+                    </Border>
 
                     <!-- The same tools and gizmos as the map editor: a viewport is a viewport. -->
                     <v:ViewportToolShelf x:Name="ToolShelf" />
@@ -225,12 +250,6 @@
                             <DropShadowEffect Color="#E87D0D" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
                         </Border.Effect>
                     </Border>
-
-                    <!-- Says what to do with an empty stage, which is otherwise indistinguishable from a
-                         viewport that failed to start. -->
-                    <TextBlock x:Name="EmptyStageText" Foreground="#66FFFFFF" FontSize="13"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
-                               Text="Double-click an archive below to put it on the stage" />
 
                     <v:NoticeBanner x:Name="Notices" />
                 </Grid>

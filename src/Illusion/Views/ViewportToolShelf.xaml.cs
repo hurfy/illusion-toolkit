@@ -23,6 +23,7 @@ public partial class ViewportToolShelf : UserControl
 {
     private D3DImageHost _viewport = null!;
     private TransformGizmo? _gizmo;
+    private ViewportGizmo? _navigation;
 
     public ViewportToolShelf() => InitializeComponent();
 
@@ -38,6 +39,20 @@ public partial class ViewportToolShelf : UserControl
     {
         get => ToolBlender.Visibility == Visibility.Visible;
         set => ToolBlender.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Shows or hides the shelf together with the navigation gizmo. That one is a SIBLING of the render
+    /// surface rather than a child of this control — it has to draw above it — so hiding this control alone
+    /// leaves an axis widget floating over a window with nothing on its stage.
+    /// <para>Hidden rather than collapsed: the shelf keeps its slot, so nothing jumps when a stage arrives,
+    /// and it stays a laid-out thing the layout probe can measure against the stage. The transform gizmo is
+    /// left alone — it draws nothing without a selection, and it decides that for itself.</para>
+    /// </summary>
+    public void SetShown(bool shown)
+    {
+        Visibility = shown ? Visibility.Visible : Visibility.Hidden;
+        if (_navigation != null) _navigation.Visibility = Visibility;
     }
 
     /// <summary>
@@ -65,9 +80,9 @@ public partial class ViewportToolShelf : UserControl
                 e.Handled = true;
             };
 
-            var navigation = new ViewportGizmo();
-            host.Children.Add(navigation);
-            navigation.Attach(viewport);
+            _navigation = new ViewportGizmo();
+            host.Children.Add(_navigation);
+            _navigation.Attach(viewport);
         }
 
         // Walk mode (this shelf's top toggle / Space): WASD flying instead of the mouse-only orbit camera.

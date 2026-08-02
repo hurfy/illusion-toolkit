@@ -214,7 +214,32 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         MouseMove += OnMouseMove;
     }
 
+    /// <summary>
+    /// Whether the control waits to be told to start rather than building its pipeline the moment it loads.
+    /// A GPU device, a shared render target and a per-frame callback are not free, and a window that opens
+    /// on nothing to draw should not pay for them until it has something. Set it BEFORE the control loads;
+    /// <see cref="Start"/> is what then brings it up.
+    /// <para>Everything on this control is already safe to touch while the renderer does not exist — the
+    /// environment properties keep their values in fields and forward them through at start — so a deferred
+    /// viewport is configurable exactly like a running one.</para>
+    /// </summary>
+    public bool StartsOnDemand { get; set; }
+
+    /// <summary>Brings the pipeline up, once. Safe to call before the control has loaded (it will start on
+    /// load instead) and safe to call again on one that is already running.</summary>
+    public void Start()
+    {
+        StartsOnDemand = false;
+        if (IsLoaded) Initialize();
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (StartsOnDemand) return;   // waiting to be told — see Start()
+        Initialize();
+    }
+
+    private void Initialize()
     {
         if (_initialized) return;
         _initialized = true;

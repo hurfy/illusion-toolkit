@@ -178,6 +178,7 @@ public partial class ResourceEditorWindow : Window
         if (Stage.HasUnsavedEdits) SaveEdits();
 
         _staged = entry;
+        Stage.Start();      // first thing to draw: bring the render pipeline up (see the XAML)
         Stage.LoadStage(entry.File, entry.Name);
         UpdateStageChrome();
     }
@@ -185,7 +186,14 @@ public partial class ResourceEditorWindow : Window
     private void UpdateStageChrome()
     {
         StagedText.Text = _staged?.Name ?? "nothing loaded";
-        EmptyStageText.Visibility = Stage.Roots.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+
+        // With nothing loaded the stage column is a page, not a viewport: the render surface is not even
+        // running, so the tools and gizmos that act on it go with it rather than floating over an empty
+        // background. The hover label is left alone — it drives its own visibility, and there are no glyphs
+        // here to name.
+        bool staged = Stage.Roots.Count > 0;
+        EmptyStage.Visibility = staged ? Visibility.Collapsed : Visibility.Visible;
+        ToolShelf.SetShown(staged);
         UpdateTitle();
     }
 
