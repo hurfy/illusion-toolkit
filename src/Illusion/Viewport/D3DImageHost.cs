@@ -74,6 +74,10 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <summary>Scene tree roots: folder → SDS → frame hierarchy → mesh. Populated incrementally.</summary>
     public ObservableCollection<SceneNode> Roots => Tree.Roots;
 
+    /// <summary>The same scene without its folder / SDS / FrameResource spine — what a window opened on one
+    /// archive shows. See <see cref="SceneTree.StageRoots"/>.</summary>
+    public ObservableCollection<SceneNode> StageRoots => Tree.StageRoots;
+
     public int MeshCount => Tree.MeshCount;
 
     public event Action? SceneChanged;

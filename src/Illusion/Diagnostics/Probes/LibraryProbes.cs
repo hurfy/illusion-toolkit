@@ -13,6 +13,7 @@ using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
+using Illusion.Scene;
 using Illusion.Views;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
@@ -537,6 +538,32 @@ internal static class LibraryProbes
                     (browser.FolderTree.SelectedItem as LibraryFolder)?.Name ?? "nothing");
             }
         }
+
+        // The hierarchy the resource editor shows is the scene without its folder / SDS / FrameResource spine.
+        // Built here by hand rather than by staging an archive: streaming needs a GPU and a shown window, and
+        // the flattening itself is pure tree work that can be asked directly.
+        var folder = new SceneNode("cars", "Folder", true);
+        var sdsNode = new SceneNode("shubert_38", "Sds", true);
+        var frameRes = new SceneNode("FrameResource", "FrameResource", true);
+        frameRes.AddChild(new SceneNode("body", "Model", false));
+        frameRes.AddChild(new SceneNode("wheels", "Model", false));
+        sdsNode.AddChild(frameRes);
+        sdsNode.AddChild(new SceneNode("Collisions", "Collision", true));
+        folder.AddChild(sdsNode);
+        window.Stage.Tree.Roots.Add(folder);
+        window.Stage.Tree.RebuildStageRoots();
+
+        var flat = window.Stage.Tree.StageRoots.ToList();
+        check("the hierarchy drops the folder, the archive and the frame resource",
+            flat.Count == 3 && flat[0].Name == "body" && flat[1].Name == "wheels"
+            && flat[2].Name == "Collisions",
+            string.Join(" · ", flat.Select(n => n.Name)));
+        check("the real tree keeps its spine — unload and the scene filters read it",
+            window.Stage.Tree.Roots.Count == 1 && window.Stage.Tree.Roots[0].Children.Count == 1,
+            $"{window.Stage.Tree.Roots.Count} roots");
+        window.Stage.Tree.Clear();
+        check("clearing the scene clears the flattened view with it",
+            window.Stage.Tree.StageRoots.Count == 0, $"{window.Stage.Tree.StageRoots.Count} left");
 
         // Folding gives the height back — how much is --probe-layout's business. What matters here is that
         // there is still something to click: the tab hangs OUTSIDE the pane on a negative margin, so a folded

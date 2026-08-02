@@ -1307,6 +1307,11 @@ internal sealed class DistrictStreamer
             foreach (SceneNode sc in frameRes.Children)
                 _host.Tree.ApplySceneFilter(sc);
 
+        // The flattened view the resource editor binds to. Rebuilt whole rather than patched: the stage holds
+        // one archive, replaced whole, so there is nothing to patch incrementally. Skipped for the map, which
+        // binds the real roots and would only be paying for a list nothing reads.
+        if (!_host.IsMapViewport) _host.Tree.RebuildStageRoots();
+
         _buildMeshes = new List<GpuMesh>();
         _buildQueue = new Queue<(SceneNode Leaf, GpuMesh Mesh)>(load.Meshes);
         _building = true;

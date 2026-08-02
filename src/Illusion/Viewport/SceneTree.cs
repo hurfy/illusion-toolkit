@@ -14,6 +14,40 @@ internal sealed class SceneTree
     /// <summary>Tree roots (source folders). Populated incrementally.</summary>
     public ObservableCollection<SceneNode> Roots { get; } = new();
 
+    /// <summary>
+    /// What the panel shows when ONE archive is on the stage: that archive's frame roots straight at the top,
+    /// followed by whatever else it carries (collisions, actors, AI). A district is a folder of archives and
+    /// the nesting there is the truth, but a window opened on a single resource should not spend three rows —
+    /// folder, SDS, FrameResource — before the first thing you can click.
+    /// <para>A parallel view, not a replacement: the real tree keeps its spine, because unloading, the scene
+    /// filters and the property tabs all read it.</para>
+    /// </summary>
+    public ObservableCollection<SceneNode> StageRoots { get; } = new();
+
+    /// <summary>Rebuilds <see cref="StageRoots"/> from the real tree. Cheap — it walks the layers under each
+    /// archive, never their contents — so it can simply run after anything that changes the roots.</summary>
+    public void RebuildStageRoots()
+    {
+        StageRoots.Clear();
+        foreach (SceneNode folder in Roots)
+        {
+            foreach (SceneNode sds in folder.Children)
+            {
+                foreach (SceneNode layer in sds.Children)
+                {
+                    if (string.Equals(layer.Kind, "FrameResource", StringComparison.Ordinal))
+                    {
+                        foreach (SceneNode root in layer.Children) StageRoots.Add(root);
+                    }
+                    else
+                    {
+                        StageRoots.Add(layer);   // Collisions, Actors, AI, Crash objects — beside the frames
+                    }
+                }
+            }
+        }
+    }
+
     private readonly Dictionary<string, SceneNode> _folders = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Number of meshes currently attached to the renderer.</summary>
@@ -148,6 +182,7 @@ internal sealed class SceneTree
     public void Clear()
     {
         Roots.Clear();
+        StageRoots.Clear();
         _folders.Clear();
         MeshCount = 0;
     }

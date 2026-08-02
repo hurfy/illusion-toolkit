@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
@@ -39,6 +40,19 @@ public partial class ScenePanel : UserControl
 
     public ScenePanel() => InitializeComponent();
 
+    // What the tree is bound to — the roots themselves, or the flattened stage view. Kept so the empty state
+    // can ask whether there is anything to show without caring which of the two it is.
+    private ObservableCollection<SceneNode>? _shown;
+
+    // Nothing open yet: a hierarchy showing an empty box reads as a panel that failed rather than as a window
+    // waiting for a resource. Says so instead, the same way the stage does.
+    private void UpdateEmptyState()
+    {
+        bool empty = _shown is not { Count: > 0 };
+        EmptyScene.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        SceneTree.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     /// <summary>A material tile was clicked — the host opens (or re-focuses) the material editor on it.</summary>
     public event Action<MaterialViewModel>? MaterialEditorRequested;
 
@@ -67,9 +81,14 @@ public partial class ScenePanel : UserControl
     {
         _viewport = viewport;
 
-        SceneTree.ItemsSource = viewport.Roots;
-        _groupsView = CollectionViewSource.GetDefaultView(viewport.Roots);
+        // A district is a folder of archives and that nesting is the truth of it; one archive on a stage is
+        // not, and the folder / SDS / FrameResource spine would be three rows of ceremony before the first
+        // thing you can click. Same nodes either way — only where the view starts differs.
+        ObservableCollection<SceneNode> shown = viewport.IsMapViewport ? viewport.Roots : viewport.StageRoots;
+        SceneTree.ItemsSource = shown;
+        _groupsView = CollectionViewSource.GetDefaultView(shown);
         _groupsView.Filter = o => o is SceneNode n && n.HasSearchMatch;
+        _shown = shown;
 
         _selection = new SelectionViewModel(viewport);
         PropertyTabs.DataContext = _selection;
@@ -78,7 +97,9 @@ public partial class ScenePanel : UserControl
         {
             UpdateSceneStats();
             _groupsView.Refresh();
+            UpdateEmptyState();
         });
+        UpdateEmptyState();
 
         // Selection sync: tree ⇄ viewport ⇄ property tabs. Only act on a real node — a null NewValue can come
         // from the virtualized tree recycling the selected container on scroll, and must NOT deselect
