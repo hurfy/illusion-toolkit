@@ -92,6 +92,10 @@ public partial class ContentBrowser : UserControl
     /// decides what that means (in Library mode: load it onto the stage).</summary>
     public event Action<LibraryEntry>? EntryActivated;
 
+    /// <summary>A resource INSIDE the open archive was double-clicked. The host decides what that means —
+    /// a texture goes on the stage as a picture; most types have nothing to show yet.</summary>
+    public event Action<SdsResource>? ResourceActivated;
+
     /// <summary>The browser was folded away or opened again — the host re-sizes its row.</summary>
     public event Action? CollapsedChanged;
 
@@ -661,6 +665,9 @@ public partial class ContentBrowser : UserControl
                 // inside it. One asks what it looks like, the other what it is made of.
                 EntryActivated?.Invoke(entry);
                 OpenArchive(entry);
+                break;
+            case SdsResource resource:
+                ResourceActivated?.Invoke(resource);
                 break;
         }
     }

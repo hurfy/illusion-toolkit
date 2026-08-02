@@ -61,10 +61,10 @@
             <Path Width="46" Height="46" Stretch="Uniform" Fill="Transparent" Stroke="#33383F"
                   StrokeThickness="1.5" StrokeLineJoin="Round" StrokeStartLineCap="Round"
                   StrokeEndLineCap="Round" Data="{StaticResource IconScene}" HorizontalAlignment="Center" />
-            <TextBlock Text="No hierarchy yet" Foreground="#9AFFFFFF" FontSize="12.5" FontWeight="SemiBold"
-                       HorizontalAlignment="Center" Margin="0,16,0,0" />
-            <TextBlock Text="Open a resource to see what is in it" Foreground="#59FFFFFF" FontSize="11"
-                       HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" />
+            <TextBlock x:Name="EmptyTitle" Text="No hierarchy yet" Foreground="#9AFFFFFF" FontSize="12.5"
+                       FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,0" />
+            <TextBlock x:Name="EmptyHint" Text="Open a resource to see what is in it" Foreground="#59FFFFFF"
+                       FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" />
         </StackPanel>
 
         <TreeView x:Name="SceneTree" Grid.Row="2" Margin="8,0,8,0" BorderThickness="0"

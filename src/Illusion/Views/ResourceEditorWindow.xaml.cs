@@ -2,11 +2,14 @@ using System.IO;
 using System.Numerics;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using Illusion.Assets;
 using Illusion.Assets.Library;
+using Illusion.Assets.Sds;
 using Illusion.Rendering.Passes;
 using Illusion.Settings;
 using Illusion.ViewModels;
+using Illusion.Viewport;
 
 namespace Illusion.Views;
 
@@ -28,6 +31,12 @@ public partial class ResourceEditorWindow : Window
     private LibraryEntry? _staged;
     private MaterialEditorWindow? _materialEditor;
     private double _browserHeight = 300;   // two rows of tiles — see the BrowserRow definition
+
+    // The texture on the stage, if the stage is showing one, and the thing that draws it. The renderer owns
+    // its own headless GPU stack, so a texture costs nothing until one is opened and does not bring the
+    // scene viewport up behind it.
+    private SdsResource? _shownTexture;
+    private TexturePreviewRenderer? _textures;
 
     public ResourceEditorWindow()
     {
@@ -66,6 +75,7 @@ public partial class ResourceEditorWindow : Window
         UpdateBridgeUi();
 
         Browser.EntryActivated += StageEntry;
+        Browser.ResourceActivated += ShowResource;
         Browser.CollapsedChanged += UpdateBrowserRow;
 
         CommandBindings.Add(new CommandBinding(EditorCommands.Undo, (_, _) => Stage.Undo(),
@@ -178,22 +188,65 @@ public partial class ResourceEditorWindow : Window
         if (Stage.HasUnsavedEdits) SaveEdits();
 
         _staged = entry;
+        ClearTexture();     // a scene and a picture are the same surface — one replaces the other
         Stage.Start();      // first thing to draw: bring the render pipeline up (see the XAML)
         Stage.LoadStage(entry.File, entry.Name);
         UpdateStageChrome();
+    }
+
+    /// <summary>
+    /// A resource inside the open archive was asked for. A texture is a picture, so the stage shows the
+    /// picture — no scene, no viewport, and the hierarchy says as much rather than sitting there empty.
+    /// Every other type is left alone for now: opening one would have to mean something first.
+    /// </summary>
+    private void ShowResource(SdsResource resource)
+    {
+        if (resource.Kind is not (SdsResourceKind.Texture or SdsResourceKind.Mipmap
+            or SdsResourceKind.AnimatedTexture))
+        {
+            return;
+        }
+
+        _textures ??= new TexturePreviewRenderer();
+        ImageSource? picture = _textures.Render(resource.File);
+        (int Width, int Height)? size = TexturePreviewRenderer.ReadSize(resource.File);
+
+        TextureImage.Source = picture;
+        TextureCaption.Text = picture == null
+            ? resource.Name + " — could not be decoded"
+            : size is var (w, h) && size != null
+                ? $"{resource.Name}   ·   {w} × {h}"
+                : resource.Name;
+
+        _shownTexture = resource;
+        UpdateStageChrome();
+    }
+
+    // Anything that puts a scene on the stage takes the picture back off it: the two are the same surface.
+    private void ClearTexture()
+    {
+        _shownTexture = null;
+        TextureImage.Source = null;
     }
 
     private void UpdateStageChrome()
     {
         StagedText.Text = _staged?.Name ?? "nothing loaded";
 
-        // With nothing loaded the stage column is a page, not a viewport: the render surface is not even
-        // running, so the tools and gizmos that act on it go with it rather than floating over an empty
-        // background. The hover label is left alone — it drives its own visibility, and there are no glyphs
-        // here to name.
+        // Three forms, one surface: a scene, a texture, or the page that says there is neither. With no
+        // scene the render surface is not even running, so the tools and gizmos that act on it go with it
+        // rather than floating over a picture or an empty background. The hover label is left alone — it
+        // drives its own visibility, and there are no glyphs here to name.
         bool staged = Stage.Roots.Count > 0;
-        EmptyStage.Visibility = staged ? Visibility.Collapsed : Visibility.Visible;
+        bool texture = !staged && _shownTexture != null;
+        EmptyStage.Visibility = staged || texture ? Visibility.Collapsed : Visibility.Visible;
+        TextureStage.Visibility = texture ? Visibility.Visible : Visibility.Collapsed;
         ToolShelf.SetShown(staged);
+
+        // A texture has no hierarchy, and the panel saying which nothing it is beats it sitting empty.
+        Scene.ShowNothing(
+            texture ? "This is a texture" : "No hierarchy yet",
+            texture ? "There is no scene in it to list" : "Open a resource to see what is in it");
         UpdateTitle();
     }
 
@@ -490,7 +543,8 @@ public partial class ResourceEditorWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _materialEditor?.Close();
-        Stage.Dispose();  // its own GPU stack — the map editor's keeps running
+        Stage.Dispose();     // its own GPU stack — the map editor's keeps running
+        _textures?.Dispose();  // and the texture page's, which is a second one again
         base.OnClosed(e);
     }
 }

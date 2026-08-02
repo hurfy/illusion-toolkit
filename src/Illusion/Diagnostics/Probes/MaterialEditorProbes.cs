@@ -754,6 +754,11 @@ internal static class MaterialEditorProbes
                     }
                 }
             }
+
+            // The resource editor's texture page: the same trick at the texture's own size, off an extracted
+            // .dds by path rather than by material slot. The game ships DDS, which WPF cannot decode and
+            // nothing here decodes on the CPU — so if this stops working, opening a texture shows nothing.
+            CheckTexturePreview(Check, sb);
         }
         catch (Exception ex)
         {
@@ -767,6 +772,51 @@ internal static class MaterialEditorProbes
             r1?.Dispose(); t1?.Dispose(); gpu1?.Dispose();
             sb.Insert(0, $"MATERIAL GPU PROBE: {(failed == 0 ? "PASS" : "FAIL")} ({passed} passed, {failed} failed)\n\n");
             File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
+    // One extracted .dds through the texture page's renderer: the header gives its size, the picture comes
+    // back at that size (capped), and it is an image rather than a flat fill.
+    private static void CheckTexturePreview(Action<string, bool, string> check, StringBuilder sb)
+    {
+        var car = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars", "shubert_38.sds"));
+        if (!car.Exists) { sb.AppendLine("\ntexture preview skipped — no shubert_38"); return; }
+
+        string extracted = SdsMeshLoader.EnsureExtracted(car);
+        FileInfo? dds = new DirectoryInfo(extracted).GetFiles("*.dds")
+            .Where(f => !f.Name.StartsWith("MIP_", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(f => f.Length).FirstOrDefault();
+        if (dds == null) { sb.AppendLine("\ntexture preview skipped — no .dds in the car"); return; }
+
+        (int Width, int Height)? size = TexturePreviewRenderer.ReadSize(dds);
+        check("a texture's own size reads straight off its header", size is { Width: > 0, Height: > 0 },
+            size is var (sw, sh) && size != null ? $"{dds.Name} {sw}x{sh}" : "unreadable");
+
+        using var preview = new TexturePreviewRenderer();
+        ImageSource? picture = preview.Render(dds);
+        var bmp = picture as BitmapSource;
+        check("a texture comes back as a picture at its own shape",
+            bmp != null && size != null
+            && Math.Abs((double)bmp.PixelWidth / bmp.PixelHeight - (double)size.Value.Width / size.Value.Height)
+                < 0.02,
+            bmp == null ? "nothing came back" : $"{bmp.PixelWidth}x{bmp.PixelHeight}");
+
+        if (bmp != null)
+        {
+            var pixels = new byte[bmp.PixelWidth * bmp.PixelHeight * 4];
+            bmp.CopyPixels(pixels, bmp.PixelWidth * 4, 0);
+            var shades = new HashSet<int>();
+            for (int i = 0; i + 3 < pixels.Length; i += 4)
+                shades.Add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2]);
+            check("the picture is the texture, not a flat fill", shades.Count > 16, shades.Count + " colours");
+            check("a texture is decoded once and kept", ReferenceEquals(picture, preview.Render(dds)), "");
+
+            var enc = new PngBitmapEncoder();
+            enc.Frames.Add(BitmapFrame.Create(bmp));
+            string png = Path.Combine(Path.GetTempPath(), "illusion_texture_preview.png");
+            using FileStream fs = File.Create(png);
+            enc.Save(fs);
+            sb.AppendLine($"\ntexture preview ({dds.Name}) -> {png}");
         }
     }
 

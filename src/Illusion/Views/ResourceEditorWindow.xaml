@@ -236,6 +236,47 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- The stage's third form: a texture is a picture, so the stage shows the picture. Same
+                         page as the empty one so opening a texture reads as the stage changing rather than
+                         as a different window; checkerboard behind it, because a texture with an alpha hole
+                         and a texture that is simply dark look identical on a flat background. -->
+                    <Border x:Name="TextureStage" Visibility="Collapsed" Background="#17181B">
+                        <Grid Margin="24">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    BorderBrush="#26FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Rectangle>
+                                        <Rectangle.Fill>
+                                            <DrawingBrush TileMode="Tile" Viewport="0,0,16,16"
+                                                          ViewportUnits="Absolute" Stretch="None">
+                                                <DrawingBrush.Drawing>
+                                                    <GeometryDrawing Brush="#232427">
+                                                        <GeometryDrawing.Geometry>
+                                                            <GeometryGroup>
+                                                                <RectangleGeometry Rect="0,0,8,8" />
+                                                                <RectangleGeometry Rect="8,8,8,8" />
+                                                            </GeometryGroup>
+                                                        </GeometryDrawing.Geometry>
+                                                    </GeometryDrawing>
+                                                </DrawingBrush.Drawing>
+                                            </DrawingBrush>
+                                        </Rectangle.Fill>
+                                    </Rectangle>
+                                    <Image x:Name="TextureImage" Stretch="Uniform"
+                                           StretchDirection="DownOnly"
+                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="TextureCaption" Grid.Row="1" Foreground="#8AFFFFFF"
+                                       FontSize="11.5" HorizontalAlignment="Center" Margin="0,16,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Border>
+
                     <!-- The same tools and gizmos as the map editor: a viewport is a viewport. -->
                     <v:ViewportToolShelf x:Name="ToolShelf" />
 

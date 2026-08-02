@@ -44,8 +44,17 @@ public partial class ScenePanel : UserControl
     // can ask whether there is anything to show without caring which of the two it is.
     private ObservableCollection<SceneNode>? _shown;
 
-    // Nothing open yet: a hierarchy showing an empty box reads as a panel that failed rather than as a window
-    // waiting for a resource. Says so instead, the same way the stage does.
+    /// <summary>
+    /// What the panel says when there is no hierarchy to show. The host sets it to name WHICH nothing this
+    /// is — a texture on the stage has no scene to list, and saying so beats an empty box that reads as a
+    /// panel which failed.
+    /// </summary>
+    public void ShowNothing(string title, string hint)
+    {
+        EmptyTitle.Text = title;
+        EmptyHint.Text = hint;
+    }
+
     private void UpdateEmptyState()
     {
         bool empty = _shown is not { Count: > 0 };
