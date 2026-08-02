@@ -817,7 +817,63 @@ internal static class MaterialEditorProbes
             using FileStream fs = File.Create(png);
             enc.Save(fs);
             sb.AppendLine($"\ntexture preview ({dds.Name}) -> {png}");
+
+            CheckPreviewIdentity(check, dds, extracted);
         }
+    }
+
+    // Two ways the preview can hand back a picture of something else, both found by review after it shipped.
+    private static void CheckPreviewIdentity(Action<string, bool, string> check, FileInfo dds, string extracted)
+    {
+        FileInfo? second = new DirectoryInfo(extracted).GetFiles("*.dds")
+            .FirstOrDefault(f => !f.Name.Equals(dds.Name, StringComparison.OrdinalIgnoreCase)
+                                 && f.Length != dds.Length);
+        if (second == null) return;
+
+        string root = Path.Combine(Path.GetTempPath(), "illusion_preview_identity");
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        string one = Path.Combine(root, "archiveA");
+        string two = Path.Combine(root, "archiveB");
+        Directory.CreateDirectory(one);
+        Directory.CreateDirectory(two);
+
+        // Same FILE NAME, different archives, different content — what two archives that both ship a
+        // "chrome_d.dds" look like. The texture library answers by bare name over every folder it has ever
+        // been told about, so nothing but the preview's own folder handling keeps these apart.
+        const string shared = "shared_name.dds";
+        var inA = new FileInfo(Path.Combine(one, shared));
+        var inB = new FileInfo(Path.Combine(two, shared));
+        dds.CopyTo(inA.FullName, true);
+        second.CopyTo(inB.FullName, true);
+        inA.Refresh();
+        inB.Refresh();
+
+        using var preview = new TexturePreviewRenderer();
+        string? a = Fingerprint(preview.Render(inA));
+        string? b = Fingerprint(preview.Render(inB));
+        check("two archives sharing a texture name do not show each other's picture",
+            a != null && b != null && a != b, a == b ? "same picture came back twice" : "different");
+
+        // ...and a file replaced under a path already previewed — which is exactly what restoring a backup
+        // does, since it deletes the extracted folder and unpacks the older archive to the same paths.
+        second.CopyTo(inA.FullName, true);
+        inA.Refresh();
+        string? afterSwap = Fingerprint(preview.Render(inA));
+        check("a texture replaced on disk is not served from the cache",
+            afterSwap != null && afterSwap != a, afterSwap == a ? "stale picture" : "re-read");
+
+        Directory.Delete(root, true);
+    }
+
+    // Enough of a picture to tell two of them apart: size plus a sample of the pixels.
+    private static string? Fingerprint(ImageSource? image)
+    {
+        if (image is not BitmapSource bmp) return null;
+        var pixels = new byte[bmp.PixelWidth * bmp.PixelHeight * 4];
+        bmp.CopyPixels(pixels, bmp.PixelWidth * 4, 0);
+        long sum = 0;
+        for (int i = 0; i < pixels.Length; i += 97) sum += pixels[i] * (i + 1L);
+        return $"{bmp.PixelWidth}x{bmp.PixelHeight}:{sum}";
     }
 
     // Pixels meaningfully brighter than the dark clear color — the lit sphere's footprint.

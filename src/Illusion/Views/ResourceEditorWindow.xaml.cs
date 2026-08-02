@@ -201,10 +201,20 @@ public partial class ResourceEditorWindow : Window
     /// </summary>
     private void ShowResource(SdsResource resource)
     {
+        // The scene is a resource like any other, and the frame resource is the tile that stands for it —
+        // so opening it is how you get back from a picture to the thing the archive actually is. Without
+        // this the stage has a way in and no way out.
+        if (resource.Kind == SdsResourceKind.Mesh)
+        {
+            ClearTexture();
+            UpdateStageChrome();
+            return;
+        }
+
         if (resource.Kind is not (SdsResourceKind.Texture or SdsResourceKind.Mipmap
             or SdsResourceKind.AnimatedTexture))
         {
-            return;
+            return;   // nothing to show yet — opening it would have to mean something first
         }
 
         _textures ??= new TexturePreviewRenderer();
@@ -507,6 +517,10 @@ public partial class ResourceEditorWindow : Window
 
     private void ReloadStage()
     {
+        // Same rule as every other way a scene reaches the stage: a scene and a picture are the same
+        // surface. Without this a restore reloads the archive BEHIND a texture that is still on top and now
+        // shows bytes the archive no longer has.
+        ClearTexture();
         if (_staged is { } entry) Stage.LoadStage(entry.File, entry.Name);
     }
 

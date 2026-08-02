@@ -501,17 +501,35 @@ internal static class LibraryProbes
                         && window.Scene.EmptyTitle.Text.Contains("texture", StringComparison.OrdinalIgnoreCase),
                         $"{window.Scene.EmptyScene.Visibility}, “{window.Scene.EmptyTitle.Text}”");
 
-                    // ...and a resource that is not a texture is not something to open yet, so nothing moves.
-                    SdsResource? other = inside.Find(r => r.Kind == SdsResourceKind.Shape);
-                    int otherRow = other == null ? -1 : browser.Contents.Items.IndexOf(other);
-                    if (other != null && otherRow >= 0 && Row(browser, otherRow) is { } otherTile)
+                    // A resource with nothing to show is not a way out — the stage stays as it was.
+                    SdsResource? shape = inside.Find(r => r.Kind == SdsResourceKind.Shape);
+                    int shapeRow = shape == null ? -1 : browser.Contents.Items.IndexOf(shape);
+                    if (shape != null && shapeRow >= 0 && Row(browser, shapeRow) is { } shapeTile)
                     {
-                        browser.Contents.SelectedItem = other;
-                        DoubleClick(browser.Contents, otherTile);
+                        browser.Contents.SelectedItem = shape;
+                        DoubleClick(browser.Contents, shapeTile);
                         Layout();
                         check("a resource with nothing to show leaves the stage alone",
                             window.TextureStage.Visibility == Visibility.Visible,
                             window.TextureStage.Visibility.ToString());
+                    }
+
+                    // ...but the frame resource IS one: it stands for the scene, so opening it takes the
+                    // picture back off the stage. Without it a texture is a door that only opens inward.
+                    SdsResource? mesh = inside.Find(r => r.Kind == SdsResourceKind.Mesh);
+                    int meshRow = mesh == null ? -1 : browser.Contents.Items.IndexOf(mesh);
+                    if (mesh != null && meshRow >= 0 && Row(browser, meshRow) is { } meshTile)
+                    {
+                        browser.Contents.SelectedItem = mesh;
+                        DoubleClick(browser.Contents, meshTile);
+                        Layout();
+                        check("opening the frame resource switches back from a texture to the scene",
+                            window.TextureStage.Visibility == Visibility.Collapsed
+                            && window.EmptyStage.Visibility == Visibility.Collapsed,
+                            $"texture={window.TextureStage.Visibility}, empty={window.EmptyStage.Visibility}");
+                        check("and the hierarchy goes back to listing the scene",
+                            window.Scene.EmptyScene.Visibility == Visibility.Collapsed,
+                            window.Scene.EmptyScene.Visibility.ToString());
                     }
                     window.Stage.Tree.Clear();
                 }

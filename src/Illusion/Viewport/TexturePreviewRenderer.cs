@@ -38,6 +38,13 @@ internal sealed class TexturePreviewRenderer : IDisposable
 
     private readonly Dictionary<string, ImageSource> _cache = new(StringComparer.OrdinalIgnoreCase);
 
+    // The extracted folder the GPU stack is currently primed for. The texture library it resolves through
+    // only ever ACCUMULATES folders and answers by bare file name, taking the first registered folder that
+    // has one — which is right for a district's own shared texture namespace and wrong here, where two
+    // unrelated archives may each ship a "chrome_d.dds". So the stack is torn down when the folder changes:
+    // a device rebuild on a click that switches archives, against showing one archive's texture for another's.
+    private string? _folder;
+
     /// <summary>
     /// The picture for one extracted <c>.dds</c>, cached by path, or null when the file cannot be sized or
     /// the GPU stack is unavailable. Never throws: a texture that will not decode is a thing to report in
@@ -45,10 +52,20 @@ internal sealed class TexturePreviewRenderer : IDisposable
     /// </summary>
     public ImageSource? Render(FileInfo dds)
     {
+        dds.Refresh();   // the stamps below decide what is cached; a FileInfo made earlier remembers old ones
         if (!dds.Exists) return null;
-        if (_cache.TryGetValue(dds.FullName, out ImageSource? hit)) return hit;
+
+        // Keyed by what the file IS, not only where it is: restoring a backup deletes the extracted folder
+        // and unpacks the older archive to the very same paths, so a key of path alone would keep handing
+        // back a picture of bytes that are no longer there.
+        string key = $"{dds.FullName}|{dds.LastWriteTimeUtc.Ticks}|{dds.Length}";
+        if (_cache.TryGetValue(key, out ImageSource? hit)) return hit;
         if (ReadSize(dds) is not var (width, height)) return null;
+
+        string folder = dds.DirectoryName!;
+        if (_folder != null && !string.Equals(_folder, folder, StringComparison.OrdinalIgnoreCase)) Reset();
         if (!EnsureContext()) return null;
+        _folder = folder;
 
         try
         {
@@ -61,7 +78,7 @@ internal sealed class TexturePreviewRenderer : IDisposable
                 _target = new SharedRenderTarget(_gpu!, w, h);
             }
 
-            _renderer!.Textures.AddFolder(dds.DirectoryName!);
+            _renderer!.Textures.AddFolder(folder);
             _renderer.Clear();
             _renderer.AddMesh(Quad(dds.Name));
             _renderer.Render(_target);
@@ -69,7 +86,7 @@ internal sealed class TexturePreviewRenderer : IDisposable
             byte[] bgra = RenderTargetReadback.Read(_gpu!, _target);
             BitmapSource bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Bgra32, null, bgra, w * 4);
             bmp.Freeze();
-            _cache[dds.FullName] = bmp;
+            _cache[key] = bmp;
             return bmp;
         }
         catch (Exception)
@@ -156,13 +173,15 @@ internal sealed class TexturePreviewRenderer : IDisposable
         }
         catch (Exception)
         {
-            Dispose();
+            Reset();          // not Dispose: pictures already made are still good, whatever the device did
             _failed = true;
             return false;
         }
     }
 
-    public void Dispose()
+    // Drops the GPU stack, keeping the pictures already made — they are finished bitmaps and owe the device
+    // nothing. What has to go is the texture library's idea of which folders a name may be found in.
+    private void Reset()
     {
         _target?.Dispose();
         _target = null;
@@ -170,6 +189,12 @@ internal sealed class TexturePreviewRenderer : IDisposable
         _renderer = null;
         _gpu?.Dispose();
         _gpu = null;
+        _folder = null;
+    }
+
+    public void Dispose()
+    {
+        Reset();
         _cache.Clear();
     }
 }
