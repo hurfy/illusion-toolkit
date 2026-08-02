@@ -470,6 +470,52 @@ internal static class LibraryProbes
                 browser.FilterBox.Text = "";
                 Layout();
 
+                // A texture on the stage. The archive is loaded underneath by definition — stepping into one
+                // is what stages it — so this is exactly the case a picture that only showed on an empty
+                // stage could never reach, which is how it shipped broken the first time.
+                SdsResource? tex = inside.Find(r => r.Kind == SdsResourceKind.Texture);
+                int texRow = tex == null ? -1 : browser.Contents.Items.IndexOf(tex);
+                if (tex != null && texRow >= 0 && Row(browser, texRow) is { } texTile)
+                {
+                    // Stood up by hand because the probe cannot stream one — that needs a GPU and a shown
+                    // window. Without a scene underneath, the check would pass on the broken build too: the
+                    // bug WAS that the picture only showed on an empty stage, and here the stage is empty.
+                    var loaded = new SceneNode("cars", "Folder", true);
+                    var loadedSds = new SceneNode("shubert_38", "Sds", true);
+                    var loadedFr = new SceneNode("FrameResource", "FrameResource", true);
+                    loadedFr.AddChild(new SceneNode("body", "Model", false));
+                    loadedSds.AddChild(loadedFr);
+                    loaded.AddChild(loadedSds);
+                    window.Stage.Tree.Roots.Add(loaded);
+                    window.Stage.Tree.RebuildStageRoots();
+
+                    browser.Contents.SelectedItem = tex;
+                    DoubleClick(browser.Contents, texTile);
+                    Layout();
+                    check("double-clicking a texture puts it on the stage",
+                        window.TextureStage.Visibility == Visibility.Visible
+                        && window.EmptyStage.Visibility == Visibility.Collapsed,
+                        $"texture={window.TextureStage.Visibility}, empty={window.EmptyStage.Visibility}");
+                    check("a texture on the stage says so in the hierarchy too",
+                        window.Scene.EmptyScene.Visibility == Visibility.Visible
+                        && window.Scene.EmptyTitle.Text.Contains("texture", StringComparison.OrdinalIgnoreCase),
+                        $"{window.Scene.EmptyScene.Visibility}, “{window.Scene.EmptyTitle.Text}”");
+
+                    // ...and a resource that is not a texture is not something to open yet, so nothing moves.
+                    SdsResource? other = inside.Find(r => r.Kind == SdsResourceKind.Shape);
+                    int otherRow = other == null ? -1 : browser.Contents.Items.IndexOf(other);
+                    if (other != null && otherRow >= 0 && Row(browser, otherRow) is { } otherTile)
+                    {
+                        browser.Contents.SelectedItem = other;
+                        DoubleClick(browser.Contents, otherTile);
+                        Layout();
+                        check("a resource with nothing to show leaves the stage alone",
+                            window.TextureStage.Visibility == Visibility.Visible,
+                            window.TextureStage.Visibility.ToString());
+                    }
+                    window.Stage.Tree.Clear();
+                }
+
                 // ...and out again. The archive's own folder is where up lands, not wherever the tree was.
                 check("up is live while an archive is open", browser.UpBtn.IsEnabled, "disabled");
                 browser.UpBtn.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));

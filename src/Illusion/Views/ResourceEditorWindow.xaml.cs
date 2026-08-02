@@ -233,20 +233,25 @@ public partial class ResourceEditorWindow : Window
     {
         StagedText.Text = _staged?.Name ?? "nothing loaded";
 
-        // Three forms, one surface: a scene, a texture, or the page that says there is neither. With no
-        // scene the render surface is not even running, so the tools and gizmos that act on it go with it
-        // rather than floating over a picture or an empty background. The hover label is left alone — it
-        // drives its own visibility, and there are no glyphs here to name.
-        bool staged = Stage.Roots.Count > 0;
-        bool texture = !staged && _shownTexture != null;
-        EmptyStage.Visibility = staged || texture ? Visibility.Collapsed : Visibility.Visible;
+        // Three forms, one surface: a texture, a scene, or the page that says there is neither.
+        // The texture WINS over the scene, and that ordering is the whole of it: you can only reach a
+        // texture by stepping into an archive, and stepping into one stages it — so a scene is always
+        // loaded underneath, and a picture that only showed on an empty stage could never show at all.
+        // With no scene the render surface is not even running, so the tools and gizmos that act on it go
+        // with it rather than floating over a picture. The hover label is left alone — it drives its own
+        // visibility, and there are no glyphs here to name.
+        bool texture = _shownTexture != null;
+        bool scene = !texture && Stage.Roots.Count > 0;
+        EmptyStage.Visibility = texture || scene ? Visibility.Collapsed : Visibility.Visible;
         TextureStage.Visibility = texture ? Visibility.Visible : Visibility.Collapsed;
-        ToolShelf.SetShown(staged);
+        ToolShelf.SetShown(scene);
 
-        // A texture has no hierarchy, and the panel saying which nothing it is beats it sitting empty.
+        // A texture has no hierarchy, and the panel saying which nothing it is beats it listing a scene
+        // that is no longer on the stage — hence forcing the message over whatever the tree still holds.
         Scene.ShowNothing(
             texture ? "This is a texture" : "No hierarchy yet",
-            texture ? "There is no scene in it to list" : "Open a resource to see what is in it");
+            texture ? "There is no scene in it to list" : "Open a resource to see what is in it",
+            always: texture);
         UpdateTitle();
     }
 

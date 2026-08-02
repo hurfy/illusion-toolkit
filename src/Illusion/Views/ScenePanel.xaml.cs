@@ -48,16 +48,23 @@ public partial class ScenePanel : UserControl
     /// What the panel says when there is no hierarchy to show. The host sets it to name WHICH nothing this
     /// is — a texture on the stage has no scene to list, and saying so beats an empty box that reads as a
     /// panel which failed.
+    /// <para><paramref name="always"/> says it even when a scene IS still loaded: a texture replaces the
+    /// scene on the stage without unloading it, and a tree listing something you are no longer looking at
+    /// is worse than a line saying what you are.</para>
     /// </summary>
-    public void ShowNothing(string title, string hint)
+    public void ShowNothing(string title, string hint, bool always = false)
     {
         EmptyTitle.Text = title;
         EmptyHint.Text = hint;
+        _forceEmpty = always;
+        UpdateEmptyState();
     }
+
+    private bool _forceEmpty;
 
     private void UpdateEmptyState()
     {
-        bool empty = _shown is not { Count: > 0 };
+        bool empty = _forceEmpty || _shown is not { Count: > 0 };
         EmptyScene.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         SceneTree.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
     }
