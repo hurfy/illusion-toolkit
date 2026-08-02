@@ -3,9 +3,11 @@ using System.Numerics;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Illusion.Assets;
 using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
@@ -122,6 +124,83 @@ internal static class LibraryProbes
             LibraryCatalog empty = LibraryCatalog.Build(Path.Combine(Path.GetTempPath(), "illusion_no_such_sds"));
             Check("a missing sds folder yields an empty catalog, not a throw",
                 empty.Roots.Count == 0 && empty.AllEntries.Count == 0);
+
+            // What an archive is MADE OF, straight off its manifest — the model the browser bands into
+            // sections. A car is the useful sample: it is the one archive that carries almost every type.
+            LibraryEntry? shubert = catalog.AllEntries.FirstOrDefault(e => e.Name == "shubert_38");
+            if (shubert != null)
+            {
+                ArchiveContents contents = ArchiveContents.Read(shubert.File);
+                var byKind = contents.Resources.GroupBy(r => r.Kind).ToDictionary(g => g.Key, g => g.Count());
+                sb.AppendLine("\n— shubert_38 announces " + contents.Resources.Count + " resources: " +
+                              string.Join(", ", byKind.OrderByDescending(p => p.Value)
+                                  .Select(p => $"{p.Value} {p.Key}")));
+
+                Check("an archive's manifest reads as typed resources",
+                    contents.Resources.Count > 20
+                    && byKind.ContainsKey(SdsResourceKind.Mesh) && byKind.ContainsKey(SdsResourceKind.Texture)
+                    && byKind.ContainsKey(SdsResourceKind.Shape),
+                    $"{contents.Resources.Count} resources, {byKind.Count} kinds");
+                // An unrecognised type is the one thing this table cannot be sure of, and the section it
+                // lands in is where it would show up — so the count of them is worth an assertion.
+                var strangers = contents.Resources.Where(r => r.Kind == SdsResourceKind.Unknown).ToList();
+                Check("every type a car carries is one this build knows", strangers.Count == 0,
+                    string.Join(", ", strangers.Select(r => r.Type).Distinct()));
+                Check("every resource announced is a file on disk",
+                    contents.Resources.All(r => r.Size > 0),
+                    string.Join(", ", contents.Resources.Where(r => r.Size == 0).Select(r => r.Name).Take(4)));
+                Check("a resource is filed under its kind's section",
+                    contents.Resources.All(r =>
+                        r.Section == SdsResourceKinds.SectionOf(r.Kind)));
+            }
+
+            // A second archive, for the entries whose manifest name is NOT what the extractor put on disk —
+            // a car carries none of them. The XML handler appends a suffix it does not record, and a Script
+            // entry names the package rather than a file and lists its pieces under elements of its own.
+            LibraryEntry? gui = catalog.AllEntries
+                .FirstOrDefault(e => e.Name == "gui" && e.FolderPath == "sds/gui");
+            if (gui != null)
+            {
+                ArchiveContents guiContents = ArchiveContents.Read(gui.File);
+                var xml = guiContents.Resources.Where(r => r.Kind == SdsResourceKind.Xml).ToList();
+                Check("an XML resource resolves to the file the extractor wrote, suffix and all",
+                    xml.Count > 0 && xml.TrueForAll(r => r.Size > 0),
+                    $"{xml.Count(r => r.Size > 0)} of {xml.Count} found on disk");
+                var scripts = guiContents.Resources.Where(r => r.Kind == SdsResourceKind.Script).ToList();
+                Check("a script package is not called a missing file",
+                    scripts.Count > 0 && scripts.TrueForAll(r => !r.NamesFile),
+                    $"{scripts.Count} scripts");
+                Check("everything else in a second archive is on disk too",
+                    guiContents.Resources.Where(r => r.NamesFile).All(r => r.Size > 0),
+                    string.Join(", ", guiContents.Resources
+                        .Where(r => r.NamesFile && r.Size == 0).Select(r => r.Type + " " + r.Name).Take(4)));
+            }
+
+            // The browser catches whatever a read throws and says so instead of falling over — which is only
+            // worth anything if a read of something that is not an archive does throw.
+            bool threw = false;
+            try
+            {
+                ArchiveContents.Read(new FileInfo(
+                    Path.Combine(Path.GetTempPath(), "illusion_not_an_archive.sds")));
+            }
+            catch (Exception) { threw = true; }
+            Check("reading something that is not an archive throws, which is what the browser catches", threw);
+
+            // Every type the extractor knows how to unpack has to have a home here, or an archive would open
+            // onto a band called Other with no way to tell what landed in it.
+            string[] engineTypes =
+            {
+                "IndexBufferPool", "VertexBufferPool", "Texture", "FrameResource", "Effects", "FrameNameTable",
+                "Actors", "EntityDataStorage", "Table", "NAV_OBJ_DATA", "NAV_AIWORLD_DATA", "PREFAB",
+                "AnimalTrafficPaths", "Animation2", "NAV_HPD_DATA", "AudioSectors", "MemFile", "Collisions",
+                "ItemDesc", "FxActor", "FxAnimSet", "Script", "Sound", "Speech", "Cutscene", "SoundTable",
+                "XML", "Translokator", "Mipmap", "Animated Texture",
+            };
+            var unclassified = engineTypes.Where(t => SdsResourceKinds.Of(t) == SdsResourceKind.Unknown)
+                .ToList();
+            Check("every resource type the extractor knows is classified", unclassified.Count == 0,
+                string.Join(", ", unclassified));
 
             CheckBrowserControl(catalog, Check, sb);
 
@@ -336,6 +415,129 @@ internal static class LibraryProbes
             }
         }
 
+        // Opening a resource is two things at once: the host stages it, and the pane steps INTO it. The read
+        // runs off the UI thread, so the probe has to pump its own dispatcher to see the answer arrive.
+        if (car != null)
+        {
+            browser.Reveal(car);
+            Layout();
+            int at = browser.Contents.Items.IndexOf(car);
+            if (at >= 0 && Row(browser, at) is { } carTile)
+            {
+                browser.Contents.SelectedItem = car;
+                DoubleClick(browser.Contents, carTile);
+                bool opened = PumpUntil(() => Rows(browser).Exists(o => o is SdsResource));
+                Layout();
+
+                var inside = Rows(browser).OfType<SdsResource>().ToList();
+                check("opening an archive shows the resources it announces",
+                    opened && inside.Count > 20
+                    && inside.Exists(r => r.Kind == SdsResourceKind.Mesh)
+                    && inside.Exists(r => r.Kind == SdsResourceKind.Texture),
+                    $"{inside.Count} resources");
+
+                // Banded, and the bands in their canonical order however the tiles inside them are sorted —
+                // the sort is over the tiles, not over the sections.
+                var bands = new List<SdsResourceSection>();
+                foreach (SdsResource r in inside)
+                    if (bands.Count == 0 || bands[^1] != r.Section) bands.Add(r.Section);
+                bool rising = true;
+                for (int i = 1; i < bands.Count; i++) if (bands[i] <= bands[i - 1]) rising = false;
+                check("the resources come out banded, in section order", bands.Count > 2 && rising,
+                    string.Join(" · ", bands));
+
+                browser.SortBy(BrowserSort.SizeDescending);
+                Layout();
+                var resorted = Rows(browser).OfType<SdsResource>().ToList();
+                var afterSort = new List<SdsResourceSection>();
+                foreach (SdsResource r in resorted)
+                    if (afterSort.Count == 0 || afterSort[^1] != r.Section) afterSort.Add(r.Section);
+                check("sorting inside an archive reorders tiles, not sections",
+                    afterSort.Count == bands.Count && !resorted.SequenceEqual(inside),
+                    $"{afterSort.Count} bands, {string.Join(" · ", afterSort)}");
+                browser.SortBy(BrowserSort.NameAscending);
+                Layout();
+
+                string needle = inside[0].Name[..3];
+                browser.FilterBox.Text = needle;
+                Layout();
+                var narrowed = Rows(browser).OfType<SdsResource>().ToList();
+                check("the filter narrows an archive's resources too",
+                    narrowed.Count is > 0 && narrowed.Count <= inside.Count
+                    && narrowed.TrueForAll(r => r.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)),
+                    $"{narrowed.Count} of {inside.Count} on “{needle}”");
+                browser.FilterBox.Text = "";
+                Layout();
+
+                // ...and out again. The archive's own folder is where up lands, not wherever the tree was.
+                check("up is live while an archive is open", browser.UpBtn.IsEnabled, "disabled");
+                browser.UpBtn.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                Layout();
+                check("up walks out of an archive back to the folder holding it",
+                    Rows(browser).Count > 0 && Rows(browser).TrueForAll(o => o is LibraryEntry)
+                    && ReferenceEquals(browser.FolderTree.SelectedItem, cars),
+                    $"{Rows(browser).Count} rows, tree={(browser.FolderTree.SelectedItem as LibraryFolder)?.Name}");
+                check("up is dead at a root", !browser.UpBtn.IsEnabled, "still enabled");
+            }
+        }
+
+        // An archive opened out of a SEARCH HIT still has to show the archive. The pane answers the search
+        // before it answers an open archive, so a query left standing would keep the hit list up forever.
+        if (car != null)
+        {
+            browser.SearchBox.Text = "shubert_38";
+            Layout();
+            int hit = browser.Contents.Items.IndexOf(car);
+            if (hit >= 0 && Row(browser, hit) is { } hitTile)
+            {
+                browser.Contents.SelectedItem = car;
+                DoubleClick(browser.Contents, hitTile);
+                bool shown = PumpUntil(() => Rows(browser).Exists(o => o is SdsResource));
+                Layout();
+                check("opening an archive out of a search hit still shows the archive",
+                    shown && !browser.IsSearching && browser.SearchBox.Text.Length == 0,
+                    $"searching={browser.IsSearching}, {Rows(browser).Count} rows");
+                browser.UpBtn.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                Layout();
+            }
+            browser.SearchBox.Text = "";
+            Layout();
+        }
+
+        // ...and up out of a folder lands on its parent.
+        if (chars is { Folders.Count: > 0 })
+        {
+            browser.OpenFolder(chars.Folders[0]);
+            Layout();
+            check("up is live inside a sub-folder", browser.UpBtn.IsEnabled, "disabled");
+            browser.UpBtn.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Layout();
+            check("up out of a folder lands on its parent",
+                ReferenceEquals(browser.FolderTree.SelectedItem, chars),
+                (browser.FolderTree.SelectedItem as LibraryFolder)?.Name ?? "nothing");
+        }
+
+        // The same folder object hangs under two roots — hchar is a row under Characters AND a row under
+        // All archives. Up has to leave by the branch you came in, which only the selected ROW knows; asking
+        // the catalog who the parent is answers for whichever root it happens to reach first.
+        LibraryFolder? all = catalog.Roots.FirstOrDefault(r => r.Name == "All archives");
+        LibraryFolder? shared = chars?.Folders.Count > 0 ? chars.Folders[0] : null;
+        if (all != null && shared != null && Branch(browser, all) is { } allRow)
+        {
+            allRow.IsExpanded = true;
+            Layout();
+            if (allRow.ItemContainerGenerator.ContainerFromItem(shared) is TreeViewItem sharedRow)
+            {
+                sharedRow.IsSelected = true;
+                Layout();
+                browser.UpBtn.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                Layout();
+                check("up leaves a shared folder by the branch you came in",
+                    ReferenceEquals(browser.FolderTree.SelectedItem, all),
+                    (browser.FolderTree.SelectedItem as LibraryFolder)?.Name ?? "nothing");
+            }
+        }
+
         // Folding gives the height back — how much is --probe-layout's business. What matters here is that
         // there is still something to click: the tab hangs OUTSIDE the pane on a negative margin, so a folded
         // browser is a hairline with the tab standing above it. Anything that starts clipping the control
@@ -349,9 +551,28 @@ internal static class LibraryProbes
         browser.IsCollapsed = false;
         Layout();
 
-        // Two pictures, because the browser has two shapes worth eyeballing: a folder open, and a search on —
-        // the second is the one where the tree folds away and the tiles come from everywhere at once.
+        // Three pictures, because the pane takes three shapes worth eyeballing: a folder open, the inside of
+        // an archive banded by section, and a search — where the tree folds away and the tiles come from
+        // everywhere at once.
+        if (chars is { Folders.Count: > 0 }) browser.OpenFolder(chars.Folders[0]);
+        Layout();
         Shoot("illusion_library_browser.png");
+
+        if (car != null)
+        {
+            browser.Reveal(car);
+            Layout();
+            int shot = browser.Contents.Items.IndexOf(car);
+            if (shot >= 0 && Row(browser, shot) is { } shotTile)
+            {
+                browser.Contents.SelectedItem = car;
+                DoubleClick(browser.Contents, shotTile);
+                PumpUntil(() => Rows(browser).Exists(o => o is SdsResource));
+                Layout();
+                Shoot("illusion_library_archive.png");
+            }
+        }
+
         browser.SearchBox.Text = "shubert";
         Layout();
         Shoot("illusion_library_search.png");
@@ -373,6 +594,22 @@ internal static class LibraryProbes
             }
             catch (Exception ex) { sb.AppendLine("\nrender skipped — " + ex.Message); }
         }
+    }
+
+    // Runs the dispatcher until the condition holds. The browser opens an archive on a background thread and
+    // posts the answer back, and a probe has no message loop of its own to deliver it on — without this the
+    // check would read the pane before it had been filled and call a working feature broken.
+    private static bool PumpUntil(Func<bool> done, int timeoutMs = 30000)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (!done() && DateTime.UtcNow < deadline)
+        {
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background,
+                new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+        }
+        return done();
     }
 
     // A root branch of the folder tree, by the folder it stands for. Only the roots are reachable this way,

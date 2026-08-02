@@ -2,6 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:lib="clr-namespace:Illusion.Assets.Library;assembly=Illusion.Assets"
+             xmlns:sds="clr-namespace:Illusion.Assets.Sds;assembly=Illusion.Assets"
              xmlns:v="clr-namespace:Illusion.Views">
 
     <!-- The library's navigator: the folder tree on the left, that folder's content as tiles on the right.
@@ -27,8 +28,56 @@
         <v:ResourceGlyphConverter x:Key="Glyph" />
         <v:ResourceTintConverter x:Key="Tint" />
 
+        <v:ArchiveGlyphConverter x:Key="ArchiveGlyph" />
+        <v:ArchiveTintConverter x:Key="ArchiveTint" />
+        <v:SectionTintConverter x:Key="SectionTint" />
+        <v:SectionTitleConverter x:Key="SectionTitle" />
+        <v:ResourceSizeConverter x:Key="ResourceSize" />
+
+
         <StreamGeometry x:Key="BrowserFolder">M1.5,9.3 L1.5,4.2 L4.4,4.2 L5.6,5.5 L10.5,5.5 L10.5,9.3 Z</StreamGeometry>
         <StreamGeometry x:Key="BrowserFind">M2.1,5.2 A3.1,3.1 0 1 1 8.3,5.2 A3.1,3.1 0 1 1 2.1,5.2 Z M7.5,7.5 L10.4,10.4</StreamGeometry>
+        <!-- Up one level. A bare arrow, because at 13px it is the only thing that reads: a folder with an
+             arrow inside it turns into a smudge, which was the first thing tried. -->
+        <StreamGeometry x:Key="BrowserUpArrow">M6,10.4 L6,2.6 M2.4,6.2 L6,2.6 L9.6,6.2</StreamGeometry>
+
+        <!-- Out of the open folder or archive. Sized to the sort field beside it so the row keeps one
+             baseline; dimmed rather than hidden at a root, because a control that comes and goes moves
+             everything next to it. -->
+        <Style x:Key="BrowserUp" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="ToolTip" Value="Up one level" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
+                                BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                            <Path x:Name="Icon" Width="13" Height="13" Stretch="Uniform" Fill="Transparent"
+                                  Stroke="#C8FFFFFF" StrokeThickness="1.15" StrokeLineJoin="Round"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Data="{StaticResource BrowserUpArrow}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                                <Setter TargetName="Icon" Property="Stroke" Value="White" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <!-- The fold: a tab standing on the browser's top edge and sticking UP out of it, rounded on the
              top corners only and open at the bottom, so it reads as one piece with the pane it opens. The
@@ -273,12 +322,18 @@
                     <Grid Grid.Row="0" Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <v:DropDownField x:Name="SortField" Grid.Column="0" Width="124" DisplayPath="Label"
+                        <!-- Out of here: back to the folder holding the open archive, or up to the parent
+                             folder. First in the row because it is the one control that changes WHAT the
+                             other two are working on. -->
+                        <Button x:Name="UpBtn" Grid.Column="0" Style="{StaticResource BrowserUp}"
+                                Margin="0,0,8,0" Click="Up_Click" />
+                        <v:DropDownField x:Name="SortField" Grid.Column="1" Width="124" DisplayPath="Label"
                                          VerticalAlignment="Center" ToolTip="How the tiles are ordered"
                                          SelectionChanged="Sort_Changed" />
-                        <Grid Grid.Column="1" Margin="8,0,0,0">
+                        <Grid Grid.Column="2" Margin="8,0,0,0">
                             <TextBox x:Name="FilterBox" Style="{StaticResource BrowserSearch}"
                                      ToolTip="Narrow down what is showing in this folder"
                                      TextChanged="Filter_TextChanged" />
@@ -300,11 +355,46 @@
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  ScrollViewer.CanContentScroll="False">
+                            <!-- The tiles' own panel — and it stays the tiles' panel once the pane is banded
+                                 by section, because ItemsPanel is the panel of the INNERMOST level. What
+                                 lays the section blocks out is GroupStyle.Panel below; getting those two the
+                                 wrong way round bands the pane sideways, one column per section. -->
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <WrapPanel Orientation="Horizontal" />
                                 </ItemsPanelTemplate>
                             </ListBox.ItemsPanel>
+
+                            <!-- Section band inside an opened archive. Unused while browsing folders: a view
+                                 with no grouping never asks for it. The header carries the section's own
+                                 colour, so a band is recognisable before its title is read. -->
+                            <ListBox.GroupStyle>
+                                <GroupStyle>
+                                    <GroupStyle.Panel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Vertical" />
+                                        </ItemsPanelTemplate>
+                                    </GroupStyle.Panel>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,0,0,9">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="3" Height="12" CornerRadius="1.5"
+                                                            VerticalAlignment="Center" Margin="0,0,8,0"
+                                                            Background="{Binding Name, Converter={StaticResource SectionTint}}" />
+                                                    <TextBlock Foreground="White" FontSize="11.5"
+                                                               FontWeight="SemiBold" VerticalAlignment="Center"
+                                                               Text="{Binding Name, Converter={StaticResource SectionTitle}}" />
+                                                    <TextBlock Foreground="#66FFFFFF" FontSize="10.5"
+                                                               VerticalAlignment="Center" Margin="8,0,0,0"
+                                                               Text="{Binding ItemCount}" />
+                                                </StackPanel>
+                                                <Border Height="1" Background="#14FFFFFF" Margin="0,6,12,0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </ListBox.GroupStyle>
 
                             <!-- Two implicit templates, picked by row type: the pane lists a folder's
                                  sub-folders above its archives, so a category that only gathers folders still
@@ -363,6 +453,40 @@
                                         <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding Size, Converter={StaticResource ByteSize}}" />
+                                    </Grid>
+                                </DataTemplate>
+
+                                <!-- One resource inside an opened archive. Same square as an archive tile,
+                                     so stepping in changes what you are looking at and not how to read it.
+                                     The tooltip carries the engine's own type name — that is what the game
+                                     and every other tool call it, and the section is only our grouping. -->
+                                <DataTemplate DataType="{x:Type sds:SdsResource}">
+                                    <Grid Margin="8,12,8,10">
+                                        <Grid.ToolTip>
+                                            <StackPanel MaxWidth="320">
+                                                <TextBlock Text="{Binding Name}" Foreground="White"
+                                                           FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Type}" Foreground="#99FFFFFF"
+                                                           FontSize="11" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Grid.ToolTip>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Path Grid.Row="0" Width="40" Height="40" Stretch="Uniform"
+                                              Fill="Transparent" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                              Data="{Binding Kind, Converter={StaticResource ArchiveGlyph}}"
+                                              Stroke="{Binding Kind, Converter={StaticResource ArchiveTint}}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
+                                                   FontSize="11" TextAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
+                                        <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
+                                                   TextAlignment="Center" Margin="0,2,0,0"
+                                                   Text="{Binding Converter={StaticResource ResourceSize}}" />
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.Resources>

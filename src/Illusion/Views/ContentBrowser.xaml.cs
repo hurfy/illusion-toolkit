@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -5,13 +6,16 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using Illusion.Assets.Library;
+using Illusion.Assets.Sds;
 
 namespace Illusion.Views;
 
 /// <summary>
 /// The resource library's navigator: the folder tree on the left, that folder's sub-folders and archives as
-/// tiles on the right. A single click selects; a double click walks into a folder or puts an archive on the
-/// stage (<see cref="EntryActivated"/>).
+/// tiles on the right. A single click selects; a double click walks into a folder, or opens an archive —
+/// which means both putting it on the stage (<see cref="EntryActivated"/>) and stepping INTO it, so the pane
+/// shows what it is made of: every resource its manifest announces, banded by section. The up button walks
+/// back out of either.
 /// <para>
 /// There are two searches, because they answer two different questions. The library search
 /// (<see cref="SearchBox"/>) is "where in the game is this?" — it queries the whole index and folds the tree
@@ -44,6 +48,19 @@ public partial class ContentBrowser : UserControl
     private LibraryCatalog? _catalog;
     private LibraryFolder? _folder;
     private BrowserSort _sort = BrowserSort.NameAscending;
+
+    // The archive the pane has stepped INTO, if any: its manifest, the card it came from, and — while the
+    // read is still running — the name to say and, once it fails, the reason. The entry is set before the
+    // contents are, so there is a way back out of an archive that is still extracting.
+    private ArchiveContents? _archive;
+    private LibraryEntry? _archiveEntry;
+    private string? _opening;
+    private string? _openError;
+
+    // Which open the pane is waiting for. Reading a manifest may have to extract the archive first, which is
+    // slow enough to double-click something else during — and the second answer must not be overwritten by
+    // the first one arriving late.
+    private int _openToken;
 
     private string _query = "";      // the library search, over the whole index
     private string _filter = "";     // the folder filter, over the tiles already showing
@@ -102,6 +119,7 @@ public partial class ContentBrowser : UserControl
     public void SetCatalog(LibraryCatalog? catalog)
     {
         _catalog = catalog;
+        CloseArchive();
         _folder = null;
         _foldedBefore = null;
         _treeQuery = "";
@@ -147,6 +165,7 @@ public partial class ContentBrowser : UserControl
     /// </summary>
     internal void OpenFolder(LibraryFolder folder)
     {
+        CloseArchive();     // every way into a folder is also the way out of an archive
         _folder = folder;
         _syncing = true;
         try { Highlight(folder); }
@@ -176,6 +195,139 @@ public partial class ContentBrowser : UserControl
         if (Array.Find(SortOptions, option => option.Sort == sort) is { } found) SortField.SelectedItem = found;
     }
 
+    // ── Stepping into an archive ──
+
+    /// <summary>
+    /// Opens an archive IN THE PANE: its manifest becomes the rows, banded by section. Separate from staging
+    /// it — the viewport shows what the archive looks like, this shows what it is made of, and a double click
+    /// asks for both.
+    /// <para>
+    /// The read may have to extract first, so it runs off the UI thread and the pane says what it is waiting
+    /// for meanwhile. The extraction is the same shared working copy the stage loads from, so opening an
+    /// archive that is already staged costs a manifest parse.
+    /// </para>
+    /// </summary>
+    private async void OpenArchive(LibraryEntry entry)
+    {
+        int token = ++_openToken;
+        _archive = null;
+        _archiveEntry = entry;      // set now: there has to be a way back out of a slow open
+        _openError = null;
+        _opening = entry.Name;
+        // Both queries go, the same as walking into a folder. The search matters most: it is answered BEFORE
+        // an open archive when the pane decides what to show, so leaving it on would keep the hit list up and
+        // the archive you just opened would never appear — and you can open one from a search hit.
+        SearchBox.Text = "";
+        FilterBox.Text = "";
+        Refresh();
+
+        ArchiveContents? contents = null;
+        string? failure = null;
+        try
+        {
+            contents = await Task.Run(() => ArchiveContents.Read(entry.File));
+        }
+        catch (Exception ex)
+        {
+            // A malformed or half-written archive is a thing to report, not to fall over on — the browser
+            // has to survive whatever is in the game folder.
+            failure = ex.Message;
+        }
+
+        if (token != _openToken) return;   // something else was opened while this one was extracting
+        _opening = null;
+        _archive = contents;
+        _openError = failure;
+        Refresh();
+    }
+
+    // Leaves the archive, and disowns any read still running for it.
+    private void CloseArchive()
+    {
+        _openToken++;
+        _archive = null;
+        _archiveEntry = null;
+        _opening = null;
+        _openError = null;
+    }
+
+    /// <summary>
+    /// Out one level: back to the folder holding the open archive, or up to the current folder's parent.
+    /// Both queries are left behind on the way, the same as walking into a folder — one written for where
+    /// you were would only hide where you have arrived.
+    /// </summary>
+    private void GoUp()
+    {
+        LibraryFolder? target = _archiveEntry is { } inside ? FolderOf(inside) : ParentFolder();
+        if (target == null) return;
+
+        CloseArchive();
+        SearchBox.Text = "";
+        FilterBox.Text = "";
+        OpenFolder(target);
+    }
+
+    private void UpdateUpButton() =>
+        UpBtn.IsEnabled = _archiveEntry != null || ParentFolder() != null;
+
+    // The folder that directly holds an archive, by the same first-match-from-the-roots walk the tree
+    // highlight uses — so where "up" out of an archive goes and where the tree lands cannot disagree.
+    private LibraryFolder? FolderOf(LibraryEntry entry)
+    {
+        if (_catalog == null) return null;
+        foreach (LibraryFolder root in _catalog.Roots)
+        {
+            var path = new List<LibraryFolder>();
+            if (FindPath(root, entry, path)) return path[^1];
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The folder one level above the open one — read off the TREE, not off the catalog. The same real folder
+    /// hangs under more than one root (<c>hchar</c> is under Characters and under All archives, as the very
+    /// same object), so asking the catalog "who is its parent" answers for whichever root comes first and
+    /// would teleport you out of the branch you were actually in. The selected row knows which one that is.
+    /// </summary>
+    private LibraryFolder? ParentFolder()
+    {
+        if (SelectedNode() is { } node
+            && ItemsControl.ItemsControlFromItemContainer(node) is TreeViewItem above
+            && above.DataContext is LibraryFolder parent)
+        {
+            return parent;
+        }
+
+        // No realized selection to read — a pane rebuilt before the tree has containers. Fall back to the
+        // catalog, which is right whenever a folder hangs under one root only.
+        if (_catalog == null || _folder == null) return null;
+        foreach (LibraryFolder root in _catalog.Roots)
+        {
+            var path = new List<LibraryFolder>();
+            if (FindFolderPath(root, _folder, path)) return path.Count >= 2 ? path[^2] : null;
+        }
+        return null;
+    }
+
+    // The tree row that is actually highlighted. TreeView hands out the selected ITEM, and one item can be
+    // two rows under two different roots — the container is the only thing that says which.
+    private TreeViewItem? SelectedNode()
+    {
+        TreeViewItem? found = null;
+        void Walk(ItemsControl host)
+        {
+            foreach (object item in host.Items)
+            {
+                if (found != null) return;
+                if (host.ItemContainerGenerator.ContainerFromItem(item) is not TreeViewItem node) continue;
+                if (node.IsSelected) { found = node; return; }
+                Walk(node);
+            }
+        }
+        Walk(FolderTree);
+        return found;
+    }
+
     // ── The contents pane ──
 
     // Everything the pane shows is rebuilt here, from the two boxes and the sort: which rows there are at all
@@ -197,6 +349,17 @@ public partial class ContentBrowser : UserControl
                     if (Hit(entry.Name, _query)) rows.Add(entry);
             }
         }
+        else if (_archive != null)
+        {
+            // Inside an archive: what it announces it carries, banded by section below.
+            foreach (SdsResource resource in _archive.Resources) rows.Add(resource);
+        }
+        else if (_archiveEntry != null)
+        {
+            // Committed to an archive that has not answered yet, or has failed. Deliberately no rows: the
+            // folder underneath would look exactly like nothing having happened, and the pane's one line of
+            // prose — what it is waiting for, or why it gave up — only shows when there is nothing else to.
+        }
         else if (_folder != null)
         {
             // Sub-folders above archives: a category that only gathers folders (Characters) would otherwise
@@ -208,9 +371,21 @@ public partial class ContentBrowser : UserControl
         if (_filter.Length > 0) rows.RemoveAll(row => !Hit(NameOf(row), _filter));
         rows.Sort(Order);
 
+        BandBySection(rows, _archive != null && !IsSearching);
         Contents.ItemsSource = rows;
         ScrollToTop();
         UpdateEmptyState(rows.Count);
+        UpdateUpButton();
+    }
+
+    // Bands the rows by section. Nothing has to be undone for the flat case: the rows are a fresh list every
+    // refresh, so its default view is fresh too and there is never a grouping left over from the last one.
+    // The panels are both declared in XAML and stay put — see the note there about which lays out which.
+    private static void BandBySection(List<object> rows, bool banded)
+    {
+        if (!banded) return;
+        ICollectionView view = CollectionViewSource.GetDefaultView(rows);
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(SdsResource.Section)));
     }
 
     private void ScrollToTop()
@@ -241,15 +416,26 @@ public partial class ContentBrowser : UserControl
     {
         LibraryEntry entry => entry.Name,
         LibraryFolder folder => folder.Name,
+        SdsResource resource => resource.Name,
         _ => "",
     };
 
-    // Folders before archives, always: they are the way deeper rather than content, and a sort that scatters
-    // them through a hundred tiles makes the pane unnavigable. Ties fall back to the name so the order of two
-    // equal rows never wobbles between refreshes.
+    // The band a row belongs to, and the order the bands come in. Folders before archives, always: they are
+    // the way deeper rather than content, and a sort that scatters them through a hundred tiles makes the
+    // pane unnavigable. Inside an archive it is the section, so the headers keep their canonical order
+    // whatever the sort is doing to the tiles under them.
+    private static int Band(object row) => row switch
+    {
+        LibraryFolder => 0,
+        LibraryEntry => 1,
+        SdsResource resource => (int)resource.Section,
+        _ => int.MaxValue,
+    };
+
+    // Ties fall back to the name so the order of two equal rows never wobbles between refreshes.
     private int Order(object a, object b)
     {
-        int group = (a is LibraryFolder ? 0 : 1) - (b is LibraryFolder ? 0 : 1);
+        int group = Band(a) - Band(b);
         if (group != 0) return group;
 
         int by = _sort switch
@@ -272,6 +458,7 @@ public partial class ContentBrowser : UserControl
     {
         LibraryEntry entry => entry.Size,
         LibraryFolder folder => folder.TotalEntries,
+        SdsResource resource => resource.Size,
         _ => 0,
     };
 
@@ -279,6 +466,7 @@ public partial class ContentBrowser : UserControl
     {
         LibraryEntry entry => (int)entry.Resource,
         LibraryFolder folder => (int)folder.Resource,
+        SdsResource resource => (int)resource.Kind,
         _ => 0,
     };
 
@@ -287,9 +475,12 @@ public partial class ContentBrowser : UserControl
     private void UpdateEmptyState(int count)
     {
         EmptyText.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EmptyText.Text = _catalog == null ? "No game folder yet"
+        EmptyText.Text = _openError != null ? "Could not read this archive — " + _openError
+            : _opening != null ? "Opening " + _opening + "…"
+            : _catalog == null ? "No game folder yet"
             : IsSearching ? "Nothing in the library matches"
             : _filter.Length > 0 ? "Nothing here matches the filter"
+            : _archive != null ? "This archive announces no resources"
             : _folder == null ? "Pick a folder on the left"
             : "This folder holds no archives";
     }
@@ -440,6 +631,7 @@ public partial class ContentBrowser : UserControl
     private void FolderTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         if (_syncing || e.NewValue is not LibraryFolder folder) return;
+        CloseArchive();     // picking a folder is also the way out of an archive
         _folder = folder;
 
         // Picking a folder ends BOTH queries — the same rule the other two ways into a folder follow. The
@@ -465,10 +657,15 @@ public partial class ContentBrowser : UserControl
                 OpenFolder(folder);
                 break;
             case LibraryEntry entry:
+                // Both halves of opening a resource: the host puts it on the stage, and the pane steps
+                // inside it. One asks what it looks like, the other what it is made of.
                 EntryActivated?.Invoke(entry);
+                OpenArchive(entry);
                 break;
         }
     }
+
+    private void Up_Click(object sender, RoutedEventArgs e) => GoUp();
 
     private static ListBoxItem? FindRow(DependencyObject? node)
     {
