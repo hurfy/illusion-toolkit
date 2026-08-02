@@ -36,11 +36,12 @@ public sealed class LibraryCatalog
     /// <c>m03_prostitute</c>, <c>driver</c>), not traffic vehicles. Every drivable car, truck, train and
     /// wagon lives in <c>cars\</c>.
     /// </summary>
-    private static readonly (string Name, string[] Folders)[] Categories =
+    private static readonly (string Name, string[] Folders, LibraryResourceKind Resource)[] Categories =
     {
-        ("Cars", new[] { "cars" }),
-        ("Characters", new[] { "hchar", "player", "police_char", "wardrobe", "traffic" }),
-        ("City objects", new[] { "city_crash" }),
+        ("Cars", new[] { "cars" }, LibraryResourceKind.Car),
+        ("Characters", new[] { "hchar", "player", "police_char", "wardrobe", "traffic" },
+            LibraryResourceKind.Character),
+        ("City objects", new[] { "city_crash" }, LibraryResourceKind.CityCrash),
     };
 
     /// <summary>
@@ -69,9 +70,9 @@ public sealed class LibraryCatalog
             var byName = new Dictionary<string, LibraryFolder>(StringComparer.OrdinalIgnoreCase);
             foreach (LibraryFolder f in tree.Folders) byName[f.Name] = f;
 
-            foreach ((string name, string[] folders) in Categories)
+            foreach ((string name, string[] folders, LibraryResourceKind resource) in Categories)
             {
-                LibraryFolder? category = BuildCategory(name, folders, byName);
+                LibraryFolder? category = BuildCategory(name, folders, resource, byName);
                 if (category != null) roots.Add(category);
             }
 
@@ -82,6 +83,9 @@ public sealed class LibraryCatalog
                 Name = "All archives",
                 Kind = LibraryFolderKind.Directory,
                 Path = "sds",
+                // Deliberately unclassified: this root is everything at once, so the only honest icon for it
+                // is the plain archive. Its children each carry their own kind.
+                Resource = LibraryResourceKind.Unknown,
                 FolderList = tree.FolderList,
                 EntryList = tree.EntryList,
                 TotalEntries = tree.TotalEntries,
@@ -104,7 +108,7 @@ public sealed class LibraryCatalog
     // One category: the folders it gathers, in the order the table names them. A single source folder is shown
     // flattened (the category IS that folder, renamed); several stay as sub-branches. Missing folders — a
     // stripped or modded install — are skipped, and a category left with nothing is dropped by the caller.
-    private static LibraryFolder? BuildCategory(string name, string[] folders,
+    private static LibraryFolder? BuildCategory(string name, string[] folders, LibraryResourceKind resource,
         Dictionary<string, LibraryFolder> byName)
     {
         var sources = new List<LibraryFolder>();
@@ -117,6 +121,7 @@ public sealed class LibraryCatalog
             Name = name,
             Kind = LibraryFolderKind.Category,
             Path = name,
+            Resource = resource,   // a category has no path to read its kind off — the table says it outright
         };
 
         if (sources.Count == 1)
@@ -138,11 +143,13 @@ public sealed class LibraryCatalog
     // is worse than no row.
     private static LibraryFolder? Scan(DirectoryInfo dir, string path, List<LibraryEntry> all)
     {
+        LibraryResourceKind resource = LibraryResourceKinds.Of(path);
         var folder = new LibraryFolder
         {
             Name = dir.Name,
             Kind = LibraryFolderKind.Directory,
             Path = path,
+            Resource = resource,
         };
 
         foreach (FileInfo f in Enumerate(dir))
@@ -153,6 +160,7 @@ public sealed class LibraryCatalog
                 File = f,
                 Size = f.Length,
                 FolderPath = path,
+                Resource = resource,
             };
             folder.EntryList.Add(entry);
             all.Add(entry);
@@ -164,6 +172,12 @@ public sealed class LibraryCatalog
             LibraryFolder? child = Scan(sub, path + "/" + sub.Name, all);
             if (child != null) folder.FolderList.Add(child);
         }
+        // Sorted like the archives above, and for a harder reason than tidiness: GetDirectories makes no
+        // promise about order, so without this the browser's tree lists sub-folders in whatever order the
+        // filesystem handed them over — disagreeing with the tile pane, which always sorts, and shuffling
+        // itself whenever the catalog is rebuilt. The category table's own order is set elsewhere and is
+        // deliberate; only this walk's output is alphabetised.
+        folder.FolderList.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
 
         folder.TotalEntries = folder.EntryList.Count;
         foreach (LibraryFolder c in folder.Folders) folder.TotalEntries += c.TotalEntries;

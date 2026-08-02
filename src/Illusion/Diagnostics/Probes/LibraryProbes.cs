@@ -133,9 +133,11 @@ internal static class LibraryProbes
 
     /// <summary>
     /// The browser control itself, driven headlessly inside a real resource-editor window: the panes fill from
-    /// the catalog, walking into a folder moves both panes together, the search box queries the whole index
-    /// rather than the open folder, and revealing an archive lands on its card. Ends with a picture of the
-    /// whole window for eyeballing, since none of the above says whether it is READABLE.
+    /// the catalog, walking into a folder moves both panes together, the library search queries the whole
+    /// index rather than the open folder and folds the tree down to the branches a hit is inside, the folder
+    /// filter narrows only what is already showing, sorting reorders it, and revealing an archive lands on its
+    /// tile. Ends with a picture of each of the browser's two shapes — a folder open, and a search on — since
+    /// none of the above says whether either is READABLE.
     /// </summary>
     private static void CheckBrowserControl(LibraryCatalog catalog, Action<string, bool, string> check,
         StringBuilder sb)
@@ -195,10 +197,101 @@ internal static class LibraryProbes
         int misses = SearchCount(browser, "zzz_no_such_archive");
         check("a search miss shows nothing rather than the folder again", misses == 0, $"{misses} rows");
 
+        // ...and it folds the tree down to the branches a hit is inside, which is what makes the hit list
+        // placeable: 28 cars mean nothing until the tree says they are all in one folder. Asked again
+        // because the miss above left every branch folded away, which is the same thing said about nothing.
+        browser.SearchBox.Text = "shubert";
+        Layout();
+        TreeViewItem? carsRow = Branch(browser, cars);
+        TreeViewItem? charsRow = Branch(browser, chars);
+        check("the search folds the tree down to the branches a hit is inside",
+            carsRow?.Visibility == Visibility.Visible && charsRow?.Visibility == Visibility.Collapsed,
+            $"cars={carsRow?.Visibility}, characters={charsRow?.Visibility}");
+
+        // Picking one of them is the end of the search — the filter is there to FIND the folder, and leaving
+        // the query on would keep the pane showing hits from everywhere else.
+        if (carsRow != null)
+        {
+            carsRow.IsSelected = true;
+            Layout();
+            check("picking a folder in the folded tree ends the search",
+                !browser.IsSearching && browser.SearchBox.Text.Length == 0
+                && ReferenceEquals(browser.FolderTree.SelectedItem, cars)
+                && charsRow?.Visibility == Visibility.Visible,
+                $"searching={browser.IsSearching}, tree={(browser.FolderTree.SelectedItem as LibraryFolder)?.Name}");
+        }
+
         browser.SearchBox.Text = "";
         Layout();
         check("clearing the search puts the folder back", !browser.IsSearching && Rows(browser).Count > 0,
             $"{Rows(browser).Count} rows");
+
+        // The OTHER search: the folder filter narrows what is already in the pane and touches neither the
+        // library nor the tree. Needled off the data rather than a literal, so a modded install still runs it.
+        if (cars != null && cars.Entries.Count > 1)
+        {
+            browser.OpenFolder(cars);
+            Layout();
+            int whole = Rows(browser).Count;
+            string needle = cars.Entries[0].Name[..3];
+            browser.FilterBox.Text = needle;
+            Layout();
+            var kept = Rows(browser).OfType<LibraryEntry>().ToList();
+            check("the folder filter narrows the open folder, not the library",
+                kept.Count is > 0 && kept.Count <= whole
+                && kept.TrueForAll(e => e.Name.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                && ReferenceEquals(browser.FolderTree.SelectedItem, cars),
+                $"{kept.Count} of {whole} on “{needle}”");
+
+            browser.FilterBox.Text = "zzz_no_such_archive";
+            Layout();
+            check("a filter miss empties the pane without losing the folder",
+                Rows(browser).Count == 0 && ReferenceEquals(browser.FolderTree.SelectedItem, cars),
+                $"{Rows(browser).Count} rows");
+
+            browser.FilterBox.Text = "";
+            Layout();
+            check("clearing the filter puts the whole folder back", Rows(browser).Count == whole,
+                $"{Rows(browser).Count} of {whole}");
+
+            // Sorting reorders those same rows. Size runs over the archives...
+            browser.SortBy(BrowserSort.SizeDescending);
+            Layout();
+            var bySize = Rows(browser).OfType<LibraryEntry>().ToList();
+            bool falling = true;
+            for (int i = 1; i < bySize.Count; i++)
+                if (bySize[i].Size > bySize[i - 1].Size) falling = false;
+            check("sorting by size reorders the tiles", bySize.Count > 1 && falling,
+                bySize.Count > 1 ? $"{bySize[0].Size / 1024} KB first, {bySize[^1].Size / 1024} KB last" : "too few");
+
+            // A click on a tree row is the primary way to change folders, and it has to leave the filter
+            // behind: one typed for the folder you left would otherwise empty the one you just picked.
+            if (chars != null && Branch(browser, chars) is { } charsRow2)
+            {
+                browser.OpenFolder(cars);
+                browser.FilterBox.Text = "zzz_no_such_archive";
+                Layout();
+                charsRow2.IsSelected = true;
+                Layout();
+                check("a tree click leaves the folder filter behind",
+                    browser.FilterBox.Text.Length == 0 && Rows(browser).Count == chars.Folders.Count,
+                    $"filter=“{browser.FilterBox.Text}”, {Rows(browser).Count} rows");
+            }
+        }
+
+        // ...and over a folder it is how much is inside it, since a folder has no size of its own.
+        if (chars != null)
+        {
+            browser.OpenFolder(chars);
+            Layout();
+            var byWeight = Rows(browser).OfType<LibraryFolder>().ToList();
+            check("a folder tile is weighed by what is inside it",
+                byWeight.Count == chars.Folders.Count && byWeight.Count > 1
+                && byWeight[0].TotalEntries >= byWeight[^1].TotalEntries,
+                byWeight.Count > 1 ? $"{byWeight[0].Name} {byWeight[0].TotalEntries} first" : "too few");
+        }
+        browser.SortBy(BrowserSort.NameAscending);
+        Layout();
 
         // The map → library jump: an archive on disk resolves to its card and the browser lands on it.
         LibraryEntry? car = catalog.AllEntries.FirstOrDefault(e => e.Name == "shubert_38");
@@ -243,25 +336,51 @@ internal static class LibraryProbes
             }
         }
 
-        // Folding gives the height back — asserted numerically by --probe-layout; here it only has to not throw.
+        // Folding gives the height back — how much is --probe-layout's business. What matters here is that
+        // there is still something to click: the tab hangs OUTSIDE the pane on a negative margin, so a folded
+        // browser is a hairline with the tab standing above it. Anything that starts clipping the control
+        // (a ClipToBounds, a Border with a corner radius around the body) would leave no way back in.
         browser.IsCollapsed = true;
         Layout();
+        Point tab = browser.CollapseBtn.TransformToAncestor(browser).Transform(new Point(0, 0));
+        check("folded, the tab is still drawn and hangs outside the pane",
+            browser.CollapseBtn.ActualHeight > 8 && tab.Y < 0 && browser.ActualHeight < 8,
+            $"tab {browser.CollapseBtn.ActualHeight:F0}px at y={tab.Y:F0}, pane {browser.ActualHeight:F0}px");
         browser.IsCollapsed = false;
         Layout();
 
-        try
+        // Two pictures, because the browser has two shapes worth eyeballing: a folder open, and a search on —
+        // the second is the one where the tree folds away and the tiles come from everywhere at once.
+        Shoot("illusion_library_browser.png");
+        browser.SearchBox.Text = "shubert";
+        Layout();
+        Shoot("illusion_library_search.png");
+        browser.SearchBox.Text = "";
+        Layout();
+
+        void Shoot(string name)
         {
-            if (content is Panel root) root.Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
-            var rtb = new RenderTargetBitmap((int)w, (int)h, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(content);
-            var enc = new PngBitmapEncoder();
-            enc.Frames.Add(BitmapFrame.Create(rtb));
-            string png = Path.Combine(Path.GetTempPath(), "illusion_library_browser.png");
-            using (FileStream fs = File.Create(png)) enc.Save(fs);
-            sb.AppendLine($"\nrendered {w}x{h}px -> {png}");
+            try
+            {
+                if (content is Panel root) root.Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
+                var rtb = new RenderTargetBitmap((int)w, (int)h, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(content);
+                var enc = new PngBitmapEncoder();
+                enc.Frames.Add(BitmapFrame.Create(rtb));
+                string png = Path.Combine(Path.GetTempPath(), name);
+                using (FileStream fs = File.Create(png)) enc.Save(fs);
+                sb.AppendLine($"\nrendered {w}x{h}px -> {png}");
+            }
+            catch (Exception ex) { sb.AppendLine("\nrender skipped — " + ex.Message); }
         }
-        catch (Exception ex) { sb.AppendLine("\nrender skipped — " + ex.Message); }
     }
+
+    // A root branch of the folder tree, by the folder it stands for. Only the roots are reachable this way,
+    // which is all the search checks need — they are the branches a fold is visible on.
+    private static TreeViewItem? Branch(ContentBrowser browser, LibraryFolder? folder) =>
+        folder == null
+            ? null
+            : browser.FolderTree.ItemContainerGenerator.ContainerFromItem(folder) as TreeViewItem;
 
     private static ListBoxItem? Row(ContentBrowser browser, int index) =>
         browser.Contents.ItemContainerGenerator.ContainerFromIndex(index) as ListBoxItem;

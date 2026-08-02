@@ -4,48 +4,61 @@
              xmlns:lib="clr-namespace:Illusion.Assets.Library;assembly=Illusion.Assets"
              xmlns:v="clr-namespace:Illusion.Views">
 
-    <!-- The library's navigator: folders on the left, their archives on the right, a search box that queries
-         the whole game rather than the open folder. A single click selects, a double click puts the archive on
-         the stage — the same split every asset browser has, so nothing here has to be learned.
-         The control is a strip plus a body: collapsing hides the body and leaves the strip, which is what keeps
-         the viewport usable on a 1280x720 screen. -->
+    <!-- The library's navigator: the folder tree on the left, that folder's content as tiles on the right.
+         A single click selects, a double click walks into a folder or puts an archive on the stage — the same
+         split every asset browser has, so nothing here has to be learned.
+
+         Two searches, because they answer two different questions. The one over the tree is "where in the
+         game is this?" and queries the whole index; the one over the tiles is "which of THESE?" and narrows
+         what is already on screen. Sorting sits beside the second one, since it reorders the same rows.
+
+         There is no title bar and no status line. Everything one would have said is already on screen and
+         better placed: which folder is open is the highlighted tree row, how much is in it is the number on
+         that row, and what the tiles are is the tiles. A caption repeating them is a band of text charged
+         against the height of a pane that is short to begin with.
+
+         The fold is a tab OUTSIDE the block — it sits on the divider above, sticking up into the stage, so
+         it stays put and stays clickable when the browser gives up all of its height. Folded, this control
+         is one hairline; the tab is the whole of what is left. -->
+
 
     <UserControl.Resources>
         <v:ByteSizeConverter x:Key="ByteSize" />
+        <v:ResourceGlyphConverter x:Key="Glyph" />
+        <v:ResourceTintConverter x:Key="Tint" />
 
-        <!-- Local copies of the scene tree's icons: this control is also built on its own (probes), so it
-             cannot reach the window's resource dictionary. -->
         <StreamGeometry x:Key="BrowserFolder">M1.5,9.3 L1.5,4.2 L4.4,4.2 L5.6,5.5 L10.5,5.5 L10.5,9.3 Z</StreamGeometry>
-        <StreamGeometry x:Key="BrowserArchive">M2,3.3 L10,3.3 L10,9.6 L2,9.6 Z M2,5.4 L10,5.4 M5.4,7.4 L6.6,7.4</StreamGeometry>
-        <StreamGeometry x:Key="BrowserCategory">M6,1.5 L10.5,4 L10.5,8.5 L6,11 L1.5,8.5 L1.5,4 Z</StreamGeometry>
+        <StreamGeometry x:Key="BrowserFind">M2.1,5.2 A3.1,3.1 0 1 1 8.3,5.2 A3.1,3.1 0 1 1 2.1,5.2 Z M7.5,7.5 L10.4,10.4</StreamGeometry>
 
-        <!-- Collapse chevron: points down while the body is open, right once it is folded away. -->
-        <Style x:Key="BrowserChevron" TargetType="ToggleButton">
+        <!-- The fold: a tab standing on the browser's top edge and sticking UP out of it, rounded on the
+             top corners only and open at the bottom, so it reads as one piece with the pane it opens. The
+             negative margin is what puts it outside; nothing between here and the window clips, so it draws
+             and takes clicks over the divider and the bottom of the stage.
+             Chevron down while the body is open (the way it will travel), up once it is folded away. -->
+        <Style x:Key="BrowserHandle" TargetType="ToggleButton">
             <Setter Property="Focusable" Value="False" />
-            <Setter Property="Width" Value="20" />
-            <Setter Property="Height" Value="20" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="58" />
+            <Setter Property="Height" Value="15" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="0,-14,0,0" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="3">
-                            <!-- Checked = the body is showing, so the chevron points down at it; unchecked it
-                                 points right, the way a folded-away panel reads everywhere else. -->
-                            <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="9"
-                                       Text="&#xE76C;" Foreground="#B0FFFFFF"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                                       RenderTransformOrigin="0.5,0.5" />
+                        <Border x:Name="Bd" Background="#2A2A2E" BorderBrush="#26FFFFFF"
+                                BorderThickness="1,1,1,0" CornerRadius="7,7,0,0" SnapsToDevicePixels="True">
+                            <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
+                                       Text="&#xE70E;" Foreground="#9AFFFFFF" Margin="0,1,0,0"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Chev" Property="RenderTransform">
-                                    <Setter.Value>
-                                        <RotateTransform Angle="90" />
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="Chev" Property="Text" Value="&#xE70D;" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#18FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="#3A3A40" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#40FFFFFF" />
                                 <Setter TargetName="Chev" Property="Foreground" Value="White" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -54,11 +67,11 @@
             </Setter>
         </Style>
 
-        <!-- Search field, matching the property panel's inputs. -->
+        <!-- Search field, matching the property panel's inputs. The left inset clears the magnifier. -->
         <Style x:Key="BrowserSearch" TargetType="TextBox">
             <Setter Property="Foreground" Value="White" />
             <Setter Property="FontSize" Value="11.5" />
-            <Setter Property="Height" Value="22" />
+            <Setter Property="Height" Value="24" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CaretBrush" Value="White" />
             <Setter Property="SelectionBrush" Value="#552D7DD2" />
@@ -67,7 +80,7 @@
                     <ControlTemplate TargetType="TextBox">
                         <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
                                 BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="22,0,6,0" VerticalAlignment="Center" />
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="26,0,6,0" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -84,7 +97,8 @@
         </Style>
 
         <!-- Folder row: same chevron, hover and selection colours as the scene tree, so the two trees in the
-             window read as one kind of thing. -->
+             window read as one kind of thing. The root Grid is what the search hides — collapsing it takes the
+             branch's children with it, which a hidden header alone would not. -->
         <Style x:Key="BrowserTreeItem" TargetType="TreeViewItem">
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -97,7 +111,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <Border x:Name="Row" Grid.Row="0" CornerRadius="3" Padding="2,0" MinHeight="22">
+                            <Border x:Name="Row" Grid.Row="0" CornerRadius="3" Padding="2,0" MinHeight="23">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="Background" Value="Transparent" />
@@ -113,33 +127,18 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <ToggleButton x:Name="Expander" Grid.Column="0" Width="14" Focusable="False"
-                                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}">
-                                        <ToggleButton.Template>
-                                            <ControlTemplate TargetType="ToggleButton">
-                                                <Border Background="Transparent" Width="14">
-                                                    <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                                               Text="&#xE76C;" Foreground="#99FFFFFF"
-                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                               RenderTransformOrigin="0.5,0.5" />
-                                                </Border>
-                                                <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsChecked" Value="True">
-                                                        <Setter TargetName="Chev" Property="RenderTransform">
-                                                            <Setter.Value>
-                                                                <RotateTransform Angle="90" />
-                                                            </Setter.Value>
-                                                        </Setter>
-                                                    </Trigger>
-                                                </ControlTemplate.Triggers>
-                                            </ControlTemplate>
-                                        </ToggleButton.Template>
-                                    </ToggleButton>
+                                    <!-- The scene tree's chevron, not a copy of it: the two trees sit in the
+                                         same window and a row that indents by a different amount than the
+                                         one above it is the kind of thing you see without being able to
+                                         name. -->
+                                    <ToggleButton x:Name="Expander" Grid.Column="0"
+                                                  Style="{StaticResource TreeChevron}"
+                                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" />
                                     <ContentPresenter x:Name="PART_Header" Grid.Column="1" ContentSource="Header"
                                                       HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
-                            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="12,0,0,0" />
+                            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Margin="14,0,0,0" />
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsExpanded" Value="False">
@@ -157,24 +156,35 @@
             </Setter>
         </Style>
 
-        <!-- Archive card. No thumbnail: a name, where it came from (only worth saying in a search hit) and
-             its size. The template is the one place a picture would later go. -->
-        <Style x:Key="BrowserCard" TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="4,0" />
+        <!-- Archive tile: a square of empty space with a big type icon in it, the name, and the size. No
+             thumbnail — an .sds is not opened to build this pane, so there is no picture to show; the icon
+             carries the type instead.
+             No card: a hundred filled, outlined boxes read as a wall rather than as a hundred things, so the
+             tile is nothing until the pointer or the selection is on it. What separates one from the next is
+             the gap, not a border.
+             100px with a 12px gap is measured, not taste: two rows of tile+gap have to clear the browser's
+             opening height at 720p, where the host caps it at half the stage (see ResourceEditorWindow),
+             once the panel's own 8px inset is off it. A row and a bit reads as a pane that failed to finish
+             drawing. -->
+        <Style x:Key="BrowserTile" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,12,12" />
+            <Setter Property="Padding" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="Bd" Background="Transparent" CornerRadius="3" MinHeight="22"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center" />
+                        <Border x:Name="Bd" Width="100" Height="100" CornerRadius="8"
+                                Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#12FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="#14FFFFFF" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Bd" Property="Background" Value="#382D7DD2" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -183,164 +193,193 @@
         </Style>
     </UserControl.Resources>
 
-    <Border Background="#1B1B1E" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+    <!-- The tab is a sibling of the pane, not a child of it: it has to survive the pane being collapsed to
+         a hairline, and it is drawn last so it lands over the divider and the stage above. -->
+    <Grid>
+        <Border Background="#1B1B1E" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0">
 
-            <!-- Strip: what stays on screen when the browser is folded away. -->
-            <Grid Grid.Row="0" Height="26">
+            <!-- Body: folders | contents. Collapsed by the tab. -->
+            <Grid x:Name="Body">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <ToggleButton x:Name="CollapseBtn" Grid.Column="0" Style="{StaticResource BrowserChevron}"
-                              IsChecked="True" Margin="6,0,2,0" ToolTip="Show / hide the content browser"
-                              Checked="Collapse_Changed" Unchecked="Collapse_Changed" />
-                <TextBlock Grid.Column="1" Text="Content" Foreground="White" FontSize="11.5" FontWeight="SemiBold"
-                           VerticalAlignment="Center" Margin="2,0,10,0" />
-                <TextBlock x:Name="PathText" Grid.Column="2" Foreground="#80FFFFFF" FontSize="11"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <Grid Grid.Column="3" Width="220" Margin="8,0,8,0">
-                    <TextBox x:Name="SearchBox" Style="{StaticResource BrowserSearch}"
-                             TextChanged="Search_TextChanged" />
-                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
-                               Foreground="#80FFFFFF" Margin="7,0,0,0"
-                               HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
-                    <TextBlock x:Name="SearchPlaceholder" Text="Search all archives…" Foreground="#66FFFFFF"
-                               FontSize="11.5" Margin="22,0,0,0" VerticalAlignment="Center"
-                               IsHitTestVisible="False" />
-                </Grid>
-            </Grid>
-
-            <!-- Body: folders | contents. Collapsed with the strip's chevron. -->
-            <Grid x:Name="Body" Grid.Row="1">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="FolderColumn" Width="210" MinWidth="120" />
+                    <ColumnDefinition x:Name="FolderColumn" Width="218" MinWidth="140" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" MinWidth="180" />
                 </Grid.ColumnDefinitions>
 
-                <TreeView x:Name="FolderTree" Grid.Column="0" Margin="4,2,0,4" BorderThickness="0"
-                          Background="Transparent"
-                          ItemContainerStyle="{StaticResource BrowserTreeItem}"
-                          SelectedItemChanged="FolderTree_SelectedItemChanged"
-                          VirtualizingStackPanel.IsVirtualizing="True"
-                          VirtualizingStackPanel.VirtualizationMode="Recycling">
-                    <TreeView.Resources>
-                        <HierarchicalDataTemplate DataType="{x:Type lib:LibraryFolder}" ItemsSource="{Binding Folders}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform" Fill="Transparent"
-                                      StrokeThickness="1.15" StrokeLineJoin="Round" VerticalAlignment="Center"
-                                      Margin="0,0,6,0" SnapsToDevicePixels="True">
-                                    <Path.Style>
-                                        <Style TargetType="Path">
-                                            <Setter Property="Stroke" Value="#E3B341" />
-                                            <Setter Property="Data" Value="{StaticResource BrowserFolder}" />
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Kind}" Value="Category">
-                                                    <Setter Property="Stroke" Value="#56C7D6" />
-                                                    <Setter Property="Data" Value="{StaticResource BrowserCategory}" />
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Path.Style>
-                                </Path>
-                                <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="11.5"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Grid.Column="2" Text="{Binding TotalEntries}" Foreground="#66FFFFFF"
-                                           FontSize="10.5" VerticalAlignment="Center" Margin="6,0,6,0" />
-                            </Grid>
-                        </HierarchicalDataTemplate>
-                    </TreeView.Resources>
-                </TreeView>
+                <!-- Left: the library search over the folder tree. Full width, above the tree it filters —
+                     a box that narrows what is under it belongs on top of it, not in a far corner.
+                     8 off every edge, like the scene panel next door: both are a search box over a tree in
+                     the same window, and they have no business being inset differently. -->
+                <Grid Grid.Column="0" Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <TextBox x:Name="SearchBox" Style="{StaticResource BrowserSearch}"
+                                 ToolTip="Search the whole library — folders and archives"
+                                 TextChanged="Search_TextChanged" />
+                        <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="#80FFFFFF"
+                              StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
+                              HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
+                        <TextBlock x:Name="SearchPlaceholder" Text="Search the library…" Foreground="#66FFFFFF"
+                                   FontSize="11.5" Margin="28,0,0,0" VerticalAlignment="Center"
+                                   IsHitTestVisible="False" />
+                    </Grid>
+
+                    <!-- Not virtualized on purpose: the whole sds tree is well under a hundred folders, and
+                         the search sets Visibility on the containers themselves — a recycled container would
+                         carry the previous row's answer with it. -->
+                    <TreeView x:Name="FolderTree" Grid.Row="1" BorderThickness="0" Background="Transparent"
+                              ItemContainerStyle="{StaticResource BrowserTreeItem}"
+                              SelectedItemChanged="FolderTree_SelectedItemChanged"
+                              VirtualizingStackPanel.IsVirtualizing="False"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <TreeView.Resources>
+                            <HierarchicalDataTemplate DataType="{x:Type lib:LibraryFolder}" ItemsSource="{Binding Folders}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                                          Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                                          Data="{Binding Resource, Converter={StaticResource Glyph}}"
+                                          Stroke="{Binding Resource, Converter={StaticResource Tint}}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="11.5"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="2" Text="{Binding TotalEntries}" Foreground="#66FFFFFF"
+                                               FontSize="10.5" VerticalAlignment="Center" Margin="8,0,2,0" />
+                                </Grid>
+                            </HierarchicalDataTemplate>
+                        </TreeView.Resources>
+                    </TreeView>
+                </Grid>
 
                 <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="#22000000" />
 
-                <Grid Grid.Column="2">
-                    <ListBox x:Name="Contents" Margin="4,2,4,4" BorderThickness="0" Background="Transparent"
-                             ItemContainerStyle="{StaticResource BrowserCard}"
-                             IsSynchronizedWithCurrentItem="False"
-                             MouseDoubleClick="Contents_MouseDoubleClick"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             VirtualizingStackPanel.IsVirtualizing="True"
-                             VirtualizingStackPanel.VirtualizationMode="Recycling">
-                        <!-- Two implicit templates, picked by row type: the pane lists a folder's sub-folders
-                             above its archives, so a category that only gathers folders still opens onto
-                             something, and a double click walks into it. -->
-                        <ListBox.Resources>
-                            <DataTemplate DataType="{x:Type lib:LibraryFolder}">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform" Fill="Transparent"
-                                          Stroke="#E3B341" StrokeThickness="1.15" StrokeLineJoin="Round"
-                                          VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
-                                          Data="{StaticResource BrowserFolder}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="11.5"
-                                               FontWeight="SemiBold" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="2" Foreground="#66FFFFFF" FontSize="10.5"
-                                               VerticalAlignment="Center" Margin="10,0,8,0"
-                                               Text="{Binding TotalEntries, StringFormat={}{0} archives}" />
-                                </Grid>
-                            </DataTemplate>
-                            <DataTemplate DataType="{x:Type lib:LibraryEntry}">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform" Fill="Transparent"
-                                          Stroke="#B392F0" StrokeThickness="1.15" StrokeLineJoin="Round"
-                                          VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
-                                          Data="{StaticResource BrowserArchive}" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="11.5"
-                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                    <!-- Where the hit came from: worth saying only while searching, when the rows
-                                         no longer share one folder. -->
-                                    <TextBlock Grid.Column="2" Text="{Binding FolderPath}" Foreground="#66FFFFFF"
-                                               FontSize="10.5" VerticalAlignment="Center" Margin="10,0,0,0">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Value="True"
-                                                                 Binding="{Binding IsSearching, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                                                        <Setter Property="Visibility" Value="Visible" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <TextBlock Grid.Column="3" Foreground="#66FFFFFF" FontSize="10.5" Width="62"
-                                               TextAlignment="Right" VerticalAlignment="Center" Margin="10,0,8,0"
-                                               Text="{Binding Size, Converter={StaticResource ByteSize}}" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.Resources>
-                    </ListBox>
+                <!-- Right: how the tiles are ordered, then what is filtered out of them, then the tiles. -->
+                <Grid Grid.Column="2" Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-                    <!-- Says why the pane is empty, which is otherwise indistinguishable from a stuck browser. -->
-                    <TextBlock x:Name="EmptyText" Foreground="#66FFFFFF" FontSize="11.5"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               Visibility="Collapsed" Text="Pick a folder on the left" />
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <v:DropDownField x:Name="SortField" Grid.Column="0" Width="124" DisplayPath="Label"
+                                         VerticalAlignment="Center" ToolTip="How the tiles are ordered"
+                                         SelectionChanged="Sort_Changed" />
+                        <Grid Grid.Column="1" Margin="8,0,0,0">
+                            <TextBox x:Name="FilterBox" Style="{StaticResource BrowserSearch}"
+                                     ToolTip="Narrow down what is showing in this folder"
+                                     TextChanged="Filter_TextChanged" />
+                            <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="#80FFFFFF"
+                                  StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
+                                  HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
+                            <TextBlock x:Name="FilterPlaceholder" Text="Filter this folder…" Foreground="#66FFFFFF"
+                                       FontSize="11.5" Margin="28,0,0,0" VerticalAlignment="Center"
+                                       IsHitTestVisible="False" />
+                        </Grid>
+                    </Grid>
+
+                    <Grid Grid.Row="1">
+                        <ListBox x:Name="Contents" BorderThickness="0" Background="Transparent"
+                                 ItemContainerStyle="{StaticResource BrowserTile}"
+                                 IsSynchronizedWithCurrentItem="False"
+                                 MouseDoubleClick="Contents_MouseDoubleClick"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.CanContentScroll="False">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+
+                            <!-- Two implicit templates, picked by row type: the pane lists a folder's
+                                 sub-folders above its archives, so a category that only gathers folders still
+                                 opens onto something, and a double click walks into it. A sub-folder keeps the
+                                 folder shape (tinted by what it holds) rather than taking its content's icon —
+                                 in a grid of squares, "walks into it" and "goes on the stage" must not look
+                                 alike. -->
+                            <ListBox.Resources>
+                                <DataTemplate DataType="{x:Type lib:LibraryFolder}">
+                                    <Grid Margin="8,12,8,10" ToolTip="{Binding Path}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Path Grid.Row="0" Width="40" Height="40" Stretch="Uniform"
+                                              Fill="Transparent" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                              Data="{StaticResource BrowserFolder}"
+                                              Stroke="{Binding Resource, Converter={StaticResource Tint}}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
+                                                   FontSize="11" FontWeight="SemiBold" TextAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
+                                        <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
+                                                   TextAlignment="Center" Margin="0,2,0,0"
+                                                   Text="{Binding TotalEntries, StringFormat={}{0} archives}" />
+                                    </Grid>
+                                </DataTemplate>
+                                <DataTemplate DataType="{x:Type lib:LibraryEntry}">
+                                    <Grid Margin="8,12,8,10">
+                                        <Grid.ToolTip>
+                                            <!-- Where a hit came from: the tile has no room for the folder,
+                                                 and while searching that is the one thing it needs to say. -->
+                                            <StackPanel MaxWidth="320">
+                                                <TextBlock Text="{Binding Name}" Foreground="White"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding FolderPath}" Foreground="#99FFFFFF"
+                                                           FontSize="11" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Grid.ToolTip>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Path Grid.Row="0" Width="40" Height="40" Stretch="Uniform"
+                                              Fill="Transparent" StrokeThickness="1.5" StrokeLineJoin="Round"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                              Data="{Binding Resource, Converter={StaticResource Glyph}}"
+                                              Stroke="{Binding Resource, Converter={StaticResource Tint}}"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
+                                                   FontSize="11" TextAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
+                                        <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
+                                                   TextAlignment="Center" Margin="0,2,0,0"
+                                                   Text="{Binding Size, Converter={StaticResource ByteSize}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.Resources>
+                        </ListBox>
+
+                        <!-- Says why the pane is empty, which is otherwise indistinguishable from a stuck
+                             browser. -->
+                        <TextBlock x:Name="EmptyText" Foreground="#66FFFFFF" FontSize="11.5"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Visibility="Collapsed" Text="Pick a folder on the left" />
+                    </Grid>
                 </Grid>
             </Grid>
-        </Grid>
-    </Border>
+        </Border>
+
+        <ToggleButton x:Name="CollapseBtn" Style="{StaticResource BrowserHandle}"
+                      IsChecked="True" ToolTip="Show / hide the content browser"
+                      Checked="Collapse_Changed" Unchecked="Collapse_Changed" />
+    </Grid>
 </UserControl>

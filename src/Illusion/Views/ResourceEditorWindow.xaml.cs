@@ -27,7 +27,7 @@ public partial class ResourceEditorWindow : Window
     private LibraryCatalog? _catalog;
     private LibraryEntry? _staged;
     private MaterialEditorWindow? _materialEditor;
-    private double _browserHeight = 240;
+    private double _browserHeight = 300;   // two rows of tiles — see the BrowserRow definition
 
     public ResourceEditorWindow()
     {

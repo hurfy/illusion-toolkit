@@ -220,13 +220,14 @@ internal static class LayoutProbes
                 $"build={window.BuildBtn.ActualWidth:F0}");
         }
 
-        // Folded away, the browser is a strip and nothing more — this is what makes it affordable at 720p.
+        // Folded away, the browser is a hairline and its tab and nothing more — this is what makes it
+        // affordable at 720p.
         window.Browser.IsCollapsed = true;
         content.Measure(new Size(Layouts[0].Width, Layouts[0].Height));
         content.Arrange(new Rect(0, 0, Layouts[0].Width, Layouts[0].Height));
         content.UpdateLayout();
-        check("resource editor: folded, the browser is only its strip", window.Browser.ActualHeight <= 30,
-            $"{window.Browser.ActualHeight:F0}px");
+        check("resource editor: folded, the browser gives up all of its height",
+            window.Browser.ActualHeight <= 4, $"{window.Browser.ActualHeight:F0}px");
         check("resource editor: folded, the browser's splitter is gone too",
             window.BrowserSplitter.Visibility == Visibility.Collapsed,
             window.BrowserSplitter.Visibility.ToString());

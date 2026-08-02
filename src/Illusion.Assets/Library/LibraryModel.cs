@@ -27,6 +27,10 @@ public sealed class LibraryEntry
     /// <summary>Slash-separated folder this archive lives in (<c>sds/cars</c>) — the subtitle of a search hit,
     /// which is otherwise a bare name with no clue where it came from.</summary>
     public required string FolderPath { get; init; }
+
+    /// <summary>What the archive holds, read off <see cref="FolderPath"/> — the icon the browser draws it
+    /// with. A grid of same-shaped cards is unreadable otherwise: the name is all a card has left.</summary>
+    public LibraryResourceKind Resource { get; init; }
 }
 
 /// <summary>
@@ -38,6 +42,11 @@ public sealed class LibraryFolder
     public required string Name { get; init; }
 
     public required LibraryFolderKind Kind { get; init; }
+
+    /// <summary>What this branch holds — the tree draws one icon per kind. A category says it outright; a
+    /// real folder inherits it from the first level under <c>sds</c> (see <see cref="LibraryResourceKinds"/>).
+    /// </summary>
+    public LibraryResourceKind Resource { get; init; }
 
     /// <summary>Slash-separated path for a <see cref="LibraryFolderKind.Directory"/>; the name alone for a
     /// category (it has no path — it gathers folders from elsewhere in the tree).</summary>
