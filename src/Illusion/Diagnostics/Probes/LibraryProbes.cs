@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Illusion.Assets;
+using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
@@ -487,15 +488,20 @@ internal static class LibraryProbes
             // only a picture over the body says whether it sits where the parts are.
             // Built by the streamer itself, not by a copy of it here — a second implementation would be free
             // to drift, and this picture is the only thing that says the first one is right.
-            if (Viewport.DistrictStreamer.BuildRigLines(Viewport.DistrictStreamer.CollectSkeletons(roots)) is { } rig)
+            HelperGlyphRenderData rig = HelperGlyphBuilder.BuildRig(Viewport.DistrictStreamer.CollectSkeletons(roots));
+            if (!rig.IsEmpty)
             {
                 renderer.ShowSkeleton = true;
+                renderer.ShowHelpers = true;
                 renderer.SetSkeletonDistrict("probe", rig);
+                HelperGlyphRenderData helpers = HelperGlyphBuilder.BuildFrames(roots);
+                renderer.SetHelperDistrict("probe", helpers);
                 renderer.Render(target);
                 string rigPng = Path.Combine(Path.GetTempPath(), "illusion_library_stage_rig.png");
                 GpuProbes.SavePng(Rendering.Gpu.RenderTargetReadback.Read(gpu, target), w, h, rigPng);
-                sb.AppendLine($"rig: {rig.Bones.Count / 2} bone segments, {rig.Joints.Count / 6} joints, " +
-                              $"{rig.Attachments.Count / 8} attachments -> {rigPng}");
+                sb.AppendLine($"rig: {rig.GlyphCount} bones in {rig.SegmentCount} segments; " +
+                              $"helpers: {helpers.GlyphCount} glyphs in {helpers.SegmentCount} segments " +
+                              $"({helpers.HiddenCount} placeholders left out) -> {rigPng}");
             }
         }
         catch (Exception ex) { sb.AppendLine("render skipped — " + ex.Message); }

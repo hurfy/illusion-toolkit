@@ -384,9 +384,22 @@ public partial class ScenePanel : UserControl
         _viewport.ShowProxyScenes = ProxyScenesToggle.IsChecked == true;
         _viewport.ShowProxyMeshes = ProxyMeshesToggle.IsChecked == true;
         _viewport.ShowSnowScenes = SnowScenesToggle.IsChecked == true;
-        // Actor glyphs and skeletons are pure overlay — no scene reload, unlike the three filters above.
+        // Actor glyphs, skeletons and helpers are pure overlay — no scene reload, unlike the three filters above.
         _viewport.ShowActors = ActorsToggle.IsChecked == true;
         _viewport.ShowSkeleton = SkeletonToggle.IsChecked == true;
+        _viewport.ShowHelpers = HelpersToggle.IsChecked == true;
+        UpdateHelpersSubtitle();
+    }
+
+    // Says how many helper nodes were left out as placeholders, so "seventeen points I cannot see" is
+    // answered where the switch is rather than nowhere.
+    private void UpdateHelpersSubtitle()
+    {
+        if (_viewport == null) return;
+        int hidden = _viewport.HiddenHelperCount;
+        HelpersSubtitle.Text = HelpersToggle.IsChecked == true && hidden > 0
+            ? $"Dummies, points, volumes — {hidden} unnamed placeholder{(hidden == 1 ? "" : "s")} left out"
+            : "Dummies, points, volumes — no geometry of their own";
     }
 
     /// <summary>Drives the snow filter from the host's winter selector: winter geometry lives in its own

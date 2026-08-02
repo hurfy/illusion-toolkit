@@ -223,6 +223,13 @@ internal sealed class TransformEditController
         // (and everything attached to it, which the frame hierarchy has already carried along) only appears in
         // its new place once that buffer is rebuilt.
         if (node.Source is BoneNodeAdapter) _host.Streamer.RefreshRig(node);
+
+        // Same for the helper glyphs: a dummy or point IS its glyph, and a bone carries the climb boxes and
+        // locks attached to it. Queued, not rebuilt here — this runs on every mouse move of a drag.
+        _host.Streamer.RefreshHelpers(node);
+        // The accent layer is small (the selection and the hovered node), so it follows the drag immediately —
+        // an accent left behind at the old place would read as the edit not having happened.
+        _host.RefreshGlyphHighlight();
     }
 
     /// <summary>Resyncs a node's GPU meshes to its current world, then refreshes the outline/pivot and the

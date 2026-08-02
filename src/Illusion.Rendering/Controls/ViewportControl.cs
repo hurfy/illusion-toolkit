@@ -515,7 +515,15 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_navigating || Renderer == null) return;
+        // Not navigating: the cursor is just passing over the scene — a subclass may want to know what is
+        // under it (glyph highlight, name label). Cheap enough to run per move; the hook decides.
+        if (!_navigating)
+        {
+            if (Renderer != null) OnViewportHover(e.GetPosition(this));
+            return;
+        }
+
+        if (Renderer == null) return;
         // Defend against a lost/stale drag state: if the middle button isn't actually held, stop navigating (and
         // don't apply a huge delta against a stale _lastMouse). OnLostMouseCapture is the primary safety net.
         if (e.MiddleButton != MouseButtonState.Pressed) { _navigating = false; return; }
@@ -569,6 +577,20 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
     /// <summary>Hook: right-click on the render surface at <paramref name="pos"/>. Base does nothing; a subclass shows a context menu.</summary>
     protected virtual void OnViewportRightClick(Point pos) { }
+
+    /// <summary>Hook: the cursor moved over the render surface at <paramref name="pos"/> while NOT navigating.
+    /// Base does nothing; a subclass highlights what is under it.</summary>
+    protected virtual void OnViewportHover(Point pos) { }
+
+    /// <summary>Called when the cursor leaves the render surface, so a subclass can drop any hover state.</summary>
+    protected override void OnMouseLeave(MouseEventArgs e)
+    {
+        base.OnMouseLeave(e);
+        OnViewportHoverLeft();
+    }
+
+    /// <summary>Hook: the cursor left the render surface. Base does nothing.</summary>
+    protected virtual void OnViewportHoverLeft() { }
 
     /// <summary>Nearest mesh under a screen pixel (viewport ray-pick), or null on a miss. For subclass selection/picking.</summary>
     protected GpuMesh? PickMesh(Point screenPos, out float dist)

@@ -93,6 +93,9 @@ public partial class MainWindow : Window
         ToolShelf.Attach(Viewport);
         ToolShelf.BlenderRequested += ToggleBridgeSession;
 
+        // Names the helper glyph under the cursor — the glyphs themselves carry no text.
+        GlyphLabel.Attach(Viewport);
+
         // The layers list is a look, not a decision: hovering the button is enough to open it.
         HoverPopup.Attach(LayersBtn, LayersPopup);
 

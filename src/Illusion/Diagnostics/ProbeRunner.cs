@@ -77,6 +77,18 @@ internal static class ProbeRunner
             case "--probe-modes":
                 GpuProbes.RunModesProbe();
                 return true;
+            // Overlay lines (the shared helper-drawing pass): pixel width, feathered edge, distance
+            // independence, the visible/hidden depth split, and both glyph sizing modes — measured by
+            // reading the rendered pixels back. Output: %TEMP%\illusion_overlay.txt (+ two PNGs).
+            case "--probe-overlay":
+                OverlayProbes.RunOverlayProbe();
+                return true;
+            // Helper glyphs on a real car: what each frame kind turns into (a Dummy as its own box, a Point as
+            // axes), which nodes are left out as placeholders, and a picture of both layers over the body.
+            // Optional arg = the car. Output: %TEMP%\illusion_helpers.txt (+ PNG).
+            case "--probe-helpers":
+                OverlayProbes.RunHelperProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // Navigation gizmo: render the axis widget to a PNG at a fixed camera orientation (no game data).
             case "--probe-gizmo":
                 EditorProbes.RunGizmoProbe();

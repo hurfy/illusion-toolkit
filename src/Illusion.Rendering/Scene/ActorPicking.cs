@@ -48,4 +48,28 @@ public static class ActorPicking
         if (best < 0) bestT = 0f;
         return best;
     }
+
+    /// <summary>
+    /// The same test where each glyph has its OWN size: helper glyphs are not one shape, and a two-metre
+    /// volume box and a bare point cannot share a clickable radius. <paramref name="radii"/> is read in step
+    /// with <paramref name="markers"/>; a shorter list treats the rest as sizeless (angular allowance only).
+    /// </summary>
+    public static int Pick(IReadOnlyList<Vector3> markers, IReadOnlyList<float> radii, Vector3 origin,
+        Vector3 dir, out float bestT)
+    {
+        int best = -1;
+        bestT = float.MaxValue;
+
+        for (int i = 0; i < markers.Count; i++)
+        {
+            float own = i < radii.Count ? radii[i] : 0f;
+            int hit = Pick([markers[i]], origin, dir, own, out float t);
+            if (hit < 0 || t >= bestT) continue;
+            bestT = t;
+            best = i;
+        }
+
+        if (best < 0) bestT = 0f;
+        return best;
+    }
 }

@@ -101,6 +101,9 @@ internal sealed class SelectionController
             ? ActorMarkerBuilder.Build(actors, scale: 1.9f, colorOverride: new Vector4(1f, 1f, 1f, 1f))
             : null);
 
+        // A helper node or a bone has no mesh either — its glyph is redrawn in the accent colour instead.
+        _host.RefreshGlyphHighlight();
+
         GizmoPivot = ComputeGroupPivot();
     }
 

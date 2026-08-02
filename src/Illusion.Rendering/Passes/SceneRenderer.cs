@@ -22,12 +22,13 @@ public sealed unsafe class SceneRenderer : IDisposable
     private readonly SkyRenderer _sky;
     private readonly ZoneRenderer _zoneRenderer;
     private readonly CollisionRenderer _collisionRenderer;
+    private readonly OverlayLinePass _linePass;
     private readonly LineOverlayRenderer _navRenderer;
     private readonly LineOverlayRenderer _navMeshRenderer;
     private readonly LineOverlayRenderer _navWorldRenderer;
-    private readonly LineOverlayRenderer _skeletonRenderer;
-    private readonly LineOverlayRenderer _jointRenderer;
-    private readonly LineOverlayRenderer _attachmentRenderer;
+    private readonly HelperGlyphRenderer _rigRenderer;
+    private readonly HelperGlyphRenderer _helperRenderer;
+    private readonly HelperGlyphRenderer _helperHighlightRenderer;
     private readonly LineOverlayRenderer _partShapeRenderer;
     private readonly ActorMarkerRenderer _actorRenderer;
     private readonly ActorMarkerRenderer _actorSelectionRenderer;
@@ -81,18 +82,37 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// load, so this only gates drawing. For a car the bones ARE the parts, so this is how a door or an axle
     /// becomes visible at all — the mesh itself shows one solid body.</summary>
     public bool ShowSkeleton { get; set; }
+    /// <summary>Uploads/replaces one archive's rig (keyed for streaming): a glyph per bone, plus the quiet
+    /// lines to parents and to what hangs off each bone.</summary>
+    public void SetSkeletonDistrict(object key, Domain.HelperGlyphRenderData? rig) =>
+        _rigRenderer.SetDistrict(key, rig);
+
+    /// <summary>Whether to draw the helper nodes — dummies, points, volumes: everything an archive places
+    /// that has no geometry of its own. Off by default; uploaded per archive at load, so this only gates
+    /// drawing.</summary>
+    public bool ShowHelpers { get; set; }
+    /// <summary>Uploads/replaces one archive's helper glyphs (keyed for streaming).</summary>
+    public void SetHelperDistrict(object key, Domain.HelperGlyphRenderData? helpers) =>
+        _helperRenderer.SetDistrict(key, helpers);
+    /// <summary>Removes one archive's helper glyphs (district unload).</summary>
+    public void RemoveHelperDistrict(object key) => _helperRenderer.RemoveDistrict(key);
+    /// <summary>Removes every archive's helper glyphs (scene reset).</summary>
+    public void ClearHelpers() => _helperRenderer.Clear();
     /// <summary>
-    /// Uploads/replaces one archive's skeletons (keyed for streaming). The three line lists are drawn in three
-    /// weights on purpose: a car's rig is nearly flat — almost every bone hangs straight off one root — so the
-    /// bone-to-parent segments come out as a star from a single point and say very little, while the joints
-    /// and what hangs off them are the part worth reading.
+    /// Highlights glyphs — the object under the cursor and the selection. Drawn whether or not the layer it
+    /// belongs to is on: picking a bone in the tree has to show where it is even with the rig hidden. Null
+    /// clears it.
     /// </summary>
-    public void SetSkeletonDistrict(object key, RigLines lines)
-    {
-        _skeletonRenderer.SetDistrict(key, lines.Bones);
-        _jointRenderer.SetDistrict(key, lines.Joints);
-        _attachmentRenderer.SetDistrict(key, lines.Attachments);
-    }
+    public void SetHelperHighlight(Domain.HelperGlyphRenderData? glyphs) =>
+        _helperHighlightRenderer.SetDistrict(HighlightKey, glyphs);
+
+    private static readonly object HighlightKey = new();
+
+    /// <summary>Helper glyphs currently resident.</summary>
+    public int HelperGlyphCount => _helperRenderer.GlyphCount;
+    /// <summary>Helper nodes deliberately not drawn (unnamed placeholders parked at the origin).</summary>
+    public int HiddenHelperCount => _helperRenderer.HiddenCount;
+
     /// <summary>
     /// Whether to draw the physics shapes of the SELECTED part. Off by default and deliberately not a
     /// whole-scene layer: a car's shapes are what bullets hit rather than what it looks like, so they are
@@ -106,20 +126,10 @@ public sealed unsafe class SceneRenderer : IDisposable
 
     private static readonly object PartShapeKey = new();
 
-    /// <summary>Removes one archive's skeletons (district unload).</summary>
-    public void RemoveSkeletonDistrict(object key)
-    {
-        _skeletonRenderer.RemoveDistrict(key);
-        _jointRenderer.RemoveDistrict(key);
-        _attachmentRenderer.RemoveDistrict(key);
-    }
-    /// <summary>Removes every skeleton (scene reset).</summary>
-    public void ClearSkeletons()
-    {
-        _skeletonRenderer.Clear();
-        _jointRenderer.Clear();
-        _attachmentRenderer.Clear();
-    }
+    /// <summary>Removes one archive's rig (district unload).</summary>
+    public void RemoveSkeletonDistrict(object key) => _rigRenderer.RemoveDistrict(key);
+    /// <summary>Removes every rig (scene reset).</summary>
+    public void ClearSkeletons() => _rigRenderer.Clear();
 
     /// <summary>Whether to draw glyphs for the actors nothing else draws (sounds, lights, triggers, script
     /// hooks…). Off by default; uploaded per district at load, so this only gates drawing.</summary>
@@ -238,15 +248,16 @@ public sealed unsafe class SceneRenderer : IDisposable
         _sky = new SkyRenderer(gpu);
         _zoneRenderer = new ZoneRenderer(gpu);
         _collisionRenderer = new CollisionRenderer(gpu);
-        _navRenderer = new LineOverlayRenderer(gpu);
-        _navMeshRenderer = new LineOverlayRenderer(gpu);
-        _navWorldRenderer = new LineOverlayRenderer(gpu);
-        _skeletonRenderer = new LineOverlayRenderer(gpu);
-        _jointRenderer = new LineOverlayRenderer(gpu);
-        _attachmentRenderer = new LineOverlayRenderer(gpu);
-        _partShapeRenderer = new LineOverlayRenderer(gpu);
-        _actorRenderer = new ActorMarkerRenderer(gpu);
-        _actorSelectionRenderer = new ActorMarkerRenderer(gpu);
+        _linePass = new OverlayLinePass(gpu);
+        _navRenderer = new LineOverlayRenderer(_linePass);
+        _navMeshRenderer = new LineOverlayRenderer(_linePass);
+        _navWorldRenderer = new LineOverlayRenderer(_linePass);
+        _rigRenderer = new HelperGlyphRenderer(_linePass);
+        _helperRenderer = new HelperGlyphRenderer(_linePass);
+        _helperHighlightRenderer = new HelperGlyphRenderer(_linePass);
+        _partShapeRenderer = new LineOverlayRenderer(_linePass);
+        _actorRenderer = new ActorMarkerRenderer(_linePass);
+        _actorSelectionRenderer = new ActorMarkerRenderer(_linePass);
         _selectionOutline = new SelectionOutlineRenderer(gpu);
         Textures = new TextureLibrary(gpu);
 
@@ -479,32 +490,46 @@ public sealed unsafe class SceneRenderer : IDisposable
         // Debug overlay of loading zones (on top of meshes, semi-transparent boxes).
         if (ShowZones && _zoneBoxes != null) _zoneRenderer.Render(ctx, viewProj, _zoneBoxes);
 
+        // Everything an overlay glyph needs to size itself in PIXELS rather than metres: the pixel scale is
+        // metres-per-pixel per unit of clip W, read straight off the projection (M22 = 1/tan(fov/2)).
+        var overlayFrame = new OverlayFrame(
+            viewProj,
+            new Vector2(target.Width * 0.5f, target.Height * 0.5f),
+            target.Height > 0 ? 2f / (Camera.Projection.M22 * target.Height) : 0f);
+
         // .nov overlay, one toggle: the road graph (green lines) plus its AI-mesh boxes (amber wireframe).
         if (ShowNov)
         {
-            _navRenderer.Render(ctx, viewProj, new Vector4(0.25f, 1f, 0.45f, 0.9f));
-            _navMeshRenderer.Render(ctx, viewProj, new Vector4(1f, 0.6f, 0.1f, 0.85f));
+            _navRenderer.Render(ctx, overlayFrame, OverlayLineStyle.Default(new Vector4(0.25f, 1f, 0.45f, 0.9f)));
+            _navMeshRenderer.Render(ctx, overlayFrame, OverlayLineStyle.Default(new Vector4(1f, 0.6f, 0.1f, 0.85f)));
         }
 
         // .nav overlay: AI path objects (cover / vault-over / action markers) as cyan boxes.
-        if (ShowNavWorld) _navWorldRenderer.Render(ctx, viewProj, new Vector4(0.2f, 0.7f, 1f, 0.9f));
-        // The rig, over everything: a bone lives INSIDE the body it moves, so a depth-tested skeleton would
-        // be invisible exactly where it matters.
-        if (ShowSkeleton)
-        {
-            _skeletonRenderer.Render(ctx, viewProj, new Vector4(0.62f, 0.40f, 0.70f, 0.35f));   // bones, dim
-            _attachmentRenderer.Render(ctx, viewProj, new Vector4(0.35f, 0.80f, 0.78f, 0.75f)); // what hangs there
-            _jointRenderer.Render(ctx, viewProj, new Vector4(0.90f, 0.62f, 1.00f, 1f));         // joints, bright
-        }
+        if (ShowNavWorld)
+            _navWorldRenderer.Render(ctx, overlayFrame, OverlayLineStyle.Default(new Vector4(0.2f, 0.7f, 1f, 0.9f)));
 
-        // The selected part's physics shapes, over everything for the same reason the rig is: a collision box
-        // sits INSIDE the body it belongs to, so a depth-tested one is hidden exactly where it is being placed.
-        if (ShowPartShapes) _partShapeRenderer.Render(ctx, viewProj, new Vector4(1f, 0.45f, 0.25f, 0.95f));
+        // Helper nodes and the rig. Both live INSIDE the geometry they describe — a bone is in the body it
+        // moves, a climb box is around the door it belongs to — so the hidden part fades less than the
+        // default overlay does, and both floor their world-sized glyphs at a findable pixel size (a car's
+        // DWHEELL dummy is one centimetre across).
+        if (ShowHelpers) _helperRenderer.Render(ctx, overlayFrame, HelperStyle());
+        if (ShowSkeleton) _rigRenderer.Render(ctx, overlayFrame, HelperStyle());
+        // The accent — hovered and selected glyphs — over both, thicker and much less faded when hidden:
+        // finding the thing is the whole point of highlighting it.
+        _helperHighlightRenderer.Render(ctx, overlayFrame,
+            HelperStyle() with { Thickness = 2.4f, HiddenAlpha = 0.55f });
 
-        // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per category.
-        if (ShowActors) _actorRenderer.Render(ctx, viewProj);
-        // The selected actor's glyph is drawn even with the overlay off, so a tree selection always shows up.
-        _actorSelectionRenderer.Render(ctx, viewProj);
+        // The selected part's physics shapes — inside the body they belong to, for the same reason.
+        if (ShowPartShapes)
+            _partShapeRenderer.Render(ctx, overlayFrame, RigStyle(new Vector4(1f, 0.45f, 0.25f, 0.95f), 2f));
+
+        // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per segment
+        // (per category), so the tint stays neutral.
+        if (ShowActors) _actorRenderer.Render(ctx, overlayFrame, OverlayLineStyle.Default(Vector4.One));
+        // The selected actor's glyph is drawn even with the overlay off, so a tree selection always shows up —
+        // thicker and much less faded when hidden, since finding it is the whole point.
+        _actorSelectionRenderer.Render(ctx, overlayFrame,
+            OverlayLineStyle.Default(Vector4.One) with { Thickness = 2.6f, HiddenAlpha = 0.5f });
 
         // Selection silhouette outline (screen-space, on top of everything): an offscreen mask of the selected
         // mesh's exact geometry, then a dilation pass paints a constant-width contour — never a bounding box.
@@ -520,6 +545,15 @@ public sealed unsafe class SceneRenderer : IDisposable
         // otherwise WPF (D3D9Ex/D3DImage) can composite a half-written surface and the viewport flickers.
         _gpu.WaitForGpu();
     }
+
+    // Style for the layers that live inside the geometry they describe (helpers, rig, part shapes): the
+    // hidden part is most of them, so it fades less than the default overlay does. Helper and rig glyphs
+    // colour themselves per segment, so the tint stays neutral.
+    private static OverlayLineStyle RigStyle(Vector4 tint, float thickness) =>
+        OverlayLineStyle.Default(tint) with { Thickness = thickness, HiddenAlpha = 0.35f };
+
+    private static OverlayLineStyle HelperStyle() =>
+        RigStyle(Vector4.One, 1.5f) with { MinGlyphPixels = 11f };
 
     // One pass over the regular (non-instanced) meshes matching the ghost filter.
     private int DrawMeshPass(ComPtr<ID3D11DeviceContext> ctx, Matrix4x4 viewProj, in Frustum frustum,
@@ -740,12 +774,13 @@ public sealed unsafe class SceneRenderer : IDisposable
         _actorSelectionRenderer.Dispose();
         _actorRenderer.Dispose();
         _navWorldRenderer.Dispose();
-        _skeletonRenderer.Dispose();
-        _jointRenderer.Dispose();
-        _attachmentRenderer.Dispose();
+        _rigRenderer.Dispose();
+        _helperRenderer.Dispose();
+        _helperHighlightRenderer.Dispose();
         _partShapeRenderer.Dispose();
         _navMeshRenderer.Dispose();
         _navRenderer.Dispose();
+        _linePass.Dispose();
         _collisionRenderer.Dispose();
         _zoneRenderer.Dispose();
         _sky.Dispose();

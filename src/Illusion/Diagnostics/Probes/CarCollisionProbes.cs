@@ -282,14 +282,14 @@ internal static class CarCollisionProbes
                 File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
 
             FrameResource? fr = SdsMeshLoader.OpenScene(scratch).FrameResource;
-            FrameObjectModel? model = fr?.FrameObjects?.Values.OfType<FrameObjectModel>().FirstOrDefault();
-            if (model == null) { sb.AppendLine("\nno skinned model to attach to"); return; }
+            FrameObjectModel? model = fr?.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            if (fr == null || model == null) { sb.AppendLine("\nno skinned model to attach to"); return; }
 
             string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
             int hood = Array.FindIndex(bones, n => string.Equals(n, "coverF", StringComparison.OrdinalIgnoreCase));
             if (hood < 0) hood = Math.Min(1, bones.Length - 1);
 
-            int stubsBefore = fr!.FrameObjects.Values.OfType<FrameObjectCollision>().Count();
+            int stubsBefore = fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count();
             int shapesBefore = SdsManifest.Load(scratch).GetFiles("ItemDesc").Count;
 
             AddedCollisionBox? added = CarCollisionBuilder.AddBox(

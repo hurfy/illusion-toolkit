@@ -210,6 +210,9 @@
                     <!-- The same tools and gizmos as the map editor: a viewport is a viewport. -->
                     <v:ViewportToolShelf x:Name="ToolShelf" />
 
+                    <!-- Name of the helper glyph under the cursor; hidden until something is under it. -->
+                    <v:GlyphHoverLabel x:Name="GlyphLabel" />
+
                     <!-- Blender edit-mode frame: an orange glow over the stage while a bridge session is
                          active. Purely visual (hit-test transparent). -->
                     <Border x:Name="BridgeFrame" BorderBrush="#E87D0D" BorderThickness="2.5"

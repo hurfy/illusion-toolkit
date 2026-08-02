@@ -369,6 +369,30 @@
                                       Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
                     </Grid>
 
+                    <!-- (f) helper nodes — a box-with-axes glyph, steel #9FB3C8. Dummies, points and volumes:
+                         the nodes that place something without being anything to look at. -->
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                              Margin="0,0,9,0" Fill="Transparent" Stroke="#9FB3C8" StrokeThickness="1.2"
+                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Data="M1,3.4 L6,0.8 L11,3.4 L11,8.6 L6,11.2 L1,8.6 Z M6,5.6 L6,11.2 M1,3.4 L6,5.6 L11,3.4" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="Render helpers" Foreground="White" FontSize="12" />
+                            <TextBlock x:Name="HelpersSubtitle" Text="Dummies, points, volumes — no geometry of their own"
+                                       Foreground="#80FFFFFF"
+                                       FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <ToggleButton Grid.Column="2" x:Name="HelpersToggle"
+                                      Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                      ToolTip="Dummy volumes as their own bounding box and points as axes that show which way they face — glyphs keep a readable size on screen however small or far away the node is. Unnamed placeholders parked at the origin are left out (a car carries seventeen)."
+                                      Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                    </Grid>
+
                     <!-- (d) actor markers — diamond glyph, orange #E8873C -->
                     <Grid Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>

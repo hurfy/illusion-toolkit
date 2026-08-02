@@ -55,6 +55,9 @@ public partial class ResourceEditorWindow : Window
         ToolShelf.Attach(Stage);
         ToolShelf.BlenderRequested += ToggleBridgeSession;
 
+        // Names the helper glyph under the cursor — the glyphs themselves carry no text.
+        GlyphLabel.Attach(Stage);
+
         // The layers list is a look, not a decision: hovering the button is enough to open it — same as the
         // map editor, because where you switch what the viewport draws must not depend on the window.
         HoverPopup.Attach(LayersBtn, LayersPopup);

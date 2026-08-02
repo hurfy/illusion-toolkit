@@ -5,6 +5,7 @@ using Illusion.Assets;
 using Illusion.Assets.Actors;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Collisions;
+using Illusion.Assets.Frames;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
@@ -96,6 +97,14 @@ internal sealed class DistrictStreamer
     // Kept here rather than in the renderer because the renderer only knows finished line lists.
     private readonly Dictionary<SceneNode, List<SkeletonData>> _rigs = new();
 
+    // Per-archive frame roots, kept so the helper layer can be rebuilt after an edit moves something, and the
+    // archives whose helpers are waiting for that rebuild.
+    private readonly Dictionary<SceneNode, IReadOnlyList<SdsFrameNode>> _helperRoots = new();
+    private readonly HashSet<SceneNode> _helperDirty = new();
+
+    // The same glyphs as click targets: tree node, where its glyph sits, and the world slack a click gets.
+    private readonly Dictionary<SceneNode, List<(SceneNode Node, Vector3 At, float Radius)>> _helperPicks = new();
+
     // .sds load queue (single area / city_univers when streaming). One item at a time.
     private readonly Queue<(FileInfo File, string Label, string? District)> _loadQueue = new();
     private bool _hasFramedOnce; // frame the camera ONCE (first load), don't reset afterwards
@@ -130,6 +139,8 @@ internal sealed class DistrictStreamer
         public IReadOnlyList<Vector3>? NavLines;                     // decoded .nov road graph (edge endpoint pairs), null if none
         public IReadOnlyList<Vector3>? NavMeshLines;                // decoded .nov AI-mesh box wireframe, null if none
         public List<SkeletonData>? Skeletons;                        // every skinned model's rig (the overlay is built from these)
+        public IReadOnlyList<SdsFrameNode>? Roots;                   // the archive's frame roots (the helper layer is rebuilt from these)
+        public HelperGlyphRenderData? Helpers;                       // dummies / points / volumes — the nodes nothing draws
         public IReadOnlyList<Vector3>? NavWorldLines;               // decoded .nav path-object boxes, null if none
         public ActorMarkerRenderData? ActorMarkers;                 // glyphs for the actors nothing draws, null if none
         public List<(SceneNode Node, Vector3 Position)>? ActorPickables; // those glyphs, tree nodes, for ray-picking
@@ -166,6 +177,9 @@ internal sealed class DistrictStreamer
 
         // Glyphs hidden through the tree's eye: one coalesced rebuild per frame (see ActorLayer).
         Actors.RebuildDirty();
+        // Helper glyphs of an archive whose frames just moved — likewise one rebuild per frame, since a
+        // gizmo drag would otherwise rebuild the layer on every mouse move.
+        RebuildDirtyHelpers();
 
         // The queue (single area / city_univers when streaming) has priority over streaming.
         if (!_building && _loadTask == null && _loadQueue.Count > 0)
@@ -1080,9 +1094,15 @@ internal sealed class DistrictStreamer
             // is then rebuilt from these (see RefreshRig).
             List<SkeletonData> skeletons = CollectSkeletons(roots);
 
+            // The helper nodes — dummies, points, volumes. Built here rather than at draw time: it is a walk
+            // of the whole archive, and the result is one immutable buffer.
+            HelperGlyphRenderData helpers = HelperGlyphBuilder.BuildFrames(roots);
+
             return new PreparedLoad
             {
                 Sds = sds,
+                Roots = roots,
+                Helpers = helpers,
                 Meshes = prepared,
                 CollisionLayer = collisionLayer,
                 CollisionDoc = collisionDoc,
@@ -1135,63 +1155,6 @@ internal sealed class DistrictStreamer
     }
 
     /// <summary>
-    /// The rig overlay for a set of skeletons, in world space. Positions come from each bone's own adapter
-    /// where there is one, so a bone that has been dragged draws where it now is — the rest matrices captured
-    /// at load are only the fallback for a scene built without a document.
-    /// </summary>
-    internal static RigLines? BuildRigLines(IReadOnlyList<SkeletonData> skeletons)
-    {
-        var bones = new List<Vector3>();
-        var joints = new List<Vector3>();
-        var attachments = new List<Vector3>();
-
-        foreach (SkeletonData rig in skeletons)
-        {
-            var at = new Vector3[rig.Bones.Count];
-            for (int i = 0; i < rig.Bones.Count; i++)
-            {
-                at[i] = rig.Bones[i].Source is IFrameNode live
-                    ? live.WorldTransform.Translation
-                    : Vector3.Transform(rig.Bones[i].Rest.Translation, rig.World);
-            }
-
-            for (int i = 0; i < at.Length; i++)
-            {
-                int parent = rig.Bones[i].Parent;
-                if (parent >= 0 && parent < at.Length)
-                {
-                    bones.Add(at[parent]);
-                    bones.Add(at[i]);
-                }
-
-                Tick(joints, at[i], 0.035f);
-            }
-
-            // A leader from the bone to whatever hangs on it, with a tick at the far end. This is the only
-            // drawing that says which bone carries a car's door hull, lock or climb box.
-            foreach (BoneAttachment a in rig.Attachments)
-            {
-                if (a.Joint < 0 || a.Joint >= at.Length) continue;
-                Vector3 to = a.Source is IFrameNode frame ? frame.WorldTransform.Translation : a.World.Translation;
-                attachments.Add(at[a.Joint]);
-                attachments.Add(to);
-                Tick(attachments, to, 0.05f);
-            }
-        }
-
-        var lines = new RigLines(bones, joints, attachments);
-        return lines.IsEmpty ? null : lines;
-
-        // A three-axis cross. Small enough not to clutter a car, big enough to find.
-        static void Tick(List<Vector3> into, Vector3 at, float size)
-        {
-            into.Add(at - new Vector3(size, 0, 0)); into.Add(at + new Vector3(size, 0, 0));
-            into.Add(at - new Vector3(0, size, 0)); into.Add(at + new Vector3(0, size, 0));
-            into.Add(at - new Vector3(0, 0, size)); into.Add(at + new Vector3(0, 0, size));
-        }
-    }
-
-    /// <summary>
     /// Redraws the rig of the archive <paramref name="node"/> belongs to. Called after a bone moves: the
     /// overlay is one immutable vertex buffer per archive, so a moved bone only shows up once it is rebuilt.
     /// </summary>
@@ -1200,9 +1163,95 @@ internal sealed class DistrictStreamer
         for (SceneNode? n = node; n != null; n = n.Parent)
         {
             if (!_rigs.TryGetValue(n, out List<SkeletonData>? skeletons)) continue;
-            if (BuildRigLines(skeletons) is { } lines) _host.Rnd?.SetSkeletonDistrict(n, lines);
+            _host.Rnd?.SetSkeletonDistrict(n, HelperGlyphBuilder.BuildRig(skeletons));
             PoseSkinnedMeshes(n);
             return;
+        }
+    }
+
+    /// <summary>
+    /// Queues the helper glyphs of the archive <paramref name="node"/> belongs to for a rebuild — everything
+    /// a bone carries (climb boxes, locks, handles) moves with it, and a dummy dragged by the gizmo is its own
+    /// glyph. Coalesced to one rebuild per frame in <see cref="Tick"/>: the layer is an immutable buffer per
+    /// archive, and a drag would otherwise rebuild it on every mouse move.
+    /// </summary>
+    public void RefreshHelpers(SceneNode node)
+    {
+        for (SceneNode? n = node; n != null; n = n.Parent)
+        {
+            if (_helperRoots.ContainsKey(n)) { _helperDirty.Add(n); return; }
+        }
+    }
+
+    private void RebuildDirtyHelpers()
+    {
+        if (_helperDirty.Count == 0) return;
+        foreach (SceneNode sds in _helperDirty)
+        {
+            if (_helperRoots.TryGetValue(sds, out IReadOnlyList<SdsFrameNode>? roots))
+                _host.Rnd?.SetHelperDistrict(sds, HelperGlyphBuilder.BuildFrames(roots));
+            _helperPicks[sds] = CollectGlyphPicks(sds);
+        }
+        _helperDirty.Clear();
+    }
+
+    /// <summary>
+    /// Nearest glyph under the ray — a helper node or a bone — or null. Only what is DRAWN can be hit: a
+    /// layer that is switched off is not silently clickable, and a placeholder that was left out of the
+    /// drawing is left out of the picking with it.
+    /// </summary>
+    public SceneNode? PickGlyph(Vector3 origin, Vector3 dir, out float bestT)
+    {
+        bestT = float.PositiveInfinity;
+        SceneNode? hit = null;
+        if (_host.Rnd is not { } renderer) return null;
+        // Nothing drawn, nothing to hit — and this runs on every mouse move, so it leaves before the walk.
+        if (!renderer.ShowHelpers && !renderer.ShowSkeleton) return null;
+
+        // A pick set the last edit invalidated must never decide a click (the same reason the actor layer
+        // pulls its rebuild forward here).
+        RebuildDirtyHelpers();
+
+        foreach (List<(SceneNode Node, Vector3 At, float Radius)> picks in _helperPicks.Values)
+        {
+            // Only the layers actually being drawn take part — the rig and the helpers switch separately.
+            var candidates = new List<SceneNode>(picks.Count);
+            var anchors = new List<Vector3>(picks.Count);
+            var radii = new List<float>(picks.Count);
+            foreach ((SceneNode node, Vector3 at, float radius) in picks)
+            {
+                bool isBone = node.Source is BoneNodeAdapter;
+                if (isBone ? !renderer.ShowSkeleton : !renderer.ShowHelpers) continue;
+                candidates.Add(node);
+                anchors.Add(at);
+                radii.Add(radius);
+            }
+
+            int index = ActorPicking.Pick(anchors, radii, origin, dir, out float t);
+            if (index >= 0 && t < bestT) { bestT = t; hit = candidates[index]; }
+        }
+
+        if (hit == null) bestT = float.PositiveInfinity;
+        return hit;
+    }
+
+    // Every drawn glyph of one archive as a click target: the tree node it selects, where its glyph sits, and
+    // how far off centre a click still counts. Built from the SCENE TREE rather than from the glyph data, so
+    // a hit resolves straight to the row a click should select.
+    private static List<(SceneNode Node, Vector3 At, float Radius)> CollectGlyphPicks(SceneNode sds)
+    {
+        var picks = new List<(SceneNode, Vector3, float)>();
+        Walk(sds);
+        return picks;
+
+        void Walk(SceneNode node)
+        {
+            if (HelperGlyphBuilder.DrawsGlyph(node.Source))
+            {
+                picks.Add((node, HelperGlyphBuilder.GlyphAnchor(node.Source),
+                    HelperGlyphBuilder.PickRadius(node.Source)));
+            }
+            foreach (SceneNode child in node.Children) Walk(child);
         }
     }
 
@@ -1309,7 +1358,15 @@ internal sealed class DistrictStreamer
         if (load.Skeletons is { Count: > 0 } skeletons)
         {
             _rigs[load.Sds] = skeletons;
-            if (BuildRigLines(skeletons) is { } rig) _host.Rnd!.SetSkeletonDistrict(load.Sds, rig);
+            _host.Rnd!.SetSkeletonDistrict(load.Sds, HelperGlyphBuilder.BuildRig(skeletons));
+        }
+        // Helper glyphs (dummies, points, volumes): own toggle (ShowHelpers), same per-archive keying. The
+        // roots are kept so an edit can rebuild the layer without re-reading the archive.
+        if (load.Helpers is { IsEmpty: false } helpers) _host.Rnd!.SetHelperDistrict(load.Sds, helpers);
+        if (load.Roots != null)
+        {
+            _helperRoots[load.Sds] = load.Roots;
+            _helperPicks[load.Sds] = CollectGlyphPicks(load.Sds);
         }
         // .nav path objects (cover / vault-over markers): separate toggle (ShowNavWorld), same keying.
         if (load.NavWorldLines != null) _host.Rnd!.SetNavWorldDistrict(load.Sds, load.NavWorldLines);
@@ -1426,6 +1483,10 @@ internal sealed class DistrictStreamer
             _host.Rnd!.RemoveNavDistrict(node);       // and its .nov graph overlay
             _host.Rnd!.RemoveSkeletonDistrict(node);  // and the rigs of its skinned models
             _rigs.Remove(node);
+            _host.Rnd!.RemoveHelperDistrict(node);    // and its helper glyphs
+            _helperRoots.Remove(node);
+            _helperDirty.Remove(node);
+            _helperPicks.Remove(node);
             _host.Rnd!.RemoveNavMeshDistrict(node);   // and its .nov AI-mesh overlay
             _host.Rnd!.RemoveNavWorldDistrict(node);  // and its .nav path-object overlay
             _host.Rnd!.RemoveActorDistrict(node);     // and its actor glyphs
@@ -1464,6 +1525,11 @@ internal sealed class DistrictStreamer
         _host.Rnd?.ClearNavWorld();
         _host.Rnd?.ClearSkeletons();
         _rigs.Clear();
+        _host.Rnd?.ClearHelpers();
+        _helperRoots.Clear();
+        _helperDirty.Clear();
+        _helperPicks.Clear();
+        _host.Rnd?.SetHelperHighlight(null);
         _host.Rnd?.ClearActors();
         Actors.Clear();
         _collisionSources.Clear();

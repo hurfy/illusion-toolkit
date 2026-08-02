@@ -346,6 +346,9 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Name of the helper glyph under the cursor; hidden until something is under it. -->
+                    <v:GlyphHoverLabel x:Name="GlyphLabel" />
+
                     <!-- Transient notices (bottom-right): refusals and push outcomes that must not interrupt.
                          Last in the Grid so it draws over the other overlays; see NoticeBanner. -->
                     <v:NoticeBanner x:Name="Notices" />

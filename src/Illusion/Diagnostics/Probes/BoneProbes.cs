@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Text;
 using Illusion.Assets;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Frames;
 using Illusion.Assets.Sds;
 using Illusion.Domain;
 using Illusion.Formats.Archive;
@@ -10,7 +11,6 @@ using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Frames.Resources;
 using Illusion.Formats.Geometry;
-using Illusion.Rendering.Passes;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
 namespace Illusion.Diagnostics.Probes;
@@ -424,8 +424,7 @@ internal static class BoneProbes
             renderer.ShowActors = true;
             renderer.ShowNov = true;
             renderer.ShowNavWorld = true;
-            renderer.SetSkeletonDistrict(
-                "probe", Viewport.DistrictStreamer.BuildRigLines([body.Skeleton!]) ?? default);
+            renderer.SetSkeletonDistrict("probe", HelperGlyphBuilder.BuildRig([body.Skeleton!]));
             renderer.SetSelectionMeshes([skinned]);
 
             Matrix4x4 overlayPose = pose[bone];
@@ -1555,18 +1554,21 @@ internal static class BoneProbes
             Check("a bone in the rig is the editable object", live.Source is BoneNodeAdapter,
                 live.Source?.GetType().Name ?? "null");
 
-            if (live.Source is IFrameNode node && Viewport.DistrictStreamer.BuildRigLines(rigs) is { } beforeLines)
+            if (live.Source is IFrameNode node)
             {
+                HelperGlyphRenderData before = HelperGlyphBuilder.BuildRig(rigs);
                 Vector3 was = node.WorldTransform.Translation;
                 Matrix4x4 shifted = node.LocalTransform;
                 shifted.Translation += delta;
                 node.LocalTransform = shifted;
 
-                RigLines? afterLines = Viewport.DistrictStreamer.BuildRigLines(rigs);
+                // The bone's glyph is anchored at the bone, so the overlay having followed the edit means an
+                // anchor that stood at the old place now stands at the new one, with nothing else changed.
+                HelperGlyphRenderData after = HelperGlyphBuilder.BuildRig(rigs);
+                bool wasThere = before.Segments.Any(s => Approx(s.Anchor, was, 1e-3f));
+                bool movedThere = after.Segments.Any(s => Approx(s.Anchor, was + delta, 1e-3f));
                 Check("the overlay redraws the bone where it now is",
-                    afterLines is { } after
-                    && after.Joints.Count == beforeLines.Joints.Count
-                    && Approx(after.Joints[index * 6] - beforeLines.Joints[index * 6], delta),
+                    wasThere && movedThere && after.SegmentCount == before.SegmentCount,
                     $"{was} -> {node.WorldTransform.Translation}");
             }
 

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Bridge;
+using Illusion.Assets.Frames;
 using Illusion.Assets.Sds;
 using Illusion.Assets.World;
 using Illusion.Bridge.Payload;
@@ -143,14 +144,27 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         set { if (Rnd != null) Rnd.ShowActors = value; }
     }
 
-    /// <summary>Skeletons of skinned models, drawn over the mesh: a segment from each bone to its parent and
-    /// a tick at every joint. A car's doors, covers and axles ARE bones — the mesh is one solid body — so
+    /// <summary>Skeletons of skinned models: one glyph per bone, with quiet lines to its parent and to
+    /// whatever hangs off it. A car's doors, covers and axles ARE bones — the mesh is one solid body — so
     /// this is the only view in which its parts exist. Built at load; this only gates drawing.</summary>
     public bool ShowSkeleton
     {
         get => Rnd?.ShowSkeleton ?? false;
         set { if (Rnd != null) Rnd.ShowSkeleton = value; }
     }
+
+    /// <summary>Helper nodes — dummies as their own bounding box, points as axes that show which way they
+    /// face. These place things without being anything to look at, so without this they exist only in the
+    /// tree. Built at load; this only gates drawing.</summary>
+    public bool ShowHelpers
+    {
+        get => Rnd?.ShowHelpers ?? false;
+        set { if (Rnd != null) Rnd.ShowHelpers = value; }
+    }
+
+    /// <summary>Helper nodes not drawn because they are unnamed placeholders parked at the origin (a car
+    /// carries seventeen) — reported rather than silently dropped.</summary>
+    public int HiddenHelperCount => Rnd?.HiddenHelperCount ?? 0;
 
     // ── Facade: catalogs ──
 
@@ -639,6 +653,85 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         else Select(hit);
     }
 
+    // ── Glyph hover: what the cursor is over, highlighted and named ──
+
+    /// <summary>The glyph object under the cursor (helper node or bone), or null. Highlighted in the viewport
+    /// and named by the label the window shows.</summary>
+    public SceneNode? HoveredGlyph { get; private set; }
+
+    /// <summary>Raised when the glyph under the cursor changes: the node (null when the cursor is over nothing
+    /// with a glyph) and where the cursor is, so the window can put a name label there.</summary>
+    public event Action<SceneNode?, Point>? GlyphHoverChanged;
+
+    // The accent, and a brighter version of it for the one under the cursor. Selection keeps the app's accent
+    // colour; hover is the same hue lifted, so the two read as one family rather than two meanings.
+    private static readonly Vector4 SelectedGlyphColor = new(0.91f, 0.53f, 0.24f, 0.95f);
+    private static readonly Vector4 HoveredGlyphColor = new(1f, 0.80f, 0.45f, 1f);
+
+    private Point _lastHoverPos;
+
+    protected override void OnViewportHover(Point pos)
+    {
+        _lastHoverPos = pos;
+        (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
+        SceneNode? hit = Streamer.PickGlyph(origin, dir, out _);
+        if (ReferenceEquals(hit, HoveredGlyph))
+        {
+            // Same object, new cursor position — the label follows the cursor, the highlight does not change.
+            if (hit != null) GlyphHoverChanged?.Invoke(hit, pos);
+            return;
+        }
+
+        HoveredGlyph = hit;
+        RefreshGlyphHighlight();
+        GlyphHoverChanged?.Invoke(hit, pos);
+    }
+
+    protected override void OnViewportHoverLeft()
+    {
+        if (HoveredGlyph == null) return;
+        HoveredGlyph = null;
+        RefreshGlyphHighlight();
+        GlyphHoverChanged?.Invoke(null, _lastHoverPos);
+    }
+
+    /// <summary>
+    /// Redraws the accent layer: every selected glyph object plus the one under the cursor. Called on
+    /// selection change, on hover change and after an edit moves something — the layer is one immutable
+    /// buffer, so it only changes when it is rebuilt.
+    /// </summary>
+    internal void RefreshGlyphHighlight()
+    {
+        if (Rnd == null) return;
+
+        var selected = new List<ISceneSource>(Selection.Selected.Count);
+        foreach (SceneNode n in Selection.Selected)
+        {
+            ISceneSource? src = n.Source;
+            if (src != null && HelperGlyphBuilder.DrawsGlyph(src)) selected.Add(src);
+        }
+
+        HelperGlyphRenderData? accent = selected.Count > 0
+            ? HelperGlyphBuilder.BuildHighlight(selected, SelectedGlyphColor)
+            : null;
+        HelperGlyphRenderData? hover = HoveredGlyph?.Source is { } hovered && !Selection.Contains(HoveredGlyph)
+            ? HelperGlyphBuilder.BuildHighlight([hovered], HoveredGlyphColor)
+            : null;
+
+        Rnd.SetHelperHighlight(Merge(accent, hover));
+
+        static HelperGlyphRenderData? Merge(HelperGlyphRenderData? a, HelperGlyphRenderData? b)
+        {
+            if (a == null) return b;
+            if (b == null) return a;
+            return new HelperGlyphRenderData
+            {
+                Segments = [.. a.Segments, .. b.Segments],
+                GlyphCount = a.GlyphCount + b.GlyphCount,
+            };
+        }
+    }
+
     // Right-click on the render surface: report what the click hit (mesh or collision hull, or nothing) and
     // where — MainWindow builds the context menu from it (menus are a Views concern, not the viewport's).
     protected override void OnViewportRightClick(Point pos) =>
@@ -673,6 +766,12 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         // and win outright: clicking a marker you can see selects that actor, whatever stands in front of it.
         SceneNode? actor = Streamer.Actors.Pick(origin, dir, out _);
         if (actor != null) return actor;
+
+        // Helper glyphs and bones are drawn over the scene for the same reason, and are picked the same way:
+        // what you can see, you can click. Only what is actually drawn is tested (see PickGlyph), so a hidden
+        // layer never swallows a click meant for the geometry behind it.
+        SceneNode? glyph = Streamer.PickGlyph(origin, dir, out _);
+        if (glyph != null) return glyph;
 
         if (col != null && (gm == null || colT <= meshT) && (crash == null || colT <= crashT)) return col;
         if (crash != null && (gm == null || crashT <= meshT)) return crash;

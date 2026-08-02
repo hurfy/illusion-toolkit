@@ -1,0 +1,17 @@
+<UserControl x:Class="Illusion.Views.GlyphHoverLabel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             HorizontalAlignment="Left" VerticalAlignment="Top"
+             IsHitTestVisible="False" Visibility="Collapsed">
+
+    <!-- The name of the glyph under the cursor. A helper node is a box or a pair of axes and nothing else on
+         screen says which one it is — a car carries twenty dummies, and four of them are climb boxes. Shown
+         on hover only: a permanent label per glyph would be the clutter this layer was written to avoid. -->
+
+    <Border Background="#C4000000" CornerRadius="4" Padding="7,3">
+        <TextBlock FontSize="11.5" TextOptions.TextFormattingMode="Display">
+            <Run x:Name="NameRun" Foreground="#FFFFFF" />
+            <Run x:Name="KindRun" Foreground="#8CFFFFFF" />
+        </TextBlock>
+    </Border>
+</UserControl>
