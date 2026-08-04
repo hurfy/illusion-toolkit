@@ -56,9 +56,9 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" Background="#333336" CornerRadius="4">
+                        <Border x:Name="Bd" Background="{StaticResource SurfaceChip}" CornerRadius="4">
                             <Path x:Name="Icon" Width="13" Height="13" Stretch="Uniform"
-                                  Fill="Transparent" Stroke="#CFCFCF" StrokeThickness="1.2"
+                                  Fill="Transparent" Stroke="{StaticResource GlyphOn}" StrokeThickness="1.2"
                                   StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource IconEyeOpen}"
                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -66,13 +66,13 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="False">
                                 <Setter TargetName="Icon" Property="Data" Value="{StaticResource IconEyeClosed}" />
-                                <Setter TargetName="Icon" Property="Stroke" Value="#6E7279" />
+                                <Setter TargetName="Icon" Property="Stroke" Value="{StaticResource GlyphOff}" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#454549" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceChipHot}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#29292B" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceChipDown}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -91,7 +91,7 @@
                     <ControlTemplate TargetType="ToggleButton">
                         <Border Background="Transparent" Width="16">
                             <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                       Text="&#xE76C;" Foreground="#99FFFFFF"
+                                       Text="&#xE76C;" Foreground="{StaticResource TextMuted}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        RenderTransformOrigin="0.5,0.5" />
                         </Border>
@@ -120,7 +120,7 @@
             <Setter Property="HorizontalAlignment" Value="Center" />
         </Style>
         <Style x:Key="StatLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#80FFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
             <Setter Property="FontSize" Value="10" />
             <Setter Property="HorizontalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,1,0,0" />
@@ -131,7 +131,7 @@
             <Setter Property="Height" Value="30" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#2D7DD2" />
+            <Setter Property="Background" Value="{StaticResource Accent}" />
             <Setter Property="Padding" Value="14,0" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -147,10 +147,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2569B0" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentDown}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -164,7 +164,7 @@
             <Setter Property="Height" Value="30" />
             <Setter Property="Foreground" Value="White" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
             <Setter Property="FontSize" Value="15" />
             <Setter Property="Template">
@@ -175,15 +175,83 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3D3D3D" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlDown}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35" />
                                 <Setter Property="Cursor" Value="Arrow" />
                             </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A numbered strip for picking one of a handful of same-shaped things — the tuning tab's tables.
+             Same visual language as the render-mode selector below (rounded cell, accent when current), but
+             a ListBox rather than radio buttons: the selection is bound, not counted, and arrow keys work.
+             A ListBox for its behaviour only — every scrap of list chrome is templated away. -->
+        <Style x:Key="NumberStrip" TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+            <!-- The trailing cell's own gap, taken back, so the strip ends flush with the card it sits in
+                 instead of stopping one gap short of it. -->
+            <Setter Property="Margin" Value="0,0,-4,0" />
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <!-- One row of equal cells filling the width: a segmented control, not a handful of
+                             small squares adrift in a wide card. Safe as one row — no entity-data storage in
+                             the game holds more than six tables. -->
+                        <UniformGrid Rows="1" />
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBox">
+                        <ItemsPresenter />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NumberStripItem" TargetType="ListBoxItem">
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="0,0,4,4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                                Padding="7,0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -196,7 +264,7 @@
             <Setter Property="Width" Value="30" />
             <Setter Property="Height" Value="30" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
@@ -205,17 +273,17 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Accent}" />
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsChecked" Value="True" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                             </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -229,7 +297,7 @@
             <Setter Property="Width" Value="40" />
             <Setter Property="Height" Value="40" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
@@ -238,17 +306,17 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Accent}" />
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsChecked" Value="True" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                             </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -262,7 +330,7 @@
             <Setter Property="Width" Value="40" />
             <Setter Property="Height" Value="40" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
@@ -271,17 +339,17 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2D7DD2" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Accent}" />
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsChecked" Value="True" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                             </MultiTrigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35" />
@@ -301,7 +369,7 @@
             <Setter Property="Width" Value="40" />
             <Setter Property="Height" Value="40" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
@@ -310,17 +378,17 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#5E5E5E" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#E87D0D" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Blender}" />
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsChecked" Value="True" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Bd" Property="Background" Value="#F58B1F" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BlenderHot}" />
                             </MultiTrigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35" />
@@ -335,19 +403,19 @@
         <!-- ═══ Render tab: modern toggle switch + vertical icon-tab strip ═══ -->
 
         <!-- Pill toggle switch: a ToggleButton retemplated as a rounded track + sliding knob.
-             OFF = neutral-gray track (#4D4D4D, hover #5E5E5E), knob parked left.
-             ON  = accent-blue track (#2D7DD2, on-hover #3B8EE6), knob glides 18px right (120ms). -->
+             OFF = neutral-gray track (SurfaceControl, hover SurfaceControlHot), knob parked left.
+             ON  = accent-blue track (Accent, on-hover AccentHot), knob glides 18px right (120ms). -->
         <Style x:Key="ToggleSwitch" TargetType="ToggleButton">
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Width" Value="36" />
             <Setter Property="Height" Value="18" />
             <Setter Property="VerticalAlignment" Value="Center" />
-            <Setter Property="Background" Value="#4D4D4D" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Border x:Name="Track" Background="{TemplateBinding Background}"
-                                CornerRadius="9" BorderBrush="#1FFFFFFF" BorderThickness="1"
+                                CornerRadius="9" BorderBrush="{StaticResource EdgeSoft}" BorderThickness="1"
                                 SnapsToDevicePixels="True">
                             <Ellipse x:Name="Knob" Width="14" Height="14" Fill="White"
                                      HorizontalAlignment="Left" VerticalAlignment="Center"
@@ -359,11 +427,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Track" Property="Background" Value="#5E5E5E" />
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource SurfaceControlHot}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Track" Property="Background" Value="#2D7DD2" />
-                                <Setter TargetName="Track" Property="BorderBrush" Value="#2D7DD2" />
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Accent}" />
                                 <Trigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
@@ -388,8 +456,8 @@
                                     <Condition Property="IsChecked" Value="True" />
                                     <Condition Property="IsMouseOver" Value="True" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Track" Property="Background" Value="#3B8EE6" />
-                                <Setter TargetName="Track" Property="BorderBrush" Value="#3B8EE6" />
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource AccentHot}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource AccentHot}" />
                             </MultiTrigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.4" />
@@ -417,7 +485,7 @@
                             <!-- Transparent strip: blends with the content + the tree above (no two-tone
                                  band); only the hairline divider and the selected cell define the icon rail. -->
                             <Border Grid.Column="0" Background="Transparent"
-                                    BorderBrush="#1AFFFFFF" BorderThickness="0,0,1,0">
+                                    BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,0,1,0">
                                 <TabPanel x:Name="HeaderPanel" IsItemsHost="True"
                                           Panel.ZIndex="1" Margin="0,4,0,0" />
                             </Border>
@@ -431,15 +499,15 @@
             </Setter>
         </Style>
 
-        <!-- Flat icon-only tab cell. Idle = transparent + dim (#80FFFFFF). Selected = selection
-             tint fill (#382D7DD2) + a 2px accent bar on the inner right edge + white glyph.
-             Hover = subtle #12FFFFFF row-hover tint. Glyph comes from Tag; Header stays for the
+        <!-- Flat icon-only tab cell. Idle = transparent + dim (TextDim). Selected = selection
+             tint fill (SelectionFill) + a 2px accent bar on the inner right edge + white glyph.
+             Hover = subtle FillHover row-hover tint. Glyph comes from Tag; Header stays for the
              tooltip/accessibility only (not shown). -->
         <Style x:Key="VerticalTab" TargetType="TabItem">
             <Setter Property="Cursor" Value="Hand" />
             <!-- Foreground = the tab's meaning colour (set per TabItem); Blender-style coloured icon rail.
                  The glyph dims when idle, brightens on hover/select; the accent bar picks up the same colour. -->
-            <Setter Property="Foreground" Value="#9AA0A6" />
+            <Setter Property="Foreground" Value="{StaticResource GlyphIdle}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
@@ -452,14 +520,32 @@
                                        Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
                                        Foreground="{TemplateBinding Foreground}"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <!-- ...or a drawn icon, when the tab stands for something the CONTENT BROWSER
+                                 already draws. A tab and a tile meaning the same resource must not be two
+                                 different pictures, so those tabs put the browser's own geometry in Icon
+                                 and this Path shows instead of the glyph above. -->
+                            <Path x:Name="Vector" Width="15" Height="15" Stretch="Uniform" Opacity="0.62"
+                                  Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Data="{Binding (v:TabIcon.Icon), RelativeSource={RelativeSource TemplatedParent}}"
+                                  Stroke="{TemplateBinding Foreground}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Grid>
                         <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding (v:TabIcon.Icon), RelativeSource={RelativeSource Self}}"
+                                         Value="{x:Null}">
+                                <Setter TargetName="Vector" Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding (v:TabIcon.HasIcon), RelativeSource={RelativeSource Self}}"
+                                         Value="True">
+                                <Setter TargetName="Glyph" Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Cell" Property="Background" Value="#12FFFFFF" />
+                                <Setter TargetName="Cell" Property="Background" Value="{StaticResource FillHover}" />
                                 <Setter TargetName="Glyph" Property="Opacity" Value="0.9" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Cell" Property="Background" Value="#22FFFFFF" />
+                                <Setter TargetName="Cell" Property="Background" Value="{StaticResource FillActive}" />
                                 <Setter TargetName="Glyph" Property="Opacity" Value="1" />
                                 <Setter TargetName="AccentBar" Property="Opacity" Value="1" />
                             </Trigger>
@@ -474,12 +560,26 @@
 
         <!-- Grouping card: rounded panel-tint block with a hairline border (matches the scene-stats strip). -->
         <Style x:Key="PropCard" TargetType="Border">
-            <Setter Property="Background" Value="#14FFFFFF" />
-            <Setter Property="BorderBrush" Value="#1AFFFFFF" />
+            <Setter Property="Background" Value="{StaticResource FillCard}" />
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeFaint}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="11,10" />
             <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <!-- A card that is itself a button: the header of a foldable group. The highlight lives HERE and not
+             on the toggle inside it, so the whole block lights up as one — a toggle that paints its own hover
+             lights only the part of the row it happens to occupy, and the add button beside it becomes a hole
+             in the middle of the highlight. -->
+        <Style x:Key="GroupHeaderCard" TargetType="Border" BasedOn="{StaticResource PropCard}">
+            <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource FillHover}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource EdgeNeutral}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <!-- Selection header: object name (bold) over a dim type caption. -->
@@ -490,7 +590,7 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
         <Style x:Key="PropSubtitle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#80FFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="Margin" Value="0,2,0,0" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
@@ -498,7 +598,7 @@
 
         <!-- Section caption (uppercase-ish label above a group of rows). -->
         <Style x:Key="PropCaption" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#8AFFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
             <Setter Property="FontSize" Value="10.5" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="1,0,0,7" />
@@ -506,7 +606,7 @@
 
         <!-- Read-only metadata: "Label   value" row (label dim-left, value white-right). -->
         <Style x:Key="MetaLabel" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#80FFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
             <Setter Property="FontSize" Value="11.5" />
             <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
@@ -534,21 +634,21 @@
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="MinWidth" Value="64" />
             <Setter Property="CaretBrush" Value="White" />
-            <Setter Property="SelectionBrush" Value="#552D7DD2" />
+            <Setter Property="SelectionBrush" Value="{StaticResource SelectionText}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                                BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                             <ScrollViewer x:Name="PART_ContentHost" Margin="7,0,7,0" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
-                                <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

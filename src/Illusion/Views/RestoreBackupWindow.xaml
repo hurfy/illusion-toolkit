@@ -27,7 +27,7 @@
                              ToolTip="The loaded SDS archive to roll back" />
 
             <TextBlock Style="{StaticResource DimLabel}" Text="Backups (newest first)" Margin="0,0,0,4" />
-            <Border BorderBrush="#1AFFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+            <Border BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                 <Grid>
                     <ListBox x:Name="BackupList" Height="190" BorderThickness="0"
                              Background="Transparent"
@@ -45,9 +45,9 @@
                                     <TextBlock Grid.Column="0" Text="{Binding StampText}" FontSize="12"
                                                Foreground="White" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontSize="12"
-                                               Foreground="#A0FFFFFF" VerticalAlignment="Center" />
+                                               Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="2" Text="{Binding FileName}" FontSize="11"
-                                               Foreground="#80FFFFFF" FontFamily="Consolas"
+                                               Foreground="{StaticResource TextDim}" FontFamily="Consolas"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                 </Grid>
                             </DataTemplate>
@@ -60,7 +60,7 @@
             </Border>
         </StackPanel>
 
-        <Border Grid.Row="1" Background="#0FFFFFFF" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0"
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0"
                 Padding="24,14">
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"

@@ -59,7 +59,7 @@
                 <StackPanel Orientation="Horizontal">
                     <v:Vector3Box x:Name="CamPosBox" Compact="True" Decimals="1" VerticalAlignment="Center"
                                   Margin="2,1,0,1" ToolTip="Camera position (X, Y, Z)" />
-                    <Border Width="1" Height="16" Background="#40808080" Margin="12,0" />
+                    <Border Width="1" Height="16" Background="{StaticResource EdgeSoft}" Margin="12,0" />
                     <TextBox x:Name="SpeedBox" Style="{StaticResource InputField}" Width="72" Text="100"
                              VerticalAlignment="Center" Margin="0,1" ToolTip="Camera speed (units/s)"
                              KeyDown="Speed_KeyDown" LostFocus="Speed_LostFocus" />
@@ -89,7 +89,7 @@
                      stop mid-row; and since the theme's toolbar brush is translucent, painting it on both would
                      show the tray as a lighter patch. So the tray and its ToolBar go transparent and the row
                      carries the colour: the same band as before, now the full width of the viewport column. -->
-                <v:ToolbarRowPanel x:Name="ToolbarRow" DockPanel.Dock="Top" Background="#2D2D2D">
+                <v:ToolbarRowPanel x:Name="ToolbarRow" DockPanel.Dock="Top" Background="{StaticResource SurfaceBand}">
                     <ToolBarTray x:Name="ToolTray" IsLocked="True" Background="Transparent">
                         <ToolBar Background="Transparent">
                             <ComboBox x:Name="AreaCombo" Width="200" Margin="12, 4, 0, 4"
@@ -127,10 +127,10 @@
                                        Placement="Bottom" PlacementTarget="{Binding ElementName=LayersBtn}"
                                        AllowsTransparency="True" PopupAnimation="Fade" Closed="LayersPopup_Closed">
                                     <Border Background="{StaticResource PopupSurface}"
-                                            BorderBrush="{StaticResource PopupEdge}" BorderThickness="1"
+                                            BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
                                             CornerRadius="6" Padding="10,8" Margin="0,3,8,8" Width="264">
                                         <Border.Effect>
-                                            <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2"
+                                            <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2"
                                                               Opacity="0.5" />
                                         </Border.Effect>
                                         <StackPanel x:Name="LayerRows">
@@ -142,7 +142,7 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
                                                       VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
-                                                      Stroke="#56C7D6" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Stroke="{x:Static v:PaletteInk.Cyan}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconZones}" />
                                                 <TextBlock Grid.Column="1" Text="Loading zones" Foreground="White"
                                                            FontSize="12" VerticalAlignment="Center" />
@@ -159,7 +159,7 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
                                                       VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
-                                                      Stroke="#E3B341" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Stroke="{x:Static v:PaletteInk.Amber}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconInstances}" />
                                                 <TextBlock Grid.Column="1" Text="Crash objects" Foreground="White"
                                                            FontSize="12" VerticalAlignment="Center" />
@@ -176,7 +176,7 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
                                                       VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
-                                                      Stroke="#E0736B" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Stroke="{x:Static v:PaletteInk.Coral}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconCollision}" />
                                                 <TextBlock Grid.Column="1" Text="Collisions" Foreground="White"
                                                            FontSize="12" VerticalAlignment="Center" />
@@ -196,7 +196,7 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
                                                       VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
-                                                      Stroke="#5FD08A" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Stroke="{x:Static v:PaletteInk.Emerald}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                                       Data="{StaticResource IconNavigation}" />
                                                 <TextBlock Grid.Column="1" Text="AI navigation" Foreground="White"
@@ -217,7 +217,7 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
                                                       VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
-                                                      Stroke="#FF7340" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                                      Stroke="{x:Static v:PaletteInk.Vermilion}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                                       Data="{StaticResource IconCollision}" />
                                                 <TextBlock Grid.Column="1" Text="Part collision" Foreground="White"
                                                            FontSize="12" VerticalAlignment="Center" />
@@ -255,8 +255,8 @@
                                          ToolTip="Render — full textures, normal &amp; specular maps" Checked="RenderMode_Changed">
                                 <!-- Matte material ball: lit disc with a soft diffuse shadow crescent, no specular highlight -->
                                 <Canvas Width="16" Height="16">
-                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
-                                    <Path Fill="#9A9A9A">
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="{StaticResource GlyphInk}" />
+                                    <Path Fill="{StaticResource GlyphInkDim}">
                                         <Path.Data>
                                             <CombinedGeometry GeometryCombineMode="Exclude">
                                                 <CombinedGeometry.Geometry1>
@@ -276,8 +276,8 @@
                                 <!-- Checkered sphere: full material -->
                                 <Canvas Width="16" Height="16">
                                     <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
-                                             Stroke="#ECECEC" StrokeThickness="1.3" Fill="Transparent" />
-                                    <Path Fill="#ECECEC"
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" Fill="Transparent" />
+                                    <Path Fill="{StaticResource GlyphInk}"
                                           Data="M8,1.5 L14.5,1.5 L14.5,8 L8,8 Z  M1.5,8 L8,8 L8,14.5 L1.5,14.5 Z">
                                         <Path.Clip>
                                             <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
@@ -290,9 +290,9 @@
                                          ToolTip="Solid — flat geometry, no textures" Checked="RenderMode_Changed">
                                 <!-- Shaded sphere -->
                                 <Canvas Width="16" Height="16">
-                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="{StaticResource GlyphInk}" />
                                     <Ellipse Canvas.Left="3.6" Canvas.Top="3.2" Width="4.8" Height="4.8"
-                                             Fill="#FFFFFF" Opacity="0.5" />
+                                             Fill="White" Opacity="0.5" />
                                 </Canvas>
                             </RadioButton>
                             <RadioButton Tag="Wireframe" GroupName="RenderMode"
@@ -301,11 +301,11 @@
                                 <!-- Wireframe sphere: outline + meridian + equator (round, matches the others) -->
                                 <Canvas Width="16" Height="16">
                                     <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
-                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.15" Fill="Transparent" />
                                     <Ellipse Canvas.Left="5.3" Canvas.Top="0.75" Width="5.4" Height="14.5"
-                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.15" Fill="Transparent" />
                                     <Ellipse Canvas.Left="0.75" Canvas.Top="5.3" Width="14.5" Height="5.4"
-                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.15" Fill="Transparent" />
                                 </Canvas>
                             </RadioButton>
                         </v:CompactStrip.Items>
@@ -320,10 +320,10 @@
 
                     <!-- Blender edit-mode frame: an orange glow border over the whole viewport while a
                          bridge session is active. Purely visual (hit-test transparent). -->
-                    <Border x:Name="BridgeFrame" BorderBrush="#E87D0D" BorderThickness="2.5"
+                    <Border x:Name="BridgeFrame" BorderBrush="{StaticResource Blender}" BorderThickness="2.5"
                             IsHitTestVisible="False" Visibility="Collapsed">
                         <Border.Effect>
-                            <DropShadowEffect Color="#E87D0D" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
+                            <DropShadowEffect Color="{StaticResource BlenderColor}" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
                         </Border.Effect>
                     </Border>
 
@@ -336,10 +336,10 @@
                          number keeps meaning the same thing however often it is retyped. It appears in code
                          ONLY after an actual gizmo edit (not on select); DataContext = the SelectionViewModel. -->
                     <Border x:Name="GizmoPanel" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                            Margin="12" Padding="10,8" Background="#B0000000" CornerRadius="6"
+                            Margin="12" Padding="10,8" Background="{StaticResource ScrimPanel}" CornerRadius="6"
                             Visibility="Collapsed">
                         <StackPanel Width="330">
-                            <TextBlock x:Name="PanelCaption" Foreground="#A8FFFFFF" FontSize="10.5"
+                            <TextBlock x:Name="PanelCaption" Foreground="{StaticResource TextSecondary}" FontSize="10.5"
                                        FontWeight="SemiBold" Margin="2,0,0,5" />
                             <v:Vector3Box x:Name="PanelDelta" Compact="True" ShowActions="False" Decimals="3"
                                           X="{Binding DeltaX}" Y="{Binding DeltaY}" Z="{Binding DeltaZ}" />
@@ -356,7 +356,7 @@
             </DockPanel>
 
             <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
-                          Background="#22000000" />
+                          Background="{StaticResource Splitter}" />
 
             <!-- Scene panel: stats · search · tree · splitter · property tabs. Shared with the resource
                  editor — see ScenePanel; the viewport it reports on is handed over in the constructor. -->

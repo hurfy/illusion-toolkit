@@ -27,11 +27,6 @@ namespace Illusion.Views;
 /// </summary>
 public partial class SettingsWindow : Window
 {
-    private static readonly Brush OkBrush = Frozen("#60C060");
-    private static readonly Brush WarnBrush = Frozen("#D9903A");
-    private static readonly Brush ConflictBrush = Frozen("#E8A33D");
-    private static readonly Brush DimBrush = Frozen("#80FFFFFF");
-
     /// <summary>What a modifier-only action (the camera speed keys) can be put on.</summary>
     private static readonly ModifierChoice[] ModifierChoices =
     {
@@ -77,13 +72,6 @@ public partial class SettingsWindow : Window
     /// <summary>Opens the window on a named section — the launcher sends first-time users straight at the
     /// game folder, which is the only thing that blocks them.</summary>
     public void SelectSection(SettingsSection section) => Sections.SelectedIndex = (int)section;
-
-    private static Brush Frozen(string color)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-        brush.Freeze();
-        return brush;
-    }
 
     // A close (or Alt+F4) with focus still in a path box must not lose what was typed there.
     protected override void OnClosing(CancelEventArgs e)
@@ -144,25 +132,25 @@ public partial class SettingsWindow : Window
         string path = GamePathBox.Text.Trim();
         if (path.Length == 0)
         {
-            Say(GamePathStatus, "Not set — the editors stay closed until it is.", WarnBrush);
+            Say(GamePathStatus, "Not set — the editors stay closed until it is.", Palette.StatusWarn);
             return;
         }
 
         string? root = MafiaEnvironment.ResolveGameRoot(path);
         if (root == null || !Directory.Exists(root))
         {
-            Say(GamePathStatus, "No Mafia II install there.", WarnBrush);
+            Say(GamePathStatus, "No Mafia II install there.", Palette.StatusWarn);
             return;
         }
 
         string resources = Path.Combine(root, "resources");
         if (File.Exists(Path.Combine(resources, ".unpacked")))
         {
-            Say(GamePathStatus, "Ready — resources unpacked in " + resources, OkBrush);
+            Say(GamePathStatus, "Ready — resources unpacked in " + resources, Palette.StatusOk);
         }
         else
         {
-            Say(GamePathStatus, "Found, but not unpacked yet — unpack it from the launcher.", WarnBrush);
+            Say(GamePathStatus, "Found, but not unpacked yet — unpack it from the launcher.", Palette.StatusWarn);
         }
     }
 
@@ -210,7 +198,7 @@ public partial class SettingsWindow : Window
     {
         CheckUpdateBtn.IsEnabled = false;
         InstallUpdateBtn.Visibility = Visibility.Collapsed;
-        Say(UpdateStatusText, "Asking GitHub…", DimBrush);
+        Say(UpdateStatusText, "Asking GitHub…", Palette.TextDim);
 
         // force: this button exists precisely to ignore the answer the session already has.
         UpdateCheckResult result = await UpdateChecker.CheckAsync(force: true);
@@ -232,7 +220,7 @@ public partial class SettingsWindow : Window
 
         if (result is null)
         {
-            Say(UpdateStatusText, "Not looked yet in this session.", DimBrush);
+            Say(UpdateStatusText, "Not looked yet in this session.", Palette.TextDim);
             return;
         }
 
@@ -252,16 +240,16 @@ public partial class SettingsWindow : Window
                     !possible ? headline + " " + refusal
                     : blocked ? headline + " Close the map editor first — installing restarts the toolkit."
                     : headline + " Installing it restarts the toolkit.",
-                    possible && !blocked ? OkBrush : WarnBrush);
+                    possible && !blocked ? Palette.StatusOk : Palette.StatusWarn);
                 break;
             }
 
             case UpdateStatus.UpToDate:
-                Say(UpdateStatusText, $"Nothing newer than {AppVersion.Current} has been released.", OkBrush);
+                Say(UpdateStatusText, $"Nothing newer than {AppVersion.Current} has been released.", Palette.StatusOk);
                 break;
 
             default:
-                Say(UpdateStatusText, result.Error, WarnBrush);
+                Say(UpdateStatusText, result.Error, Palette.StatusWarn);
                 break;
         }
     }
@@ -271,12 +259,12 @@ public partial class SettingsWindow : Window
         if (_update is not { } release) return;
         if (EditorIsOpen)
         {
-            Say(UpdateStatusText, "Close the map editor first — installing restarts the toolkit.", WarnBrush);
+            Say(UpdateStatusText, "Close the map editor first — installing restarts the toolkit.", Palette.StatusWarn);
             return;
         }
         if (!UpdateInstaller.CanInstall(out string reason))
         {
-            Say(UpdateStatusText, reason, WarnBrush);
+            Say(UpdateStatusText, reason, Palette.StatusWarn);
             return;
         }
 
@@ -292,7 +280,7 @@ public partial class SettingsWindow : Window
                 p.Total > 0
                     ? $"Downloading… {100L * p.Received / p.Total}%"
                     : "Downloading…",
-                DimBrush));
+                Palette.TextDim));
 
             try
             {
@@ -312,7 +300,7 @@ public partial class SettingsWindow : Window
 
         if (staged is null)
         {
-            Say(UpdateStatusText, "The update could not be downloaded: " + error, WarnBrush);
+            Say(UpdateStatusText, "The update could not be downloaded: " + error, Palette.StatusWarn);
             return;
         }
 
@@ -328,7 +316,7 @@ public partial class SettingsWindow : Window
         if (!outcome.Confirmed)
         {
             Say(UpdateStatusText,
-                $"Version {staged.Version} is downloaded — press the button again to install it.", OkBrush);
+                $"Version {staged.Version} is downloaded — press the button again to install it.", Palette.StatusOk);
             return;
         }
 
@@ -338,7 +326,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
-            Say(UpdateStatusText, "The downloaded toolkit would not start: " + ex.Message, WarnBrush);
+            Say(UpdateStatusText, "The downloaded toolkit would not start: " + ex.Message, Palette.StatusWarn);
             return;
         }
 
@@ -373,15 +361,15 @@ public partial class SettingsWindow : Window
         string path = BlenderPathBox.Text.Trim();
         if (path.Length == 0)
         {
-            if (_autoDetectedBlender is { } found) Say(BlenderPathStatus, "Found by itself: " + found, OkBrush);
-            else Say(BlenderPathStatus, "No Blender found on this machine — the bridge will not open.", WarnBrush);
+            if (_autoDetectedBlender is { } found) Say(BlenderPathStatus, "Found by itself: " + found, Palette.StatusOk);
+            else Say(BlenderPathStatus, "No Blender found on this machine — the bridge will not open.", Palette.StatusWarn);
             return;
         }
 
         bool exists = File.Exists(path) || Directory.Exists(path);
         Say(BlenderPathStatus,
             exists ? "Using this instead of searching." : "Nothing at that path.",
-            exists ? OkBrush : WarnBrush);
+            exists ? Palette.StatusOk : Palette.StatusWarn);
     }
 
     private void BrowseBlender_Click(object sender, RoutedEventArgs e)
@@ -429,11 +417,11 @@ public partial class SettingsWindow : Window
                 port == McpHostOptions.DefaultPort
                     ? "The default."
                     : "The server binds at startup, so this is taken up the next time the toolkit runs.",
-                DimBrush);
+                Palette.TextDim);
         }
         else
         {
-            Say(McpPortStatus, "Has to be a number from 1 to 65535.", WarnBrush);
+            Say(McpPortStatus, "Has to be a number from 1 to 65535.", Palette.StatusWarn);
         }
 
         McpServerState? state = App.McpServer?.State;
@@ -569,7 +557,7 @@ public partial class SettingsWindow : Window
 
         var conflict = new TextBlock
         {
-            Foreground = ConflictBrush,
+            Foreground = Palette.StatusWarn,
             FontSize = 11,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(1, 4, 12, 0),

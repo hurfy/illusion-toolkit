@@ -13,64 +13,21 @@
          space, margins included), and the icon lives in a left gutter that disappears with it. -->
     <Window.Resources>
         <!-- One command-bar button pair, both on the same 4px-radius pill so the pair reads as one control.
-             Confirm = app accent (the launcher's Play blue); Cancel = a neutral gray-alpha surface. -->
-        <Style x:Key="AccentButton" TargetType="Button">
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Cursor" Value="Hand" />
+             Confirm = app accent (the launcher's Play blue); Cancel = a neutral gray-alpha surface. Both are
+             the shared EditorStyles.xaml AccentButton/NeutralButton (same colours, same template) — only the
+             size differs here, so this local override is BasedOn the shared style rather than copying it. -->
+        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource AccentButton}">
             <Setter Property="MinWidth" Value="92" />
             <Setter Property="Height" Value="32" />
             <Setter Property="Padding" Value="16,0" />
-            <Setter Property="Background" Value="#2D7DD2" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#2569B0" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.4" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
 
-        <!-- Neutral secondary (Cancel): same size/shape as the accent button, gray-alpha fill + hairline so it
-             sits back from the confirm button. Foreground is left to inherit the theme's control text. -->
-        <Style x:Key="NeutralButton" TargetType="Button">
-            <Setter Property="Cursor" Value="Hand" />
+        <!-- Neutral secondary (Cancel): same size/shape as the accent button above, sits back from it because
+             the shared NeutralButton's fill is a dim gray-alpha rather than the accent. -->
+        <Style x:Key="NeutralButton" TargetType="Button" BasedOn="{StaticResource NeutralButton}">
             <Setter Property="MinWidth" Value="92" />
             <Setter Property="Height" Value="32" />
             <Setter Property="Padding" Value="16,0" />
-            <Setter Property="Background" Value="#18808080" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                                BorderBrush="#33808080" BorderThickness="1"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#28808080" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#12808080" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
     </Window.Resources>
 
@@ -108,7 +65,7 @@
         <!-- Command bar: hairline-topped strip. The verification checkbox sits on the left (aligned under the
              icon), the buttons on the right (aligned under the message) — a balanced bar, not one lonely button.
              Cancel + checkbox hide when unused. -->
-        <Border Grid.Row="1" Background="#0A808080" BorderBrush="#22808080" BorderThickness="0,1,0,0"
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0"
                 Padding="24,14">
             <DockPanel LastChildFill="False">
                 <CheckBox x:Name="CheckBoxControl" DockPanel.Dock="Left" FontSize="13"

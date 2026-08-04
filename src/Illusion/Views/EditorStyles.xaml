@@ -6,20 +6,13 @@
          cloning styles locally. Secondary windows leave their Background unset — the Fluent theme paints
          them the same as MainWindow, so the palette never drifts between windows. -->
 
-    <!-- The surface every drop-down in the app lands on. One brush pair rather than five copies of a literal,
-         so the popups cannot drift apart. It sits in the same family as the toolbar band (#2D2D2D) and a step
-         above the windows it floats over (#202020); the edge is a neutral grey, because a white-alpha hairline
-         read as a lit outline against the dark chrome rather than as a border. -->
-    <SolidColorBrush x:Key="PopupSurface" Color="#2D2D2D" />
-    <SolidColorBrush x:Key="PopupEdge" Color="#454545" />
-
     <!-- Buttons -->
     <Style x:Key="AccentButton" TargetType="Button">
         <Setter Property="Foreground" Value="White" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Height" Value="28" />
         <Setter Property="Padding" Value="14,0" />
-        <Setter Property="Background" Value="#2D7DD2" />
+        <Setter Property="Background" Value="{StaticResource Accent}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -29,10 +22,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#2569B0" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentDown}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4" />
@@ -48,21 +41,21 @@
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Height" Value="26" />
         <Setter Property="Padding" Value="12,0" />
-        <Setter Property="Background" Value="#18FFFFFF" />
+        <Setter Property="Background" Value="{StaticResource FillRest}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                            BorderBrush="#2DFFFFFF" BorderThickness="1"
+                            BorderBrush="{StaticResource EdgeButton}" BorderThickness="1"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#28FFFFFF" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHot}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#10FFFFFF" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillDown}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4" />
@@ -75,13 +68,13 @@
 
     <!-- Text -->
     <Style x:Key="Caption" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="#8AFFFFFF" />
+        <Setter Property="Foreground" Value="{StaticResource TextDim}" />
         <Setter Property="FontSize" Value="10" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Margin" Value="0,0,0,4" />
     </Style>
     <Style x:Key="DimLabel" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="#80FFFFFF" />
+        <Setter Property="Foreground" Value="{StaticResource TextDim}" />
         <Setter Property="FontSize" Value="11.5" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
@@ -90,28 +83,28 @@
     <Style x:Key="DarkBox" TargetType="TextBox">
         <Setter Property="Foreground" Value="White" />
         <Setter Property="CaretBrush" Value="White" />
-        <Setter Property="SelectionBrush" Value="#552D7DD2" />
+        <Setter Property="SelectionBrush" Value="{StaticResource SelectionText}" />
         <Setter Property="FontSize" Value="11.5" />
         <Setter Property="Height" Value="24" />
         <Setter Property="MinHeight" Value="0" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
-                    <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                            BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                    <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                            BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="7,0,7,0" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
-                            <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                         </Trigger>
                         <Trigger Property="IsReadOnly" Value="True">
-                            <Setter Property="Foreground" Value="#B0FFFFFF" />
-                            <Setter TargetName="Bd" Property="Background" Value="#16181C" />
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceSunken}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -130,10 +123,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#14FFFFFF" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#382D7DD2" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionFill}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -150,20 +143,20 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bd" Background="#2D7DD2" CornerRadius="4">
+                    <Border x:Name="Bd" Background="{StaticResource Accent}" CornerRadius="4">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
                                     VerticalAlignment="Center">
                             <ContentPresenter VerticalAlignment="Center" />
                             <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="8" Text="&#xE70D;"
-                                       Foreground="#C0FFFFFF" Margin="7,1,0,0" VerticalAlignment="Center" />
+                                       Foreground="{StaticResource TextStrong}" Margin="7,1,0,0" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#3B8EE6" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#2569B0" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentDown}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4" />
@@ -183,8 +176,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                            BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                    <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                            BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                         <Grid Margin="7,0,6,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -193,16 +186,16 @@
                             <TextBlock Grid.Column="0" Text="{TemplateBinding Content}" Foreground="White"
                                        FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Column="1" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                       Text="&#xE70D;" Foreground="#80FFFFFF" Margin="6,0,0,0"
+                                       Text="&#xE70D;" Foreground="{StaticResource TextDim}" Margin="6,0,0,0"
                                        VerticalAlignment="Center" />
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -222,19 +215,80 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                            BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                    <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                            BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
                                           Margin="6,0" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
-                            <Setter TargetName="Bd" Property="Background" Value="#25252A" />
-                            <Setter Property="Foreground" Value="#7FB6EE" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
+                            <Setter Property="Foreground" Value="{StaticResource AccentText}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A whole band header as one click target: no chrome, no chevron, just the header lifting under the
+         pointer so it is plainly something you press. A chevron beside a caption reads as a tree, and these
+         are panels, not a hierarchy — Blender opens its panels by their whole heading too. -->
+    <!-- The click target of a foldable group's header. It paints NOTHING: the highlight belongs to the card
+         around it (GroupHeaderCard), which is the whole block the eye reads as one thing. A hover drawn here
+         instead would stop at the toggle's own edge — short of the card's padding, and short of the add
+         button — so moving the mouse along one heading would light it, drop it, and light it again. -->
+    <Style x:Key="GroupHeaderToggle" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <!-- Without these the button shrinks to its caption and the rest of the heading stops being clickable. -->
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="Transparent"
+                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Ghosted glyph button: nothing at all until the pointer is on it. For the small actions that sit at
+         the end of a row — copy a vector, add a part, drop one. A filled button there would put a box on
+         every row and turn a list into a grid of controls; this is the shape Vector3Box's own copy/paste
+         used, lifted out of it so the two cannot drift apart. -->
+    <Style x:Key="GhostIconButton" TargetType="Button">
+        <Setter Property="Width" Value="24" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+        <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="4">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource EdgeSoft}" />
+                            <Setter Property="Foreground" Value="White" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.35" />
+                            <Setter Property="Cursor" Value="Arrow" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -253,13 +307,13 @@
 
     <!-- Dark ListView column headers (Import's preview table). -->
     <Style x:Key="DarkColumnHeader" TargetType="GridViewColumnHeader">
-        <Setter Property="Foreground" Value="#8AFFFFFF" />
+        <Setter Property="Foreground" Value="{StaticResource TextDim}" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="GridViewColumnHeader">
-                    <Border Background="Transparent" BorderBrush="#1AFFFFFF" BorderThickness="0,0,0,1"
+                    <Border Background="Transparent" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,0,0,1"
                             Padding="7,4">
                         <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" />
                     </Border>

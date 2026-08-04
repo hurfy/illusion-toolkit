@@ -25,7 +25,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Width="42" Height="42" CornerRadius="4" Margin="0,1,10,0"
-                        VerticalAlignment="Top" Background="#FF101216" BorderBrush="#1AFFFFFF"
+                        VerticalAlignment="Top" Background="{StaticResource SurfaceWell}" BorderBrush="{StaticResource EdgeFaint}"
                         BorderThickness="1" ClipToBounds="True" ToolTip="{Binding ResolveNote}">
                     <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
                 </Border>
@@ -77,7 +77,7 @@
             <v:DropDownField Grid.Row="1" x:Name="LibraryCombo" SelectionChanged="Library_Changed" />
             <TextBox Grid.Row="2" x:Name="SearchBox" Style="{StaticResource DarkBox}" Margin="0,8,0,6"
                      TextChanged="Search_Changed" ToolTip="Filter materials by name" />
-            <Border Grid.Row="3" BorderBrush="#1AFFFFFF" BorderThickness="1" CornerRadius="4">
+            <Border Grid.Row="3" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4">
                 <ListBox x:Name="MaterialList" Background="Transparent" BorderThickness="0"
                          ItemContainerStyle="{StaticResource PickerItem}"
                          IsSynchronizedWithCurrentItem="False"
@@ -103,7 +103,7 @@
                         Margin="6,0,0,0" Click="New_Click" />
             </Grid>
             <Button Grid.Row="5" x:Name="DeleteBtn" Style="{StaticResource NeutralButton}"
-                    Foreground="#E0736B" Content="Delete" Margin="0,6,0,0"
+                    Foreground="{StaticResource StatusError}" Content="Delete" Margin="0,6,0,0"
                     HorizontalAlignment="Stretch" Click="Delete_Click" />
         </Grid>
 
@@ -121,7 +121,7 @@
                 <v:CopyableTextField Label="Hash" Value="{Binding HashHex, Mode=OneWay}" ReadOnly="True"
                                      Margin="0,4,0,0" />
             </StackPanel>
-            <Border Grid.Row="1" Background="#FF101216" BorderBrush="#1AFFFFFF" BorderThickness="1"
+            <Border Grid.Row="1" Background="{StaticResource SurfaceWell}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1"
                     CornerRadius="6" ClipToBounds="True">
                 <vp:MaterialPreviewViewport x:Name="Preview" />
             </Border>
@@ -149,11 +149,11 @@
                            Placement="Bottom" AllowsTransparency="True" PopupAnimation="Fade"
                            Closed="AddSlotPopup_Closed">
                         <Border Background="{StaticResource PopupSurface}"
-                                BorderBrush="{StaticResource PopupEdge}" BorderThickness="1"
+                                BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
                                 CornerRadius="6" Padding="4" Margin="0,3,8,8"
                                 MinWidth="{Binding ActualWidth, ElementName=AddSlotBtn}">
                             <Border.Effect>
-                                <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
+                                <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
                             </Border.Effect>
                             <ListBox x:Name="AddSlotList" Background="Transparent" BorderThickness="0"
                                      FontSize="11.5" Foreground="White" MaxHeight="290"

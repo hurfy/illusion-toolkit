@@ -43,7 +43,7 @@
                              ToolTip="The loaded SDS archive the import lands in" />
 
             <!-- What the file contains, routed by name: COL_ prefixed meshes become collision hulls. -->
-            <Border BorderBrush="#1AFFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+            <Border BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                 <ListView x:Name="PreviewList"
                           Height="150" BorderThickness="0"
                           Background="Transparent" Foreground="White" Focusable="False">
@@ -77,11 +77,11 @@
                                               ToolTip="{Binding Type}">
                                             <Path.Style>
                                                 <Style TargetType="Path">
-                                                    <Setter Property="Stroke" Value="#6CC490" />
+                                                    <Setter Property="Stroke" Value="{x:Static v:PaletteInk.Mint}" />
                                                     <Setter Property="Data" Value="{StaticResource IconMesh}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding Type}" Value="Collision">
-                                                            <Setter Property="Stroke" Value="#E0736B" />
+                                                            <Setter Property="Stroke" Value="{x:Static v:PaletteInk.Coral}" />
                                                             <Setter Property="Data" Value="{StaticResource IconCollision}" />
                                                         </DataTrigger>
                                                     </Style.Triggers>
@@ -99,11 +99,11 @@
             </Border>
 
             <CheckBox x:Name="CreateMaterialsCheck"
-                      FontSize="12" Foreground="#D8FFFFFF" IsChecked="True" Margin="0,10,0,0"
+                      FontSize="12" Foreground="{StaticResource TextStrong}" IsChecked="True" Margin="0,10,0,0"
                       Visibility="Collapsed" Checked="Field_Changed" Unchecked="Field_Changed" />
         </StackPanel>
 
-        <Border Grid.Row="1" Background="#0FFFFFFF" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0"
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0"
                 Padding="24,14">
             <DockPanel LastChildFill="False">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">

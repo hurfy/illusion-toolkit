@@ -123,36 +123,39 @@ public static class ResourceTypeIcons
 
     // The colour is the SECOND cue, after the shape: it is what makes a wall of a hundred car tiles read as
     // one kind of thing at a glance. Neighbouring kinds are kept in different hue families on purpose —
-    // people are warm, places are blue, sound is green, data is grey.
+    // people are warm, places are blue, sound is green, data is grey. The hues themselves come from
+    // PaletteInk (Views\Palette.cs) — the toolkit's one categorical ink table, shared with ArchiveIcons so a
+    // kind that means the same thing in both trees is the same brush instance rather than a second literal
+    // that can drift from the first.
     private static readonly Dictionary<LibraryResourceKind, Brush> Tints = new()
     {
-        [LibraryResourceKind.Unknown] = Ink("#B392F0"),
-        [LibraryResourceKind.Car] = Ink("#6FA8F5"),
-        [LibraryResourceKind.Character] = Ink("#F0A868"),
-        [LibraryResourceKind.Player] = Ink("#FFD166"),
-        [LibraryResourceKind.Police] = Ink("#4E8FE0"),
-        [LibraryResourceKind.Wardrobe] = Ink("#C79BF0"),
-        [LibraryResourceKind.Traffic] = Ink("#7FD4B0"),
-        [LibraryResourceKind.District] = Ink("#7FB6EE"),
-        [LibraryResourceKind.CityCrash] = Ink("#FF9A5E"),
-        [LibraryResourceKind.Terrain] = Ink("#A9B96A"),
-        [LibraryResourceKind.Sky] = Ink("#7FCFEA"),
-        [LibraryResourceKind.Interface] = Ink("#9EA6B3"),
-        [LibraryResourceKind.Video] = Ink("#E884AE"),
-        [LibraryResourceKind.Sound] = Ink("#6FD1C5"),
-        [LibraryResourceKind.Music] = Ink("#5FC9A6"),
-        [LibraryResourceKind.Speech] = Ink("#8FD2F2"),
-        [LibraryResourceKind.Animation] = Ink("#B99BF2"),
-        [LibraryResourceKind.Script] = Ink("#8FD46A"),
-        [LibraryResourceKind.Mission] = Ink("#F0705A"),
-        [LibraryResourceKind.Particle] = Ink("#FFC24A"),
-        [LibraryResourceKind.Shop] = Ink("#E0A96D"),
-        [LibraryResourceKind.Table] = Ink("#8FAECC"),
-        [LibraryResourceKind.Text] = Ink("#BFC6D1"),
-        [LibraryResourceKind.Weapon] = Ink("#C9605A"),
-        [LibraryResourceKind.Cloth] = Ink("#9FE0CF"),
-        [LibraryResourceKind.Generated] = Ink("#A3B4DA"),
-        [LibraryResourceKind.Map] = Ink("#D0C46A"),
+        [LibraryResourceKind.Unknown] = PaletteInk.Lilac,
+        [LibraryResourceKind.Car] = PaletteInk.Blue,
+        [LibraryResourceKind.Character] = PaletteInk.Apricot,
+        [LibraryResourceKind.Player] = PaletteInk.Sand,
+        [LibraryResourceKind.Police] = PaletteInk.AzureDeep,
+        [LibraryResourceKind.Wardrobe] = PaletteInk.Orchid,
+        [LibraryResourceKind.Traffic] = PaletteInk.Seafoam,
+        [LibraryResourceKind.District] = PaletteInk.Sky,
+        [LibraryResourceKind.CityCrash] = PaletteInk.Tangerine,
+        [LibraryResourceKind.Terrain] = PaletteInk.Moss,
+        [LibraryResourceKind.Sky] = PaletteInk.Ice,
+        [LibraryResourceKind.Interface] = PaletteInk.Pewter,
+        [LibraryResourceKind.Video] = PaletteInk.Rose,
+        [LibraryResourceKind.Sound] = PaletteInk.Turquoise,
+        [LibraryResourceKind.Music] = PaletteInk.Jade,
+        [LibraryResourceKind.Speech] = PaletteInk.SkyLight,
+        [LibraryResourceKind.Animation] = PaletteInk.Lavender,
+        [LibraryResourceKind.Script] = PaletteInk.Lime,
+        [LibraryResourceKind.Mission] = PaletteInk.Salmon,
+        [LibraryResourceKind.Particle] = PaletteInk.Honey,
+        [LibraryResourceKind.Shop] = PaletteInk.Tan,
+        [LibraryResourceKind.Table] = PaletteInk.SteelBlue,
+        [LibraryResourceKind.Text] = PaletteInk.Pearl,
+        [LibraryResourceKind.Weapon] = PaletteInk.Brick,
+        [LibraryResourceKind.Cloth] = PaletteInk.Foam,
+        [LibraryResourceKind.Generated] = PaletteInk.Cloud,
+        [LibraryResourceKind.Map] = PaletteInk.Brass,
     };
 
     /// <summary>The icon for a kind. An unmapped kind falls back to the archive crate rather than to
@@ -169,13 +172,6 @@ public static class ResourceTypeIcons
         Geometry geometry = Geometry.Parse(data);
         geometry.Freeze();      // shared by every row and tile — frozen so WPF may reuse it across threads
         return geometry;
-    }
-
-    private static Brush Ink(string hex)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)!);
-        brush.Freeze();
-        return brush;
     }
 }
 

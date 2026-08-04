@@ -7,7 +7,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="#80FFFFFF" FontSize="11.5"
+            <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{StaticResource TextDim}" FontSize="11.5"
                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             <!-- Flat icon buttons (copy always, paste only when editable), dim glyph brightening on hover. -->
             <StackPanel Grid.Column="1" Orientation="Horizontal">
@@ -22,11 +22,11 @@
                                 <ControlTemplate TargetType="Button">
                                     <Border x:Name="Bd" Background="Transparent" CornerRadius="3" Padding="4,2">
                                         <TextBlock x:Name="Glyph" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                                   Text="{TemplateBinding Content}" Foreground="#80FFFFFF" />
+                                                   Text="{TemplateBinding Content}" Foreground="{StaticResource TextDim}" />
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="Bd" Property="Background" Value="#1AFFFFFF" />
+                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource EdgeFaint}" />
                                             <Setter TargetName="Glyph" Property="Foreground" Value="White" />
                                         </Trigger>
                                     </ControlTemplate.Triggers>
@@ -48,27 +48,27 @@
                  IsReadOnly="{Binding ReadOnly}"
                  KeyDown="Field_KeyDown"
                  Foreground="White" FontSize="11.5" FontFamily="Consolas" Height="24" MinHeight="0"
-                 CaretBrush="White" SelectionBrush="#552D7DD2">
+                 CaretBrush="White" SelectionBrush="{StaticResource SelectionText}">
             <TextBox.Style>
                 <Style TargetType="TextBox">
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="TextBox">
-                                <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                                        BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                                <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                                        BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                                     <ScrollViewer x:Name="PART_ContentHost" Margin="7,0,7,0" VerticalAlignment="Center" />
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                                     </Trigger>
                                     <Trigger Property="IsKeyboardFocused" Value="True">
-                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
-                                        <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                                     </Trigger>
                                     <Trigger Property="IsReadOnly" Value="True">
-                                        <Setter Property="Foreground" Value="#B0FFFFFF" />
-                                        <Setter TargetName="Bd" Property="Background" Value="#16181C" />
+                                        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                                        <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceSunken}" />
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>

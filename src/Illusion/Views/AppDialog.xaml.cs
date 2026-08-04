@@ -61,20 +61,13 @@ public partial class AppDialog : Window
     // plain ASCII). Tints are picked to read on the dark surface. 0 = no glyph.
     private static (int GlyphCode, Brush Brush) IconFor(DialogIcon icon) => icon switch
     {
-        DialogIcon.Info => (0xE946, Frozen(0x2D, 0x7D, 0xD2)),     // Info        — accent blue
-        DialogIcon.Success => (0xE930, Frozen(0x5F, 0xB6, 0x5F)),  // Completed   — green
-        DialogIcon.Warning => (0xE7BA, Frozen(0xE8, 0xA3, 0x3D)),  // Warning     — amber
-        DialogIcon.Error => (0xEA39, Frozen(0xE0, 0x73, 0x6B)),    // ErrorBadge  — red
-        DialogIcon.Question => (0xE897, Frozen(0x2D, 0x7D, 0xD2)), // Help        — accent blue
+        DialogIcon.Info => (0xE946, Palette.Accent),        // Info        — accent blue
+        DialogIcon.Success => (0xE930, Palette.StatusOk),   // Completed   — green
+        DialogIcon.Warning => (0xE7BA, Palette.StatusWarn), // Warning     — amber
+        DialogIcon.Error => (0xEA39, Palette.StatusError),  // ErrorBadge  — red
+        DialogIcon.Question => (0xE897, Palette.Accent),    // Help        — accent blue
         _ => (0, Brushes.Transparent),
     };
-
-    private static SolidColorBrush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
 
     // Constructed via Show (or a probe in the same assembly); use Show for normal callers.
     internal AppDialog(DialogOptions options)

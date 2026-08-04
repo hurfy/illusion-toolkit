@@ -27,7 +27,7 @@
             <ProgressBar x:Name="Bar" Height="6" Margin="0,16,0,0" IsIndeterminate="True" />
         </StackPanel>
 
-        <Border x:Name="Actions" Grid.Row="1" Background="#0A808080" BorderBrush="#22808080"
+        <Border x:Name="Actions" Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
                 BorderThickness="0,1,0,0" Padding="24,14" Visibility="Collapsed">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Show the files" Style="{StaticResource NeutralButton}" Margin="0,0,8,0"

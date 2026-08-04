@@ -10,12 +10,12 @@
             <Setter Property="Height" Value="24" />
             <Setter Property="MinWidth" Value="64" />
             <Setter Property="CaretBrush" Value="White" />
-            <Setter Property="SelectionBrush" Value="#552D7DD2" />
+            <Setter Property="SelectionBrush" Value="{StaticResource SelectionText}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                                BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
@@ -30,20 +30,20 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="Tag" Value="X">
-                                <Setter TargetName="Ax" Property="Foreground" Value="#FF6060" />
+                                <Setter TargetName="Ax" Property="Foreground" Value="{StaticResource AxisX}" />
                             </Trigger>
                             <Trigger Property="Tag" Value="Y">
-                                <Setter TargetName="Ax" Property="Foreground" Value="#60C060" />
+                                <Setter TargetName="Ax" Property="Foreground" Value="{StaticResource AxisY}" />
                             </Trigger>
                             <Trigger Property="Tag" Value="Z">
-                                <Setter TargetName="Ax" Property="Foreground" Value="#6090FF" />
+                                <Setter TargetName="Ax" Property="Foreground" Value="{StaticResource AxisZ}" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
-                                <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -62,7 +62,7 @@
             <Setter Property="Width" Value="24" />
             <Setter Property="Height" Value="24" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#A0FFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Template">
@@ -73,11 +73,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#1FFFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource EdgeSoft}" />
                                 <Setter Property="Foreground" Value="White" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#12FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -98,7 +98,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock x:Name="CompactLabel" Grid.Column="0" Foreground="#B0FFFFFF" FontSize="11.5"
+            <TextBlock x:Name="CompactLabel" Grid.Column="0" Foreground="{StaticResource TextSecondary}" FontSize="11.5"
                        VerticalAlignment="Center" Margin="0,0,10,0" />
             <TextBox x:Name="CompactX" Grid.Column="1" Tag="X" Style="{StaticResource V3Field}" Margin="0,0,5,0" />
             <TextBox x:Name="CompactY" Grid.Column="2" Tag="Y" Style="{StaticResource V3Field}" Margin="0,0,5,0" />
@@ -123,7 +123,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="BlockLabel" Grid.Column="0" Foreground="#B0FFFFFF" FontSize="11.5"
+                <TextBlock x:Name="BlockLabel" Grid.Column="0" Foreground="{StaticResource TextSecondary}" FontSize="11.5"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 <Button x:Name="BlockPaste" Grid.Column="1" Style="{StaticResource V3IconBtn}"
                         Content="&#xE77F;" ToolTip="Paste" />

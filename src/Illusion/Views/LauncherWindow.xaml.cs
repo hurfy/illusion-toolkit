@@ -5,7 +5,6 @@ using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Threading;
 using Illusion.Assets;
 using Illusion.Assets.Sds;
@@ -22,13 +21,6 @@ namespace Illusion.Views;
 /// </summary>
 public partial class LauncherWindow : Window
 {
-    // Status-dot palette, reusing the colours already established elsewhere in the app: the ready
-    // card's green check, the warning card's amber, the notice banner's error red.
-    private static readonly Brush McpRunningBrush = Frozen("#60C060");
-    private static readonly Brush McpStartingBrush = Frozen("#C77700");
-    private static readonly Brush McpFailedBrush = Frozen("#E0736B");
-    private static readonly Brush McpStoppedBrush = Frozen("#808080");
-
     private readonly McpServerHost? _mcp = App.McpServer;
     private DispatcherTimer? _copiedTimer;
     private bool _busy;
@@ -71,13 +63,6 @@ public partial class LauncherWindow : Window
         };
     }
 
-    private static Brush Frozen(string color)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-        brush.Freeze();
-        return brush;
-    }
-
     // Raised on a thread-pool thread — hop to the dispatcher before touching the controls.
     private void OnMcpStateChanged(McpServerState state) =>
         Dispatcher.BeginInvoke(() => ShowMcpState(state));
@@ -89,7 +74,7 @@ public partial class LauncherWindow : Window
         switch (state.Status)
         {
             case McpServerStatus.Running:
-                McpDot.Fill = McpRunningBrush;
+                McpDot.Fill = Palette.StatusOk;
                 McpAddressText.Text = state.Address;
                 McpStateText.Text = "MCP running";
                 McpAddressPanel.Cursor = Cursors.Hand;
@@ -97,7 +82,7 @@ public partial class LauncherWindow : Window
                 break;
 
             case McpServerStatus.Starting:
-                McpDot.Fill = McpStartingBrush;
+                McpDot.Fill = Palette.StatusWarn;
                 // Nothing to put beside "starting…" yet, and repeating the word would just be noise.
                 McpAddressText.Text = "";
                 McpStateText.Text = "MCP starting…";
@@ -106,7 +91,7 @@ public partial class LauncherWindow : Window
                 break;
 
             case McpServerStatus.Failed:
-                McpDot.Fill = McpFailedBrush;
+                McpDot.Fill = Palette.StatusError;
                 McpAddressText.Text = state.Error;
                 McpStateText.Text = "MCP failed";
                 McpAddressPanel.Cursor = null;
@@ -114,7 +99,7 @@ public partial class LauncherWindow : Window
                 break;
 
             default:
-                McpDot.Fill = McpStoppedBrush;
+                McpDot.Fill = Palette.StatusIdle;
                 McpAddressText.Text = "";
                 McpStateText.Text = "MCP stopped";
                 McpAddressPanel.Cursor = null;

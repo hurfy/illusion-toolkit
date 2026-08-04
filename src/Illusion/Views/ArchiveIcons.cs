@@ -97,33 +97,38 @@ public static class ArchiveIcons
             "M3.4,4.6 L1.6,4.6 M3.4,7.4 L1.6,7.4 M8.6,4.6 L10.4,4.6 M8.6,7.4 L10.4,7.4"),
     };
 
+    // The colour is the SECOND cue, after the shape: it is what makes a band of tiles inside an opened
+    // archive read as one kind of thing before any label does. The hues come from PaletteInk
+    // (Views\Palette.cs) — the toolkit's one categorical ink table, shared with ResourceTypeIcons so a kind
+    // that means the same thing in both trees (a car's Blue, a scene's Sky) is the same brush instance
+    // rather than a second literal that can drift from the first.
     private static readonly Dictionary<SdsResourceKind, Brush> Tints = new()
     {
-        [SdsResourceKind.Unknown] = Ink("#9AA0A6"),
-        [SdsResourceKind.Mesh] = Ink("#7FB6EE"),
-        [SdsResourceKind.NameTable] = Ink("#86C3E0"),
-        [SdsResourceKind.Buffer] = Ink("#6FA8F5"),
-        [SdsResourceKind.Texture] = Ink("#C79BF0"),
-        [SdsResourceKind.Mipmap] = Ink("#A98BD6"),
-        [SdsResourceKind.AnimatedTexture] = Ink("#E884AE"),
-        [SdsResourceKind.Effect] = Ink("#FFC24A"),
-        [SdsResourceKind.Collision] = Ink("#FF7340"),
-        [SdsResourceKind.Shape] = Ink("#E8A05C"),
-        [SdsResourceKind.Actor] = Ink("#7FD4B0"),
-        [SdsResourceKind.EntityData] = Ink("#5FC9A6"),
-        [SdsResourceKind.Prefab] = Ink("#8FD46A"),
-        [SdsResourceKind.Instances] = Ink("#A9D96A"),
-        [SdsResourceKind.Animation] = Ink("#B99BF2"),
-        [SdsResourceKind.Cutscene] = Ink("#D08AE0"),
-        [SdsResourceKind.Sound] = Ink("#6FD1C5"),
-        [SdsResourceKind.Speech] = Ink("#8FD2F2"),
-        [SdsResourceKind.AudioSector] = Ink("#79C7E3"),
-        [SdsResourceKind.Navigation] = Ink("#7FCFEA"),
-        [SdsResourceKind.TrafficPath] = Ink("#86C7A8"),
-        [SdsResourceKind.Script] = Ink("#9FB3D9"),
-        [SdsResourceKind.Table] = Ink("#8FAECC"),
-        [SdsResourceKind.Xml] = Ink("#BFC6D1"),
-        [SdsResourceKind.Binary] = Ink("#9EA6B3"),
+        [SdsResourceKind.Unknown] = PaletteInk.Ash,
+        [SdsResourceKind.Mesh] = PaletteInk.Sky,
+        [SdsResourceKind.NameTable] = PaletteInk.Cornflower,
+        [SdsResourceKind.Buffer] = PaletteInk.Blue,
+        [SdsResourceKind.Texture] = PaletteInk.Orchid,
+        [SdsResourceKind.Mipmap] = PaletteInk.Amethyst,
+        [SdsResourceKind.AnimatedTexture] = PaletteInk.Rose,
+        [SdsResourceKind.Effect] = PaletteInk.Honey,
+        [SdsResourceKind.Collision] = PaletteInk.Vermilion,
+        [SdsResourceKind.Shape] = PaletteInk.Peach,
+        [SdsResourceKind.Actor] = PaletteInk.Seafoam,
+        [SdsResourceKind.EntityData] = PaletteInk.Jade,
+        [SdsResourceKind.Prefab] = PaletteInk.Lime,
+        [SdsResourceKind.Instances] = PaletteInk.LimeSoft,
+        [SdsResourceKind.Animation] = PaletteInk.Lavender,
+        [SdsResourceKind.Cutscene] = PaletteInk.Magenta,
+        [SdsResourceKind.Sound] = PaletteInk.Turquoise,
+        [SdsResourceKind.Speech] = PaletteInk.SkyLight,
+        [SdsResourceKind.AudioSector] = PaletteInk.Aqua,
+        [SdsResourceKind.Navigation] = PaletteInk.Ice,
+        [SdsResourceKind.TrafficPath] = PaletteInk.Sage,
+        [SdsResourceKind.Script] = PaletteInk.Periwinkle,
+        [SdsResourceKind.Table] = PaletteInk.SteelBlue,
+        [SdsResourceKind.Xml] = PaletteInk.Pearl,
+        [SdsResourceKind.Binary] = PaletteInk.Pewter,
     };
 
     // The colour a section's header dot takes — the family its kinds are drawn in, so the header belongs to
@@ -146,6 +151,11 @@ public static class ArchiveIcons
     public static Geometry Glyph(SdsResourceKind kind) =>
         Glyphs.GetValueOrDefault(kind, Glyphs[SdsResourceKind.Unknown]);
 
+    /// <summary>The very geometry a kind's tiles are drawn with, for the places outside the browser that
+    /// stand for the same thing — a property tab must not be a second picture of a resource the browser
+    /// already draws.</summary>
+    public static Geometry Icon(SdsResourceKind kind) => Glyph(kind);
+
     /// <summary>The colour for a kind, on the same fallback as <see cref="Glyph"/>.</summary>
     public static Brush Tint(SdsResourceKind kind) =>
         Tints.GetValueOrDefault(kind, Tints[SdsResourceKind.Unknown]);
@@ -159,13 +169,6 @@ public static class ArchiveIcons
         Geometry geometry = Geometry.Parse(data);
         geometry.Freeze();
         return geometry;
-    }
-
-    private static Brush Ink(string hex)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)!);
-        brush.Freeze();
-        return brush;
     }
 }
 

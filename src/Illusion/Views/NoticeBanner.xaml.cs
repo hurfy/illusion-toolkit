@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
@@ -88,7 +87,7 @@ public partial class NoticeBanner : UserControl
     {
         var repeats = new TextBlock
         {
-            Foreground = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0x9A)),
+            Foreground = Palette.GlyphInkDim,
             FontSize = 11,
             Margin = new Thickness(8, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
@@ -98,7 +97,7 @@ public partial class NoticeBanner : UserControl
         var text = new TextBlock
         {
             Text = message,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xEC, 0xEC, 0xEC)),
+            Foreground = Palette.GlyphInk,
             TextWrapping = TextWrapping.Wrap,
         };
 
@@ -113,9 +112,7 @@ public partial class NoticeBanner : UserControl
         {
             Width = 3,
             CornerRadius = new CornerRadius(2, 0, 0, 2),
-            Background = new SolidColorBrush(isError
-                ? Color.FromRgb(0xE0, 0x73, 0x6B)
-                : Color.FromRgb(0x2D, 0x7D, 0xD2)),
+            Background = isError ? Palette.StatusError : Palette.Accent,
         };
 
         var layout = new DockPanel();
@@ -125,7 +122,7 @@ public partial class NoticeBanner : UserControl
 
         var visual = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0xB0, 0, 0, 0)),
+            Background = Palette.ScrimPanel,
             CornerRadius = new CornerRadius(6),
             Margin = new Thickness(0, 6, 0, 0),
             Cursor = Cursors.Hand,

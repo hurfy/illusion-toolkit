@@ -24,7 +24,7 @@
                      ToolTip="Filter the list by name" />
 
             <TextBlock Style="{StaticResource DimLabel}" Text="Object" Margin="0,0,0,4" />
-            <Border BorderBrush="#1AFFFFFF" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+            <Border BorderBrush="{StaticResource EdgeFaint}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
                 <Grid>
                     <ListBox x:Name="ObjectList" Height="260" BorderThickness="0"
                              Background="Transparent"
@@ -44,9 +44,9 @@
                                                Foreground="White" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="1" Text="{Binding CountText}" FontSize="11"
-                                               Foreground="#A0FFFFFF" VerticalAlignment="Center" />
+                                               Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="2" Text="{Binding DistanceText}" FontSize="11"
-                                               Foreground="#80FFFFFF" VerticalAlignment="Center" />
+                                               Foreground="{StaticResource TextDim}" VerticalAlignment="Center" />
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
@@ -62,7 +62,7 @@
                       ToolTip="Also place it in the other season's archive, so it does not have to be placed twice." />
         </StackPanel>
 
-        <Border Grid.Row="1" Background="#0FFFFFFF" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0"
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0"
                 Padding="24,14">
             <DockPanel LastChildFill="False">
                 <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"

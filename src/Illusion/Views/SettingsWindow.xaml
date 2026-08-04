@@ -16,8 +16,8 @@
              the default Fluent tab chrome, which draws a horizontal strip.
              The rail is DARKER than the page, not a white tint over it: a translucent tint reads as "lighter
              than everything else" against the Fluent dark chrome, and it is also at the mercy of whatever is
-             behind it. #1C1C20 is the palette's recessed surface (EditorStyles gives every input field the
-             same fill), so the rail and the footer sink while the page floats between them. -->
+             behind it. SurfaceInput is the palette's editable-field surface (EditorStyles gives every input
+             field the same fill), so the rail and the footer sink while the page floats between them. -->
         <Style x:Key="SectionTabControl" TargetType="TabControl">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -30,8 +30,8 @@
                                 <ColumnDefinition Width="184" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Background="#1C1C20"
-                                    BorderBrush="#1AFFFFFF" BorderThickness="0,0,1,0">
+                            <Border Grid.Column="0" Background="{StaticResource SurfaceInput}"
+                                    BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,0,1,0">
                                 <StackPanel IsItemsHost="True" Margin="8,12,8,8" />
                             </Border>
                             <ContentPresenter Grid.Column="1" ContentSource="SelectedContent" />
@@ -43,7 +43,7 @@
 
         <Style x:Key="SectionTab" TargetType="TabItem">
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#B0FFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -54,10 +54,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#12FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#382D7DD2" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionFill}" />
                                 <Setter Property="Foreground" Value="White" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -75,13 +75,13 @@
 
         <Style x:Key="SectionRule" TargetType="Border">
             <Setter Property="Height" Value="1" />
-            <Setter Property="Background" Value="#1AFFFFFF" />
+            <Setter Property="Background" Value="{StaticResource EdgeFaint}" />
             <Setter Property="Margin" Value="0,22,0,16" />
         </Style>
     </Window.Resources>
 
     <DockPanel>
-        <Border DockPanel.Dock="Bottom" Background="#1C1C20" BorderBrush="#1AFFFFFF"
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource SurfaceInput}" BorderBrush="{StaticResource EdgeFaint}"
                 BorderThickness="0,1,0,0" Padding="18,10">
             <Grid>
                 <TextBlock Style="{StaticResource DimLabel}" VerticalAlignment="Center"

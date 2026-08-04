@@ -14,15 +14,15 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" CornerRadius="4" BorderBrush="#40FFFFFF" BorderThickness="1"
+                        <Border x:Name="Bd" CornerRadius="4" BorderBrush="{StaticResource EdgeHot}" BorderThickness="1"
                                 Background="{Binding Swatch, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 SnapsToDevicePixels="True" />
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#A0FFFFFF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource TextSecondary}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -39,7 +39,7 @@
         </Grid.ColumnDefinitions>
 
         <TextBlock x:Name="LabelText" Grid.Column="0" Width="118" VerticalAlignment="Center"
-                   Foreground="#9AA0A6" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                   Foreground="{StaticResource GlyphIdle}" FontSize="11.5" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
 
         <ToggleButton x:Name="SwatchBtn" Grid.Column="1" Style="{StaticResource SwatchButton}"
                       Margin="0,0,8,0" ToolTip="Pick a colour" />
@@ -51,10 +51,10 @@
         <Popup x:Name="PickerPopup" PlacementTarget="{Binding ElementName=SwatchBtn}" Placement="Bottom"
                IsOpen="{Binding IsChecked, ElementName=SwatchBtn, Mode=TwoWay}"
                StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-            <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource PopupEdge}"
+            <Border Background="{StaticResource PopupSurface}" BorderBrush="{StaticResource EdgeNeutral}"
                     BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,4,10,10">
                 <Border.Effect>
-                    <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
+                    <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
                 </Border.Effect>
                 <StackPanel Width="212">
                     <!-- Saturation across, value down, over the chosen hue. -->
@@ -86,7 +86,7 @@
                                  Fill="Transparent" IsHitTestVisible="False"
                                  HorizontalAlignment="Left" VerticalAlignment="Top">
                             <Ellipse.Effect>
-                                <DropShadowEffect Color="#000000" BlurRadius="3" ShadowDepth="0" Opacity="0.8" />
+                                <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="3" ShadowDepth="0" Opacity="0.8" />
                             </Ellipse.Effect>
                         </Ellipse>
                     </Grid>
@@ -118,7 +118,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Hex" Foreground="#9AA0A6" FontSize="11.5"
+                        <TextBlock Grid.Column="0" Text="Hex" Foreground="{StaticResource GlyphIdle}" FontSize="11.5"
                                    VerticalAlignment="Center" Margin="0,0,8,0" />
                         <TextBox x:Name="HexBox" Grid.Column="1" Style="{StaticResource DarkBox}"
                                  VerticalContentAlignment="Center" MaxLength="7"
@@ -126,7 +126,7 @@
                     </Grid>
 
                     <TextBlock Text="Shown the way the viewport shows it; the numbers stay linear."
-                               Foreground="#66FFFFFF" FontSize="10.5" TextWrapping="Wrap" Margin="0,8,0,0" />
+                               Foreground="{StaticResource TextFaint}" FontSize="10.5" TextWrapping="Wrap" Margin="0,8,0,0" />
                 </StackPanel>
             </Border>
         </Popup>

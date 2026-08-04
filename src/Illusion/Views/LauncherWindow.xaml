@@ -7,9 +7,10 @@
         ResizeMode="CanMinimize">
 
     <!-- Native Fluent dark (the app pins ThemeMode.Dark), like in MainWindow (map editor): no custom
-         button outline, system accent on hover/focus, Segoe MDL2 glyphs, Consolas for paths, gray-alpha
-         surfaces over the dark window. SizeToContent="Height" fits the height to the content — no empty
-         gaps. -->
+         button outline, Segoe MDL2 glyphs, Consolas for paths, gray-alpha surfaces over the dark window.
+         The two big tiles below are stock Fluent buttons — WPF's default template carries no accent brush
+         at all, so hover and pressed are neutral fills, not the system accent. SizeToContent="Height" fits
+         the height to the content — no empty gaps. -->
 
     <Window.Resources>
         <!-- The one control here that is NOT a native Fluent button: the settings gear in the corner. A
@@ -20,7 +21,7 @@
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Width" Value="34" />
             <Setter Property="Height" Value="34" />
-            <Setter Property="Foreground" Value="#A8FFFFFF" />
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
             <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
             <Setter Property="FontSize" Value="16" />
             <Setter Property="Template">
@@ -31,11 +32,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#18FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillRest}" />
                                 <Setter Property="Foreground" Value="White" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#28FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHot}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.4" />
@@ -56,7 +57,7 @@
             <StatusBarItem Grid.Column="0" Padding="8,1">
                 <StackPanel Orientation="Horizontal">
                     <Ellipse x:Name="McpDot" Width="7" Height="7" VerticalAlignment="Center"
-                             Margin="0,0,7,0" Fill="#C77700" />
+                             Margin="0,0,7,0" Fill="{StaticResource StatusWarn}" />
                     <TextBlock x:Name="McpStateText" FontFamily="Consolas" FontSize="11" Opacity="0.85"
                                VerticalAlignment="Center" Text="MCP starting…" />
                 </StackPanel>
@@ -101,7 +102,7 @@
                          and the launcher already uses the same green for the ready card's check. The colour is
                          a local value, so the hover trigger cannot repaint it white. -->
                     <Button x:Name="UpdateBtn" Style="{StaticResource CornerIconButton}"
-                            Content="&#xE896;" Foreground="#60C060" Visibility="Collapsed"
+                            Content="&#xE896;" Foreground="{StaticResource StatusOk}" Visibility="Collapsed"
                             Click="Update_Click" />
                     <Button x:Name="SettingsBtn" Style="{StaticResource CornerIconButton}"
                             Content="&#xE713;"
@@ -136,14 +137,14 @@
             <!-- Status card: exactly one panel is visible at a time. Gray 50% at a low
                  alpha — a surface that lifts off the dark window without a hard fill. -->
             <Border Grid.Row="2" Margin="0,0,0,22" CornerRadius="6"
-                    Background="#14808080" BorderBrush="#28808080" BorderThickness="1"
+                    Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeRaised}" BorderThickness="1"
                     Padding="12,10" MinHeight="52">
                 <Grid VerticalAlignment="Center">
 
                     <!-- (a/b) invalid path or not yet unpacked -->
                     <StackPanel x:Name="WarnPanel" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7BA;" FontSize="18"
-                                   Foreground="#C77700" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                   Foreground="{StaticResource StatusWarn}" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <TextBlock x:Name="WarnText" FontSize="13" TextWrapping="Wrap"
                                    VerticalAlignment="Center" MaxWidth="470"
                                    Text="The game is not unpacked. Click the unpack button before opening the editors." />
@@ -153,7 +154,7 @@
                     <StackPanel x:Name="ReadyPanel" Orientation="Horizontal" VerticalAlignment="Center"
                                 Visibility="Collapsed">
                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE930;" FontSize="20"
-                                   Foreground="#60C060" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                   Foreground="{StaticResource StatusOk}" VerticalAlignment="Center" Margin="0,0,10,0" />
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="Game is unpacked and ready" FontSize="13" FontWeight="SemiBold" />
                             <TextBlock x:Name="ReadyPathText" FontFamily="Consolas" FontSize="11"
@@ -173,7 +174,7 @@
                 </Grid>
             </Border>
 
-            <!-- Editor tiles: native Fluent buttons (system accent on hover/focus), stretched full width -->
+            <!-- Editor tiles: native Fluent buttons (hover/pressed are neutral fills, not the system accent), stretched full width -->
             <UniformGrid Grid.Row="3" Rows="1" Columns="2" HorizontalAlignment="Stretch">
                 <Button x:Name="MapEditorBtn" Height="140" Margin="0,0,5,0"
                         HorizontalAlignment="Stretch"

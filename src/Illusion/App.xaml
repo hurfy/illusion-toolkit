@@ -4,6 +4,10 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
+                <!-- The scheme itself: every colour in the toolkit, plus the overrides that stop the Fluent
+                     theme following the user's Windows accent. FIRST, because the dictionaries below reach
+                     into it with StaticResource, which only resolves against siblings merged before them. -->
+                <ResourceDictionary Source="Views/Palette.xaml" />
                 <!-- Shared dark editor styles for secondary windows (Import, Material Editor). -->
                 <ResourceDictionary Source="Views/EditorStyles.xaml" />
                 <!-- Chrome shared by the editor windows and the scene panel: tree icons, toolbar and shelf

@@ -11,16 +11,16 @@
 
         <!-- Local styles clone the app palette (window-scoped styles aren't visible here). -->
         <Style x:Key="MatTile" TargetType="Border">
-            <Setter Property="Background" Value="#14FFFFFF" />
-            <Setter Property="BorderBrush" Value="#1AFFFFFF" />
+            <Setter Property="Background" Value="{StaticResource FillCard}" />
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeFaint}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="6" />
             <Setter Property="Padding" Value="7" />
             <Setter Property="Margin" Value="3" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#22FFFFFF" />
-                    <Setter Property="BorderBrush" Value="#2DFFFFFF" />
+                    <Setter Property="Background" Value="{StaticResource FillActive}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource EdgeButton}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -49,7 +49,7 @@
                          whole). ImageBrush, not Image: UniformToFill on an Image crops from the top-left,
                          de-centering the sphere as the panel resizes — the brush crops around the center.
                          A null thumbnail leaves the dark well. -->
-                    <Border Background="#FF1C1C1C" CornerRadius="4" Height="92">
+                    <Border Background="{StaticResource SurfaceInput}" CornerRadius="4" Height="92">
                         <Rectangle RadiusX="4" RadiusY="4">
                             <Rectangle.Fill>
                                 <ImageBrush ImageSource="{Binding Thumbnail}" Stretch="UniformToFill" />
@@ -64,10 +64,10 @@
                         <Ellipse Grid.Column="0" Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center">
                             <Ellipse.Style>
                                 <Style TargetType="Ellipse">
-                                    <Setter Property="Fill" Value="#E0A24E" /> <!-- unresolved: amber -->
+                                    <Setter Property="Fill" Value="{StaticResource StatusWarn}" /> <!-- unresolved: amber -->
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding Resolved}" Value="True">
-                                            <Setter Property="Fill" Value="#6CC490" /> <!-- resolved: green -->
+                                            <Setter Property="Fill" Value="{StaticResource StatusOk}" /> <!-- resolved: green -->
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
