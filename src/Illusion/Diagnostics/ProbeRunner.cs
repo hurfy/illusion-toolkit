@@ -227,6 +227,13 @@ internal static class ProbeRunner
             case "--probe-act-relayout":
                 ActorProbes.RunActRelayoutProbe();
                 return true;
+            // The car tuning table (EDS C_Car, 3400 B): the layout covers the struct without
+            // overlapping itself, the corpus re-emits byte for byte, the panel puts the
+            // column-major fields back together per wheel, and a written value survives an undo.
+            // Output: %TEMP%\illusion_tuning.txt
+            case "--probe-tuning":
+                TuningProbes.RunTuningProbe(args.Length >= 2 ? args[1] : null);
+                return true;
             case "--probe-eds-tables":
                 ActorProbes.RunEdsTablesProbe();
                 return true;
@@ -604,6 +611,13 @@ internal static class ProbeRunner
             case "--probe-library-browser":
                 LibraryProbes.RunBrowserProbe();
                 return true;
+            // The content browser's editing half: importing a file, replacing one, deleting a resource,
+            // copying a texture with its MIP chain into another archive, and taking each back. Runs on a
+            // scratch copy of two car working copies and packs after every step.
+            // Output: %TEMP%\illusion_content_edit.txt
+            case "--probe-content-edit":
+                ContentEditProbes.RunContentEditProbe();
+                return true;
             // Resource library, stage half: one stand-alone archive through the district loader — geometry,
             // materials and a finite box, for an .sds that is no city district. Optional arg = path under
             // pc\sds. Output: %TEMP%\illusion_library_stage.txt
@@ -650,6 +664,19 @@ internal static class ProbeRunner
             // name (a car ships no .col). Optional arg = the car. Output: %TEMP%\illusion_car_collision.txt
             case "--probe-car-collision":
                 CarCollisionProbes.RunCarCollisionProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // All three candidate physics layers of a car side by side — the ItemDesc shapes its stubs name,
+            // the collision volumes its PREFAB hangs off each deformable part, and the hit boxes the skinned
+            // model stores. Optional arg = the car. Output: %TEMP%\illusion_car_physics.txt
+            // Phase 1 of the bone plan: every array a NEW bone would have to be written into, measured over
+            // the shipped rigs before anything is written. Output: %TEMP%\illusion_bone_add.txt
+            case "--probe-bone-add":
+                BoneAddProbes.RunBoneAddProbe();
+                return true;
+            case "--probe-car-physics":
+                CarPhysicsProbes.RunCarPhysicsProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
+                    args.Length >= 3 ? args[2] : null);
                 return true;
             // What makes a panel crumple: the deform bones, the per-vertex damage group and the BBCoeffs
             // beside it — which of them the shipped cars carry, and what a damage group lines up with.
