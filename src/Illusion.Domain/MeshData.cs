@@ -20,6 +20,11 @@ public sealed class MeshData
     public uint[] Indices { get; init; } = null!;
     public MeshPart[] Parts { get; init; } = null!;
 
+    /// <summary>Which level of detail of its frame this geometry is — 0 unless the viewport was switched
+    /// to a coarser one, and already clamped to what the mesh ships (a mesh with a single level answers 0
+    /// however high the request was). Everything that edits the mesh writes back into THIS level.</summary>
+    public int Lod { get; init; }
+
     /// <summary>
     /// Per-vertex bone influences, four per vertex, flattened: vertex i owns [4i, 4i+4). Null for a mesh with
     /// no skin, which is nearly everything — only a skinned model has these.

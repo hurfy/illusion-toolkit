@@ -20,10 +20,13 @@ namespace Illusion.Assets.Bridge;
 /// </summary>
 public static class BridgeMeshApplier
 {
-    /// <summary>The extra state a topology rebuild swaps besides the vertex buffer: the whole LOD0
+    /// <summary>The extra state a topology rebuild swaps besides the vertex buffer: the whole level
     /// (fresh split info + trivial OPCODE partition), the material ranges, and the index buffer.</summary>
     internal sealed class RebuildData
     {
+        /// <summary>Which level of the geometry this rebuild replaces.</summary>
+        internal int Lod;
+
         internal Formats.Frames.Resources.FrameLOD OldLod = null!;
         internal Formats.Frames.Resources.FrameLOD NewLod = null!;
         internal Formats.Frames.Resources.MaterialStruct[] OldMaterials = null!;
@@ -37,11 +40,25 @@ public static class BridgeMeshApplier
         internal int NewIndexFormat;
     }
 
+    /// <summary>
+    /// One neighbouring level re-packed because THIS push changed the quantization. The offset and factor
+    /// are properties of the geometry block, not of a level, so a push that moves the lattice invalidates
+    /// every other level's bytes — they decode against the parameters the frame now holds. Re-packing them
+    /// against the new lattice is what keeps the untouched levels where they were.
+    /// </summary>
+    internal sealed class RequantizedLod
+    {
+        internal VertexBuffer Buffer = null!;
+        internal byte[] OldData = null!;
+        internal byte[] NewData = null!;
+    }
+
     /// <summary>A computed geometry change, ready to flip in and out of the live frame data.</summary>
     public sealed class ApplyResult
     {
         internal FrameObjectSingleMesh Frame = null!;
         internal VertexBuffer Buffer = null!;
+        internal List<RequantizedLod> RepackedLods = new();
         internal SceneDocumentAdapter? Document;
         internal RebuildData? Rebuild;
         internal BoundingBox OldBounds;
@@ -92,9 +109,16 @@ public static class BridgeMeshApplier
         /// </summary>
         public bool SkinNotSent { get; internal set; }
 
-        /// <summary>The push changed the mesh's topology — the whole LOD0 was rebuilt (lower LODs
-        /// and collision keep their old shape until their own pipelines exist).</summary>
+        /// <summary>The push changed the mesh's topology — the whole edited level was rebuilt (the other
+        /// levels and the collision keep their old shape until their own pipelines exist).</summary>
         public bool TopologyRebuilt => Rebuild != null;
+
+        /// <summary>Which level of detail this push writes into — already clamped to what the mesh ships.</summary>
+        public int Lod { get; internal set; }
+
+        /// <summary>How many OTHER levels this push re-packs because it moved the quantization lattice they
+        /// share. Zero unless <see cref="Requantized"/>.</summary>
+        public int RepackedLodCount => RepackedLods.Count;
 
         /// <summary>Writes the new geometry into the live frame data (initial apply and redo).</summary>
         public void ApplyNew()
@@ -105,11 +129,16 @@ public static class BridgeMeshApplier
             Frame.Boundings = NewBounds;
             Frame.Material.Bounds = NewBounds;
             Document?.MarkVertexBufferDirty(Buffer.Hash);
+            foreach (RequantizedLod other in RepackedLods)
+            {
+                other.Buffer.Data = other.NewData;
+                Document?.MarkVertexBufferDirty(other.Buffer.Hash);
+            }
             if (Rebuild != null)
             {
-                Frame.Geometry.LOD[0] = Rebuild.NewLod;
-                Frame.Material.Materials[0] = Rebuild.NewMaterials;
-                Frame.Material.LodMatCount[0] = Rebuild.NewLodMatCount;
+                Frame.Geometry.LOD[Rebuild.Lod] = Rebuild.NewLod;
+                Frame.Material.Materials[Rebuild.Lod] = Rebuild.NewMaterials;
+                Frame.Material.LodMatCount[Rebuild.Lod] = Rebuild.NewLodMatCount;
                 Rebuild.IndexBuffer.SetFormat(Rebuild.NewIndexFormat);
                 Rebuild.IndexBuffer.SetData(Rebuild.NewIndexData);
                 Document?.MarkIndexBufferDirty(Rebuild.IndexBuffer.Hash);
@@ -126,11 +155,16 @@ public static class BridgeMeshApplier
             Frame.Boundings = OldBounds;
             Frame.Material.Bounds = OldMaterialBounds;
             Document?.MarkVertexBufferDirty(Buffer.Hash);
+            foreach (RequantizedLod other in RepackedLods)
+            {
+                other.Buffer.Data = other.OldData;
+                Document?.MarkVertexBufferDirty(other.Buffer.Hash);
+            }
             if (Rebuild != null)
             {
-                Frame.Geometry.LOD[0] = Rebuild.OldLod;
-                Frame.Material.Materials[0] = Rebuild.OldMaterials;
-                Frame.Material.LodMatCount[0] = Rebuild.OldLodMatCount;
+                Frame.Geometry.LOD[Rebuild.Lod] = Rebuild.OldLod;
+                Frame.Material.Materials[Rebuild.Lod] = Rebuild.OldMaterials;
+                Frame.Material.LodMatCount[Rebuild.Lod] = Rebuild.OldLodMatCount;
                 Rebuild.IndexBuffer.SetFormat(Rebuild.OldIndexFormat);
                 Rebuild.IndexBuffer.SetData(Rebuild.OldIndexData);
                 Document?.MarkIndexBufferDirty(Rebuild.IndexBuffer.Hash);
@@ -139,9 +173,12 @@ public static class BridgeMeshApplier
     }
 
     /// <summary>The push entry point: the count-preserving fast path when the topology is intact,
-    /// else the full LOD0 rebuild. Null with a reason only when the object genuinely cannot apply
-    /// (unsupported object, malformed payload, an edge the rebuild does not cover yet).</summary>
-    public static ApplyResult? TryApply(IFrameNode node, MeshObjectPayload payload, out string? skipReason)
+    /// else the full rebuild of the edited level. Null with a reason only when the object genuinely
+    /// cannot apply (unsupported object, malformed payload, an edge the rebuild does not cover yet).</summary>
+    /// <param name="lod">The level the mesh was EXPORTED from — the one Blender was shown and the one the
+    /// push belongs in. Clamped per mesh, so a mesh with a single level always takes it.</param>
+    public static ApplyResult? TryApply(IFrameNode node, MeshObjectPayload payload, out string? skipReason,
+        int lod = 0)
     {
         if (UngroupedVertices(node, payload) is var stray and > 0)
         {
@@ -152,10 +189,10 @@ public static class BridgeMeshApplier
             return null;
         }
 
-        ApplyResult? result = TryApplyCountPreserving(node, payload, out skipReason);
+        ApplyResult? result = TryApplyCountPreserving(node, payload, out skipReason, lod);
         if (result != null) return result;
         if (skipReason == null || !NeedsRebuild(skipReason)) return null;
-        return TryApplyRebuild(node, payload, out skipReason);
+        return TryApplyRebuild(node, payload, out skipReason, lod);
     }
 
     /// <summary>
@@ -215,7 +252,8 @@ public static class BridgeMeshApplier
     /// <summary>Computes the count-preserving application of <paramref name="payload"/> to
     /// <paramref name="node"/>'s mesh. Null with a reason when it cannot apply (topology changed,
     /// unsupported object, malformed payload) — the caller reports it as a per-object skip.</summary>
-    public static ApplyResult? TryApplyCountPreserving(IFrameNode node, MeshObjectPayload payload, out string? skipReason)
+    public static ApplyResult? TryApplyCountPreserving(IFrameNode node, MeshObjectPayload payload,
+        out string? skipReason, int lod = 0)
     {
         skipReason = null;
         // A skinned model is accepted HERE and only here: this path keeps the vertex count, so every vertex
@@ -229,10 +267,10 @@ public static class BridgeMeshApplier
             return null;
         }
 
-        DecodedMesh? decoded = SdsMeshLoader.DecodeLod0(frame);
+        DecodedMesh? decoded = SdsMeshLoader.DecodeLod(frame, lod);
         if (decoded == null)
         {
-            skipReason = "mesh has no usable LOD0 buffers";
+            skipReason = "mesh has no usable geometry buffers";
             return null;
         }
 
@@ -301,9 +339,9 @@ public static class BridgeMeshApplier
             && pushedWeights.Length >= payload.Positions.Length * 4
             && BoneCountOf(weighted) is int rigBones and > 0)
         {
-            MaterialStruct[] mats = frame.Material.Materials[0];
+            MaterialStruct[] mats = frame.Material.Materials[decoded.Lod];
             byte[]? currentGlobal = SdsMeshLoader.ResolveBoneRemap(
-                weighted, SdsMeshLoader.BuildParts(weighted, decoded.Indices.Length), decoded);
+                weighted, SdsMeshLoader.BuildParts(weighted, decoded.Indices.Length, decoded.Lod), decoded);
             if (currentGlobal != null)
             {
                 var global = new byte[decoded.NumVerts * 4];
@@ -323,7 +361,7 @@ public static class BridgeMeshApplier
                 if (fromBlender > 0)
                 {
                     if (!RemapBlendInfo(weighted, vertices, global, decoded.Indices, mats, mats,
-                            out string? weightReason))
+                            decoded.Lod, out string? weightReason))
                     {
                         skipReason = weightReason;
                         return null;
@@ -359,14 +397,21 @@ public static class BridgeMeshApplier
             };
         }
 
+        // The levels this push is not editing — they share the frame's quantization and its bounding box.
+        List<DecodedMesh> otherLods = OtherLods(frame, decoded.Lod);
+
         // Quantization range: a touched vertex may have left the old AABB → recompute offset/factor
-        // over the new positions (15-bit Z rule) and re-encode everything.
+        // over the new positions (15-bit Z rule) and re-encode everything. The other levels are packed
+        // against the same parameters, so they are sized in and re-packed with it.
         bool requantize = NeedsRequantize(newPositions, decoded.DecompressionOffset, decoded.DecompressionFactor);
         Vector3 newOffset = decoded.DecompressionOffset;
         float newFactor = decoded.DecompressionFactor;
+        List<RequantizedLod> repacked = [];
         if (requantize)
         {
-            (newOffset, newFactor) = ComputeQuantization(newPositions);
+            (newOffset, newFactor) = ComputeQuantization(QuantizationPositions(newPositions, otherLods));
+            repacked = RepackOtherLods(
+                otherLods, decoded.DecompressionOffset, decoded.DecompressionFactor, newOffset, newFactor);
         }
 
         // Regenerated tangent frames — applied ONLY to touched vertices; untouched ones keep their
@@ -407,13 +452,15 @@ public static class BridgeMeshApplier
         var result = new ApplyResult
         {
             Frame = frame,
-            Buffer = frame.GetVertexBuffer(0)!,
+            Lod = decoded.Lod,
+            Buffer = frame.GetVertexBuffer(decoded.Lod)!,
+            RepackedLods = repacked,
             Document = adapter.Document,
             OldVertexData = original,
             NewVertexData = newData,
             OldBounds = frame.Boundings,
             OldMaterialBounds = frame.Material.Bounds,
-            NewBounds = new BoundingBox { Min = min, Max = max },
+            NewBounds = UnionBounds(min, max, otherLods),
             OldDecompressionOffset = decoded.DecompressionOffset,
             OldDecompressionFactor = decoded.DecompressionFactor,
             NewDecompressionOffset = newOffset,
@@ -440,7 +487,7 @@ public static class BridgeMeshApplier
         // influences, but the mesh handed to the renderer is built from scratch — and one built without them
         // is uploaded without a skin buffer, after which the body silently stops following its bones for the
         // rest of the session while the rig still moves.
-        MeshPart[] countParts = SdsMeshLoader.BuildParts(frame, decoded.Indices.Length);
+        MeshPart[] countParts = SdsMeshLoader.BuildParts(frame, decoded.Indices.Length, decoded.Lod);
         var countSkin = SdsMeshLoader.SkinOf(frame, decoded, countParts);
         byte[]? countIds = countSkin.Indices;
         float[]? countWeights = countSkin.Weights;
@@ -456,6 +503,7 @@ public static class BridgeMeshApplier
         result.NewMesh = new MeshData
         {
             Name = frame.Name?.ToString() ?? "mesh",
+            Lod = decoded.Lod,
             World = frame.WorldTransform,
             Positions = newPositions,
             Normals = newNormals,
@@ -480,7 +528,8 @@ public static class BridgeMeshApplier
     // whose split table and OPCODE partition the native core builds (one split + one burst per
     // material — see FrameLOD.CreateRebuilt). Lower LODs and the separate collision resource keep
     // their old shape — the caller warns the user once.
-    private static ApplyResult? TryApplyRebuild(IFrameNode node, MeshObjectPayload payload, out string? skipReason)
+    private static ApplyResult? TryApplyRebuild(IFrameNode node, MeshObjectPayload payload,
+        out string? skipReason, int lod = 0)
     {
         skipReason = null;
         // A skinned model may be re-topologised: below, its remap pools AND its per-bone face ranges
@@ -493,10 +542,10 @@ public static class BridgeMeshApplier
             skipReason = "unsupported object";
             return null;
         }
-        DecodedMesh? decoded = SdsMeshLoader.DecodeLod0(frame);
+        DecodedMesh? decoded = SdsMeshLoader.DecodeLod(frame, lod);
         if (decoded == null)
         {
-            skipReason = "mesh has no usable LOD0 buffers";
+            skipReason = "mesh has no usable geometry buffers";
             return null;
         }
 
@@ -513,7 +562,7 @@ public static class BridgeMeshApplier
         // at another bridge material is a real material change) when present, else the existing
         // table. Every hash must be a game material; slots no face uses are dropped and the faces
         // renumbered (Blender scenes accumulate unused slots).
-        Formats.Frames.Resources.MaterialStruct[] existingMats = frame.Material.Materials[0];
+        Formats.Frames.Resources.MaterialStruct[] existingMats = frame.Material.Materials[decoded.Lod];
         ulong[] slotHashes;
         if (payload.Materials.Count > 0)
         {
@@ -616,8 +665,10 @@ public static class BridgeMeshApplier
         Vector3[] newNormals = normals.ToArray();
         Vector2[] newUvs = uvs.ToArray();
 
-        // 2) Index buffer re-grouped into contiguous per-material ranges (stable by slot).
-        IndexBuffer? indexBuffer = frame.GetIndexBuffer(0);
+        // 2) Index buffer re-grouped into contiguous per-material ranges (stable by slot). THIS level's
+        // buffer: each level names its own, and writing a rebuilt LOD1 into LOD0's buffer leaves the fine
+        // level pointing at indices that address the coarse mesh — the archive then draws a mangled body.
+        IndexBuffer? indexBuffer = frame.GetIndexBuffer(decoded.Lod);
         if (indexBuffer == null)
         {
             skipReason = "mesh has no index buffer";
@@ -653,11 +704,17 @@ public static class BridgeMeshApplier
         }
 
         // 3) Quantization: keep the old lattice while everything fits (donor bytes then re-encode
-        // identically), else re-derive it from the new AABB.
+        // identically), else re-derive it from the new AABB — sized over the untouched levels too, since
+        // they are packed against the same parameters, and re-packed to follow it.
+        List<DecodedMesh> otherLods = OtherLods(frame, decoded.Lod);
         bool requantize = NeedsRequantize(newPositions, decoded.DecompressionOffset, decoded.DecompressionFactor);
         (Vector3 newOffset, float newFactor) = requantize
-            ? ComputeQuantization(newPositions)
+            ? ComputeQuantization(QuantizationPositions(newPositions, otherLods))
             : (decoded.DecompressionOffset, decoded.DecompressionFactor);
+        List<RequantizedLod> repacked = requantize
+            ? RepackOtherLods(otherLods, decoded.DecompressionOffset, decoded.DecompressionFactor,
+                newOffset, newFactor)
+            : [];
 
         // 4) Tangent frames over the rebuilt mesh; donor-matched vertices keep the donor's frame.
         bool hasTangent = decoded.Declaration.HasFlag(VertexFlags.Tangent);
@@ -683,7 +740,7 @@ public static class BridgeMeshApplier
         // group ends up drawing them.
         byte[]? globalIds = isSkinned && frame is FrameObjectModel skinnedModel
             ? SdsMeshLoader.ResolveBoneRemap(
-                skinnedModel, SdsMeshLoader.BuildParts(skinnedModel, decoded.Indices.Length), decoded)
+                skinnedModel, SdsMeshLoader.BuildParts(skinnedModel, decoded.Indices.Length, decoded.Lod), decoded)
             : null;
         byte[]? newGlobal = globalIds != null ? new byte[newCount * 4] : null;
 
@@ -791,7 +848,12 @@ public static class BridgeMeshApplier
         SkeletonData? renderRig = null;
         if (newGlobal != null && frame is FrameObjectModel rebuiltModel)
         {
-            if (!RebuildMeshSplits(rebuiltModel, outVerts, newGlobal, newIndexData, newMats,
+            // The per-bone face ranges are ONE table on the model — there is no copy per level, and the
+            // ranges it holds address LOD0's index buffer. Rebuilding it from a coarser level's indices
+            // would point the physics splits at triangles of the wrong mesh, so a push into any other
+            // level leaves the table exactly as it is: LOD0 did not move, and the table still fits it.
+            if (decoded.Lod == 0
+                && !RebuildMeshSplits(rebuiltModel, outVerts, newGlobal, newIndexData, newMats,
                     decoded.Indices, donors, out string? splitReason))
             {
                 skipReason = splitReason;
@@ -808,7 +870,7 @@ public static class BridgeMeshApplier
             renderRig = SdsMeshLoader.RigOf(rebuiltModel);
 
             if (!RemapBlendInfo(rebuiltModel, outVerts, newGlobal, newIndexData, newMats, existingMats,
-                    out string? blendReason))
+                    decoded.Lod, out string? blendReason))
             {
                 skipReason = blendReason;
                 return null;
@@ -818,9 +880,9 @@ public static class BridgeMeshApplier
         byte[] newData = VertexCompressor.CompressBuffer(
             baseData, outVerts, decoded.Declaration, newOffset, newFactor);
 
-        // 6) Fresh LOD0: the stock-shaped split info + trivial OPCODE partition come from the
+        // 6) Fresh level: the stock-shaped split info + trivial OPCODE partition come from the
         // native builder (mf_frames_rebuild_lod) — byte-identical to the old manual assembly.
-        Formats.Frames.Resources.FrameLOD oldLod = frame.Geometry.LOD[0];
+        Formats.Frames.Resources.FrameLOD oldLod = frame.Geometry.LOD[decoded.Lod];
         if (newMats.Length == 0)
         {
             // The builder accepts a slotless request (that is the placeholder a brand-new mesh
@@ -844,13 +906,15 @@ public static class BridgeMeshApplier
         var result = new ApplyResult
         {
             Frame = frame,
-            Buffer = frame.GetVertexBuffer(0)!,
+            Lod = decoded.Lod,
+            Buffer = frame.GetVertexBuffer(decoded.Lod)!,
+            RepackedLods = repacked,
             Document = adapter.Document,
             OldVertexData = decoded.RawVertexData,
             NewVertexData = newData,
             OldBounds = frame.Boundings,
             OldMaterialBounds = frame.Material.Bounds,
-            NewBounds = new BoundingBox { Min = meshMin, Max = meshMax },
+            NewBounds = UnionBounds(meshMin, meshMax, otherLods),
             OldDecompressionOffset = decoded.DecompressionOffset,
             OldDecompressionFactor = decoded.DecompressionFactor,
             NewDecompressionOffset = newOffset,
@@ -861,6 +925,7 @@ public static class BridgeMeshApplier
             Requantized = requantize,
             Rebuild = new RebuildData
             {
+                Lod = decoded.Lod,
                 OldLod = oldLod,
                 NewLod = newLod,
                 OldMaterials = existingMats,
@@ -886,6 +951,7 @@ public static class BridgeMeshApplier
         result.NewMesh = new MeshData
         {
             Name = frame.Name?.ToString() ?? "mesh",
+            Lod = decoded.Lod,
             World = frame.WorldTransform,
             Positions = newPositions,
             Normals = newNormals,
@@ -1207,7 +1273,7 @@ public static class BridgeMeshApplier
     /// </summary>
     private static bool RemapBlendInfo(
         FrameObjectModel model, Vertex[] vertices, byte[] globalOf, uint[] indices,
-        MaterialStruct[] newMats, MaterialStruct[] oldMats, out string? reason)
+        MaterialStruct[] newMats, MaterialStruct[] oldMats, int lod, out string? reason)
     {
         reason = null;
         FrameBlendInfo blend;
@@ -1216,10 +1282,12 @@ public static class BridgeMeshApplier
 
         FrameBlendInfo.BoneIndexInfo[] lods = blend.BoneIndexInfos ?? [];
         if (lods.Length == 0) { reason = "the model carries no remap pools"; return false; }
-        FrameBlendInfo.BoneIndexInfo lod0 = lods[0];
-        byte[] sizes = lod0.BonesPerRemapPool ?? [];
-        byte[] remap = lod0.BoneRemapIDs ?? [];
-        FrameBlendInfo.SkinnedMaterialInfo[] oldGroups = lod0.SkinnedMaterialInfo ?? [];
+        // The edited level's own pools — each level has its own palette and its own face groups.
+        int level = Math.Clamp(lod, 0, lods.Length - 1);
+        FrameBlendInfo.BoneIndexInfo edited = lods[level];
+        byte[] sizes = edited.BonesPerRemapPool ?? [];
+        byte[] remap = edited.BoneRemapIDs ?? [];
+        FrameBlendInfo.SkinnedMaterialInfo[] oldGroups = edited.SkinnedMaterialInfo ?? [];
 
         // Pool p is a run of sizes[p] ids in the flat remap table.
         var poolStart = new int[sizes.Length];
@@ -1359,9 +1427,9 @@ public static class BridgeMeshApplier
             }
         }
 
-        // LOD0 only: the other LODs keep their own vertex buffers and the pools that go with them. The pools
-        // and the remap table go back exactly as they came.
-        lods[0] = new FrameBlendInfo.BoneIndexInfo
+        // The edited level only: the other levels keep their own vertex buffers and the pools that go with
+        // them. The pools and the remap table go back exactly as they came.
+        lods[level] = new FrameBlendInfo.BoneIndexInfo
         {
             BonesPerRemapPool = sizes,
             BoneRemapIDs = remap,
@@ -1480,5 +1548,99 @@ public static class BridgeMeshApplier
             max = Vector3.Max(max, p);
         }
         return (min, max);
+    }
+
+    /// <summary>
+    /// Every level of this geometry the push is NOT editing, decoded against the CURRENT quantization.
+    /// <para>
+    /// They matter because two things a push writes belong to the whole geometry block rather than to one
+    /// level: the quantization parameters and the frame's bounding box. A level that shares its vertex
+    /// buffer with the edited one is left out — it is already being written.
+    /// </para>
+    /// </summary>
+    private static List<DecodedMesh> OtherLods(FrameObjectSingleMesh frame, int editedLod)
+    {
+        var others = new List<DecodedMesh>();
+        Formats.Frames.Resources.FrameLOD[] levels = frame.Geometry?.LOD ?? [];
+        if (levels.Length <= 1) return others;
+
+        var seen = new HashSet<ulong> { levels[editedLod].VertexBufferRef.Hash };
+        for (int level = 0; level < levels.Length; level++)
+        {
+            if (level == editedLod || !seen.Add(levels[level].VertexBufferRef.Hash)) continue;
+            DecodedMesh? decoded = SdsMeshLoader.DecodeLod(frame, level);
+            if (decoded != null) others.Add(decoded);
+        }
+        return others;
+    }
+
+    /// <summary>
+    /// Re-packs the untouched levels against the new lattice. Their float positions do not change — only the
+    /// integers they are stored as — so the geometry stays exactly where it was while the frame's single set
+    /// of quantization parameters moves under it.
+    /// </summary>
+    private static List<RequantizedLod> RepackOtherLods(IReadOnlyList<DecodedMesh> others,
+        Vector3 oldOffset, float oldFactor, Vector3 newOffset, float newFactor)
+    {
+        var repacked = new List<RequantizedLod>();
+        foreach (DecodedMesh other in others)
+        {
+            VertexBuffer? buffer = other.Frame.GetVertexBuffer(other.Lod);
+            if (buffer?.Data == null) continue;
+
+            Vertex[] vertices = VertexTranslator.DecompressBuffer(
+                other.RawVertexData, other.NumVerts, other.Declaration, oldOffset, oldFactor);
+            byte[] packed = VertexCompressor.CompressBuffer(
+                other.RawVertexData, vertices, other.Declaration, newOffset, newFactor);
+
+            // Write the re-packed vertices back over a copy of the WHOLE buffer: the decode only took the
+            // bytes the level's vertex count covers, and a buffer with anything past them must keep it.
+            byte[] full = (byte[])buffer.Data.Clone();
+            Array.Copy(packed, full, Math.Min(packed.Length, full.Length));
+            repacked.Add(new RequantizedLod
+            {
+                Buffer = buffer,
+                OldData = buffer.Data,
+                NewData = full,
+            });
+        }
+        return repacked;
+    }
+
+    /// <summary>
+    /// The frame's bounding box after a push: the edited level's own box widened to still cover the levels
+    /// that were not pushed. <c>Boundings</c> is per FRAME, not per level, so taking the pushed level's box
+    /// alone would shrink a car's bounds to its far-away silhouette the moment LOD1 is edited.
+    /// </summary>
+    private static BoundingBox UnionBounds(Vector3 min, Vector3 max, IReadOnlyList<DecodedMesh> others)
+    {
+        foreach (DecodedMesh other in others)
+        {
+            (Vector3 otherMin, Vector3 otherMax) = Aabb(other.Positions);
+            if (other.Positions.Length == 0) continue;
+            min = Vector3.Min(min, otherMin);
+            max = Vector3.Max(max, otherMax);
+        }
+        return new BoundingBox { Min = min, Max = max };
+    }
+
+    /// <summary>The positions a fresh lattice has to cover: the pushed level's plus every untouched level's.
+    /// Sizing it on the pushed level alone would leave the others outside the range their integers can
+    /// express, and they would clamp — a coarse body folding into the fine one.</summary>
+    private static Vector3[] QuantizationPositions(Vector3[] pushed, IReadOnlyList<DecodedMesh> others)
+    {
+        int total = pushed.Length;
+        foreach (DecodedMesh other in others) total += other.Positions.Length;
+        if (total == pushed.Length) return pushed;
+
+        var all = new Vector3[total];
+        pushed.CopyTo(all, 0);
+        int at = pushed.Length;
+        foreach (DecodedMesh other in others)
+        {
+            other.Positions.CopyTo(all, at);
+            at += other.Positions.Length;
+        }
+        return all;
     }
 }

@@ -200,6 +200,13 @@
                                             <Setter Property="Stroke" Value="{x:Static v:PaletteInk.Mint}" />
                                             <Setter Property="Data" Value="{StaticResource IconMesh}" />
                                         </DataTrigger>
+                                        <!-- A level of detail of the mesh above it: the same stack-of-sheets
+                                             the toolbar uses for layers, dimmed — it is one reading of an
+                                             object, not an object of its own. -->
+                                        <DataTrigger Binding="{Binding Kind}" Value="Lod">
+                                            <Setter Property="Stroke" Value="{x:Static v:PaletteInk.Slate}" />
+                                            <Setter Property="Data" Value="{StaticResource IconLayers}" />
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding Kind}" Value="Light">
                                             <Setter Property="Stroke" Value="{x:Static v:PaletteInk.Gold}" />
                                             <Setter Property="Data" Value="{StaticResource IconLight}" />

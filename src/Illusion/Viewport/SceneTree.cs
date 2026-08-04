@@ -86,7 +86,7 @@ internal sealed class SceneTree
     private static SceneNode BuildSceneTree(
         Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves, bool top)
     {
-        bool hasChildren = fn.Children.Count > 0 || fn.Skeleton != null;
+        bool hasChildren = fn.Children.Count > 0 || fn.Skeleton != null || fn.LodMeshes.Count > 1;
         var node = new SceneNode(fn.Name, fn.Kind, hasChildren) { Category = fn.Category, Source = fn.Source };
         if (fn.Mesh != null)
         {
@@ -97,6 +97,15 @@ internal sealed class SceneTree
             // the mesh is never uploaded visible and then hidden a frame later.
             if (Scene.DefaultHidden.IsEmitterShell(fn.Name)) node.IsVisible = false;
         }
+
+        // A mesh that ships more than one level of detail hands each of them its own row. The finest is the
+        // one on screen; the rest are there, off, behind their own eye — a coarse level is real geometry the
+        // game draws past its switch distance, not a preview, so it is shown and edited like any other row.
+        List<SceneNode> lodRows = BuildLodRows(fn, meshLeaves);
+        foreach (SceneNode lodRow in lodRows) node.AddChild(lodRow);
+        // Opened on its levels: the row that is drawn is LOD 0, and a mesh whose levels are folded away looks
+        // exactly like one that has none.
+        if (lodRows.Count > 0) node.IsExpanded = true;
         if (fn.Skeleton is { } skeleton) node.AddChild(BuildSkeletonTree(skeleton));
         foreach (Assets.Sds.SdsFrameNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves, false));
 
@@ -104,6 +113,33 @@ internal sealed class SceneTree
         // its geometry underneath, and hiding the holder before its children arrive would hide nothing.
         if (top && Scene.DefaultHidden.IsSceneryHolder(fn.Name)) node.IsVisible = false;
         return node;
+    }
+
+    /// <summary>
+    /// The "LOD n" rows of a multi-level mesh, finest first. Empty for a single-level mesh — the overwhelming
+    /// majority of a district — so the tree only grows rows where there is a choice to make.
+    /// <para>
+    /// Each row carries the SAME <c>Source</c> as the frame it hangs under, plus its level: the property tabs,
+    /// the gizmo and the Blender bridge all keep working on the frame, and the level decides which geometry of
+    /// it they act on. Level 0 is visible and its parent opens on it; the coarser ones start hidden.
+    /// </para>
+    /// </summary>
+    private static List<SceneNode> BuildLodRows(Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves)
+    {
+        var rows = new List<SceneNode>();
+        if (fn.LodMeshes.Count < 2) return rows;
+
+        for (int level = 0; level < fn.LodMeshes.Count; level++)
+        {
+            MeshData mesh = fn.LodMeshes[level];
+            var row = new SceneNode($"LOD {level}", "Lod", false) { Source = fn.Source, Lod = level, Pending = mesh };
+            // Hidden BEFORE the upload: SceneNode.Mesh applies the row's visibility as the GPU mesh is
+            // assigned, so a coarse level is never drawn for a frame and then taken away again.
+            if (level > 0) row.IsVisible = false;
+            meshLeaves.Add(row);
+            rows.Add(row);
+        }
+        return rows;
     }
 
     /// <summary>

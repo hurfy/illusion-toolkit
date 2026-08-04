@@ -90,7 +90,7 @@ public static class SdsMeshLoader
         return fr;
     }
 
-    public static List<MeshData> LoadSds(FileInfo sdsFile)
+    public static List<MeshData> LoadSds(FileInfo sdsFile, int lod = 0)
     {
         var result = new List<MeshData>();
         FrameResource? fr = OpenFrameResource(sdsFile, out _, out ActorPlacements placements);
@@ -100,7 +100,7 @@ public static class SdsMeshLoader
         {
             if (pair.Value is FrameObjectSingleMesh mesh && mesh.Geometry != null)
             {
-                MeshData? md = TryConvert(mesh, placement: placements.For(mesh));
+                MeshData? md = TryConvert(mesh, placement: placements.For(mesh), lod: lod);
                 if (md != null) result.Add(md);
             }
         }
@@ -115,8 +115,10 @@ public static class SdsMeshLoader
     /// reachable through more than one link appears exactly once. Roots are the scene folders plus the
     /// frames whose two parent slots are both empty.
     /// </summary>
+    /// <param name="lod">Which level of detail to build the render meshes from; clamped per mesh to what it
+    /// ships. The whole editing chain follows this level — a push writes back into it.</param>
     public static (List<SdsFrameNode> Roots, List<MeshData> Meshes, ISceneDocument? Document) LoadHierarchy(
-        FileInfo sdsFile, IReadOnlyCollection<string>? districtNames = null)
+        FileInfo sdsFile, IReadOnlyCollection<string>? districtNames = null, int lod = 0)
     {
         // Names of OTHER districts (to detect neighbor proxy meshes), except the one being loaded.
         string self = Path.GetFileNameWithoutExtension(sdsFile.Name);
@@ -136,7 +138,7 @@ public static class SdsMeshLoader
         Collisions.CarPhysicsVolumes.AlignStubsToPrefab(folder, fr);
 
         var document = new SceneDocumentAdapter(fr, sdsFile, placements);
-        var roots = BuildRoots(fr, document, others, meshes, null);
+        var roots = BuildRoots(fr, document, others, meshes, null, lod);
         return (roots, meshes, document);
     }
 
@@ -146,7 +148,7 @@ public static class SdsMeshLoader
     /// the table (see <see cref="MeshData.Instances"/>). Meshes without references are drawn as usual.
     /// </summary>
     public static (List<SdsFrameNode> Roots, List<MeshData> Meshes, ISceneDocument? Document,
-        CrashPlacements? Placements) LoadCrashHierarchy(FileInfo crashSds)
+        CrashPlacements? Placements) LoadCrashHierarchy(FileInfo crashSds, int lod = 0)
     {
         var meshes = new List<MeshData>();
         FrameResource? fr = OpenFrameResource(crashSds, out string extracted, out ActorPlacements actors);
@@ -154,7 +156,7 @@ public static class SdsMeshLoader
 
         var document = new SceneDocumentAdapter(fr, crashSds, actors);
         CrashPlacements? placements = LoadPlacements(crashSds, extracted, fr);
-        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildClouds());
+        var roots = BuildRoots(fr, document, Array.Empty<string>(), meshes, placements?.BuildClouds(), lod);
         return (roots, meshes, document, placements);
     }
 
@@ -203,7 +205,8 @@ public static class SdsMeshLoader
     // Builds tree roots from FrameResource. instanceMap (if provided) marks prototype meshes as instanced.
     private static List<SdsFrameNode> BuildRoots(FrameResource fr, SceneDocumentAdapter document,
         IReadOnlyCollection<string> others,
-        List<MeshData> meshes, IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap)
+        List<MeshData> meshes, IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap,
+        int lod)
     {
         var roots = new List<SdsFrameNode>();
 
@@ -231,7 +234,7 @@ public static class SdsMeshLoader
                 string sceneName = s.Name?.ToString() ?? "scene";
                 var sn = new SdsFrameNode { Name = sceneName, Kind = "Scene", Source = new FrameSceneAdapter(s) };
                 foreach (FrameObjectBase obj in s.Children)
-                    if (claimed.Add(obj)) sn.Children.Add(BuildNode(obj, document, childrenOf, meshes, instanceMap, claimed));
+                    if (claimed.Add(obj)) sn.Children.Add(BuildNode(obj, document, childrenOf, meshes, instanceMap, claimed, lod));
                 if (sn.Children.Count > 0)
                 {
                     sn.Category = CategorizeScene(sn, others);
@@ -245,14 +248,14 @@ public static class SdsMeshLoader
         // an edited mesh appear to lose its parent.
         foreach (FrameObjectBase o in objs)
             if (o.ParentIndex1.Index < 0 && o.ParentIndex2.Index < 0 && claimed.Add(o))
-                roots.Add(BuildNode(o, document, childrenOf, meshes, instanceMap, claimed));
+                roots.Add(BuildNode(o, document, childrenOf, meshes, instanceMap, claimed, lod));
 
         // Anything still unplaced is anchored to something the walk above never reached — a malformed hierarchy.
         // Show it rather than dropping it silently, but keep it distinguishable from a genuine root.
         foreach (FrameObjectBase o in objs)
             if (claimed.Add(o))
             {
-                SdsFrameNode orphan = BuildNode(o, document, childrenOf, meshes, instanceMap, claimed);
+                SdsFrameNode orphan = BuildNode(o, document, childrenOf, meshes, instanceMap, claimed, lod);
                 orphan.Name += "  (unanchored)";
                 roots.Add(orphan);
             }
@@ -263,7 +266,7 @@ public static class SdsMeshLoader
     private static SdsFrameNode BuildNode(FrameObjectBase obj, SceneDocumentAdapter document,
         Dictionary<FrameObjectBase, List<FrameObjectBase>> childrenOf, List<MeshData> meshes,
         IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap,
-        HashSet<FrameObjectBase> claimed)
+        HashSet<FrameObjectBase> claimed, int lod)
     {
         var node = new SdsFrameNode { Name = obj.Name?.ToString() ?? "?", Kind = KindOf(obj), Source = document.Node(obj) };
 
@@ -271,8 +274,35 @@ public static class SdsMeshLoader
         {
             CrashPlacements.Cloud cloud = default;
             instanceMap?.TryGetValue(sm, out cloud);
-            MeshData? md = TryConvert(sm, cloud.Matrices, cloud.DrawDistances, document.Placements.For(sm));
-            if (md != null) { node.Mesh = md; meshes.Add(md); }
+            Matrix4x4? placement = document.Placements.For(sm);
+            int levels = sm.Geometry.LOD?.Length ?? 0;
+
+            if (levels > 1)
+            {
+                // Every level, so the tree can offer them as rows. A level that will not decode ends the
+                // list rather than leaving a gap in it.
+                for (int level = 0; level < levels; level++)
+                {
+                    MeshData? each = TryConvert(sm, cloud.Matrices, cloud.DrawDistances, placement, level);
+                    if (each == null) break;
+                    node.LodMeshes.Add(each);
+                }
+            }
+
+            if (node.LodMeshes.Count > 1)
+            {
+                // Only the finest goes into the flat mesh list: that list answers "how big is this scene and
+                // where is it", and counting one object once per level would weigh a car's far silhouette as
+                // a second car.
+                meshes.Add(node.LodMeshes[0]);
+            }
+            else
+            {
+                // One usable level (nearly every district mesh): geometry stays on the frame's own row.
+                node.LodMeshes.Clear();
+                MeshData? md = TryConvert(sm, cloud.Matrices, cloud.DrawDistances, placement, lod);
+                if (md != null) { node.Mesh = md; meshes.Add(md); }
+            }
         }
 
         // A skinned model brings its rig with it. For a car the bones ARE the parts — doors, covers, axles,
@@ -285,7 +315,7 @@ public static class SdsMeshLoader
         if (childrenOf.TryGetValue(obj, out List<FrameObjectBase>? kids))
             foreach (FrameObjectBase k in kids)
                 if (claimed.Add(k))
-                    node.Children.Add(BuildNode(k, document, childrenOf, meshes, instanceMap, claimed));
+                    node.Children.Add(BuildNode(k, document, childrenOf, meshes, instanceMap, claimed, lod));
 
         return node;
     }
@@ -437,29 +467,48 @@ public static class SdsMeshLoader
     }
 
     /// <summary>
-    /// Full-fidelity LOD0 decode: float channels plus the raw packed bytes and quantization
-    /// parameters. Shared by the viewport conversion below and the Blender bridge exporter; null for
-    /// a mesh without usable LOD0 buffers. Public for the bridge and the diagnostics probes.
+    /// The level this mesh answers for when the caller asks for <paramref name="lod"/>: the request
+    /// clamped to what the mesh actually ships. Nearly every district mesh has a single level, so a
+    /// viewport switched to LOD1 has to fall back to the coarsest one present rather than draw
+    /// nothing — and every stage of a push has to agree about which level that was.
     /// </summary>
-    public static DecodedMesh? DecodeLod0(FrameObjectSingleMesh mesh)
+    public static int ClampLod(FrameObjectSingleMesh mesh, int lod)
     {
+        ArgumentNullException.ThrowIfNull(mesh);
+        int count = mesh.Geometry?.LOD?.Length ?? 0;
+        return count == 0 ? 0 : Math.Clamp(lod, 0, count - 1);
+    }
+
+    /// <summary>
+    /// Full-fidelity decode of one level: float channels plus the raw packed bytes and quantization
+    /// parameters. Shared by the viewport conversion below and the Blender bridge exporter; null for
+    /// a mesh without usable buffers. Public for the bridge and the diagnostics probes.
+    /// <para>
+    /// The quantization parameters are the GEOMETRY's, not the level's — every LOD of one geometry
+    /// block is packed against the same offset and factor, which is why re-quantizing for one of them
+    /// has to re-pack the others too.
+    /// </para>
+    /// </summary>
+    public static DecodedMesh? DecodeLod(FrameObjectSingleMesh mesh, int lod)
+    {
+        ArgumentNullException.ThrowIfNull(mesh);
         FrameGeometry geom = mesh.Geometry;
-        if (geom.LOD == null || geom.LOD.Length == 0)
+        if (geom?.LOD == null || geom.LOD.Length == 0)
         {
             return null;
         }
 
-        // LOD0 — maximum detail.
-        FrameLOD lod = geom.LOD[0];
-        var vertexBuffer = mesh.GetVertexBuffer(0);
-        var indexBuffer = mesh.GetIndexBuffer(0);
+        int level = ClampLod(mesh, lod);
+        FrameLOD lodBlock = geom.LOD[level];
+        var vertexBuffer = mesh.GetVertexBuffer(level);
+        var indexBuffer = mesh.GetIndexBuffer(level);
         if (vertexBuffer?.Data == null || indexBuffer == null)
         {
             return null;
         }
 
-        lod.GetVertexOffsets(out int stride);
-        int numVerts = lod.NumVerts;
+        lodBlock.GetVertexOffsets(out int stride);
+        int numVerts = lodBlock.NumVerts;
         if (stride <= 0 || numVerts <= 0 || (long)numVerts * stride > vertexBuffer.Data.Length)
         {
             return null;
@@ -473,7 +522,7 @@ public static class SdsMeshLoader
         var uvs = new Vector2[numVerts];
         // Tangent frame is only present when the vertex declaration advertises it; otherwise the shader
         // falls back to the vertex normal (flat-normal path), so we leave these null.
-        bool hasTangent = lod.VertexDeclaration.HasFlag(VertexFlags.Tangent);
+        bool hasTangent = lodBlock.VertexDeclaration.HasFlag(VertexFlags.Tangent);
         Vector3[]? tangents = hasTangent ? new Vector3[numVerts] : null;
         Vector3[]? binormals = hasTangent ? new Vector3[numVerts] : null;
         // Straight into the channel arrays: no wire, no Vertex per vertex. A district is millions
@@ -481,7 +530,7 @@ public static class SdsMeshLoader
         // wire record for a 16-20 byte packed vertex — enough LOH churn to stall the render thread.
         // (Binormals already carry the handedness sign applied by the decoder.)
         VertexTranslator.DecompressChannels(
-            raw, numVerts, lod.VertexDeclaration, geom.DecompressionOffset, geom.DecompressionFactor,
+            raw, numVerts, lodBlock.VertexDeclaration, geom.DecompressionOffset, geom.DecompressionFactor,
             positions, normals, uvs, tangents, binormals);
 
         // The skin, when there is one. This goes through the full-fidelity decode rather than the channel
@@ -489,10 +538,10 @@ public static class SdsMeshLoader
         // and those are single objects (a car, a character), never a district's millions of vertices.
         byte[]? boneIndices = null;
         float[]? boneWeights = null;
-        if (lod.VertexDeclaration.HasFlag(VertexFlags.Skin))
+        if (lodBlock.VertexDeclaration.HasFlag(VertexFlags.Skin))
         {
             Vertex[] full = VertexTranslator.DecompressBuffer(
-                raw, numVerts, lod.VertexDeclaration, geom.DecompressionOffset, geom.DecompressionFactor);
+                raw, numVerts, lodBlock.VertexDeclaration, geom.DecompressionOffset, geom.DecompressionFactor);
             boneIndices = new byte[numVerts * 4];
             boneWeights = new float[numVerts * 4];
             for (int i = 0; i < numVerts; i++)
@@ -508,7 +557,8 @@ public static class SdsMeshLoader
         return new DecodedMesh
         {
             Frame = mesh,
-            Declaration = lod.VertexDeclaration,
+            Lod = level,
+            Declaration = lodBlock.VertexDeclaration,
             Stride = stride,
             NumVerts = numVerts,
             DecompressionOffset = geom.DecompressionOffset,
@@ -525,19 +575,31 @@ public static class SdsMeshLoader
         };
     }
 
+    /// <summary>The maximum-detail level — <see cref="DecodeLod"/> at zero. Kept as its own entry point
+    /// for the callers that are about the mesh itself rather than about what the viewport is showing.</summary>
+    public static DecodedMesh? DecodeLod0(FrameObjectSingleMesh mesh) => DecodeLod(mesh, 0);
+
+    /// <summary>
+    /// Render-ready geometry for one frame at one level — what the viewport needs to redraw a mesh at a
+    /// different level of detail without reloading its archive. The world transform is the FRAME's own; a
+    /// caller holding a placement-aware matrix (an actor-placed prototype, a translokator copy) keeps it by
+    /// carrying it over to the new GPU mesh.
+    /// </summary>
+    public static MeshData? BuildMeshData(FrameObjectSingleMesh mesh, int lod) => TryConvert(mesh, lod: lod);
+
     // Internal for the frame duplicator, which needs a render-ready MeshData for a freshly cloned object.
     internal static MeshData? TryConvert(FrameObjectSingleMesh mesh, Matrix4x4[]? instances = null,
-        float[]? drawDistances = null, Matrix4x4? placement = null)
+        float[]? drawDistances = null, Matrix4x4? placement = null, int lod = 0)
     {
         try
         {
-            DecodedMesh? decoded = DecodeLod0(mesh);
+            DecodedMesh? decoded = DecodeLod(mesh, lod);
             if (decoded == null)
             {
                 return null;
             }
 
-            MeshPart[] parts = BuildParts(mesh, decoded.Indices.Length);
+            MeshPart[] parts = BuildParts(mesh, decoded.Indices.Length, decoded.Lod);
 
             // An actor-placed mesh carries an identity matrix of its own — the actor pack holds where it
             // stands (see ActorPlacements), so the placement goes in front of the frame's own world transform.
@@ -559,6 +621,7 @@ public static class SdsMeshLoader
             return new MeshData
             {
                 Name = mesh.Name?.ToString() ?? "mesh",
+                Lod = decoded.Lod,
                 World = mesh.WorldTransform * place,
                 Positions = decoded.Positions,
                 Normals = decoded.Normals,
@@ -591,11 +654,13 @@ public static class SdsMeshLoader
     /// into the remap pool of whichever face group draws the vertex. Null for a model with no usable skin.
     /// </para>
     /// </summary>
-    public static byte[]? GlobalBoneIds(FrameObjectModel model)
+    public static byte[]? GlobalBoneIds(FrameObjectModel model, int lod = 0)
     {
         ArgumentNullException.ThrowIfNull(model);
-        DecodedMesh? decoded = DecodeLod0(model);
-        return decoded == null ? null : ResolveBoneRemap(model, BuildParts(model, decoded.Indices.Length), decoded);
+        DecodedMesh? decoded = DecodeLod(model, lod);
+        return decoded == null
+            ? null
+            : ResolveBoneRemap(model, BuildParts(model, decoded.Indices.Length, decoded.Lod), decoded);
     }
 
     /// <summary>
@@ -621,11 +686,11 @@ public static class SdsMeshLoader
         catch (Exception) { return "the blend info cannot be read"; }
         if (blend.BoneIndexInfos is not { Length: > 0 } lods) return "the blend info carries no LODs";
 
-        FrameBlendInfo.BoneIndexInfo info = lods[0];
+        FrameBlendInfo.BoneIndexInfo info = lods[Math.Clamp(decoded.Lod, 0, lods.Length - 1)];
         byte[] pools = info.BonesPerRemapPool ?? [];
         byte[] remap = info.BoneRemapIDs ?? [];
         FrameBlendInfo.SkinnedMaterialInfo[] groups = info.SkinnedMaterialInfo ?? [];
-        MeshPart[] parts = BuildParts(model, decoded.Indices.Length);
+        MeshPart[] parts = BuildParts(model, decoded.Indices.Length, decoded.Lod);
 
         var text = new System.Text.StringBuilder();
         text.Append(System.Globalization.CultureInfo.InvariantCulture,
@@ -729,7 +794,9 @@ public static class SdsMeshLoader
         catch (Exception) { return null; }
         if (blend.BoneIndexInfos is not { Length: > 0 } lods) return null;
 
-        FrameBlendInfo.BoneIndexInfo info = lods[0];
+        // The pools are per LOD, like the material splits they are indexed by: reading LOD0's table for a
+        // coarser level names bones out of the wrong palette, which puts triangles on the wrong bones.
+        FrameBlendInfo.BoneIndexInfo info = lods[Math.Clamp(decoded.Lod, 0, lods.Length - 1)];
         byte[] pools = info.BonesPerRemapPool ?? [];
         byte[] remap = info.BoneRemapIDs ?? [];
         var groups = info.SkinnedMaterialInfo ?? [];
@@ -870,14 +937,18 @@ public static class SdsMeshLoader
         }
     }
 
-    // Split the mesh indices into ranges by material (LOD0) and resolve the diffuse texture.
+    // Split the mesh indices into ranges by material and resolve the diffuse texture. Each level owns its
+    // own slot list — a car body draws 7 materials up close and 3 far away — so the level has to be the
+    // one the geometry came from, or the ranges address triangles that are not there.
     // Internal for the bridge applier, which rebuilds a MeshData after a geometry push.
-    internal static MeshPart[] BuildParts(FrameObjectSingleMesh mesh, int indexCount)
+    internal static MeshPart[] BuildParts(FrameObjectSingleMesh mesh, int indexCount, int lod = 0)
     {
         FrameMaterial fm = mesh.Material;
-        if (fm?.Materials != null && fm.Materials.Count > 0 && fm.Materials[0] != null && fm.Materials[0].Length > 0)
+        int level = ClampLod(mesh, lod);
+        if (fm?.Materials != null && level < fm.Materials.Count
+            && fm.Materials[level] != null && fm.Materials[level].Length > 0)
         {
-            MaterialStruct[] mats = fm.Materials[0];
+            MaterialStruct[] mats = fm.Materials[level];
             var parts = new MeshPart[mats.Length];
             for (int i = 0; i < mats.Length; i++)
             {

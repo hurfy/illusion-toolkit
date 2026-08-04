@@ -13,13 +13,19 @@ namespace Illusion.Assets.Sds;
 public sealed class DecodedMesh
 {
     public required FrameObjectSingleMesh Frame { get; init; }
+
+    /// <summary>Which level of the frame's geometry this is — the request already clamped to what the
+    /// mesh ships (see <c>SdsMeshLoader.ClampLod</c>). Every later stage of a push reads it rather than
+    /// re-deriving the level, so the buffers, the material slots and the remap pools cannot disagree.</summary>
+    public required int Lod { get; init; }
+
     public required VertexFlags Declaration { get; init; }
     public required int Stride { get; init; }
     public required int NumVerts { get; init; }
     public required Vector3 DecompressionOffset { get; init; }
     public required float DecompressionFactor { get; init; }
 
-    /// <summary>The LOD0 vertex buffer bytes (exactly <see cref="NumVerts"/> × <see cref="Stride"/>).</summary>
+    /// <summary>This level's vertex buffer bytes (exactly <see cref="NumVerts"/> × <see cref="Stride"/>).</summary>
     public required byte[] RawVertexData { get; init; }
 
     public required Vector3[] Positions { get; init; }

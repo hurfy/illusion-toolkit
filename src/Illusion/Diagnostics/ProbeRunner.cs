@@ -403,6 +403,12 @@ internal static class ProbeRunner
             case "--probe-bridge-skin":
                 BridgeSkinProbes.RunBridgeSkinProbe(args.Length >= 2 ? args[1] : "shubert_38");
                 return true;
+            // Editing a level other than LOD0: a push into a car's LOD1 must move that level and leave the
+            // fine one where it was — bytes when the lattice held, positions when it moved — with the bounds
+            // still covering both. Optional arg = the car. Output: %TEMP%\illusion_lod_edit.txt
+            case "--probe-lod-edit":
+                LodProbes.RunLodEditProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // Blender bridge: weld/split export fidelity against a real district (per-loop attrs
             // match the viewport decode bit-exactly, UV V-flip, determinism).
             case "--probe-bridge-weld":

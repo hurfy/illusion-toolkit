@@ -8,7 +8,14 @@ public sealed class SdsFrameNode
     public string Name { get; set; } = null!;
     public string Kind { get; set; } = null!;
     public string Category { get; set; } = "Normal"; // for scenes: Proxy / Normal (filters during streaming)
-    public MeshData? Mesh { get; set; }         // non-null only on mesh nodes
+    public MeshData? Mesh { get; set; }         // non-null only on single-level mesh nodes
+
+    /// <summary>
+    /// One entry per level of detail, in order, for a mesh that ships more than one — then <see cref="Mesh"/>
+    /// is null and the geometry lives here instead. The tree turns these into child rows ("LOD 0", "LOD 1")
+    /// so a level can be shown, hidden and edited on its own; a single-level mesh grows no rows at all.
+    /// </summary>
+    public List<MeshData> LodMeshes { get; } = new();
 
     /// <summary>The rig, on a skinned model (<c>FrameObjectModel</c>) that has one. For a car its bones are
     /// the parts — doors, covers, axles — and the archive's collision hulls and points hang off them.</summary>

@@ -37,6 +37,13 @@ public sealed class SceneNode : INotifyPropertyChanged
     /// </summary>
     public ISceneSource? Source { get; set; }
 
+    /// <summary>
+    /// Which level of detail of <see cref="Source"/> this row holds. Zero for everything except the "LOD n"
+    /// rows a multi-level mesh grows, and those share their frame's <see cref="Source"/> — so selecting one,
+    /// dragging its gizmo or sending it to Blender all act on the same object, at THIS level.
+    /// </summary>
+    public int Lod { get; init; }
+
     private GpuMesh? _mesh;
     /// <summary>GPU mesh of the leaf (assigned during batched upload). Before that — <see cref="Pending"/>.</summary>
     public GpuMesh? Mesh

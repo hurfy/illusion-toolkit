@@ -22,7 +22,10 @@ public static class BridgeMeshExporter
     /// <summary>Exports a node's mesh; null with a human-readable <paramref name="skipReason"/> when
     /// the object cannot ride the bridge (instanced content is the caller's check — it needs the GPU
     /// mesh, which this layer never sees).</summary>
-    public static MeshObjectPayload? TryExport(IFrameNode node, ISceneDocument document, out string? skipReason)
+    /// <param name="lod">Which level of detail to send. Blender is shown exactly what the viewport is
+    /// showing, and the push comes back into this same level — see <c>BridgeMeshApplier.TryApply</c>.</param>
+    public static MeshObjectPayload? TryExport(IFrameNode node, ISceneDocument document, out string? skipReason,
+        int lod = 0)
     {
         skipReason = null;
 
@@ -44,7 +47,7 @@ public static class BridgeMeshExporter
         DecodedMesh? decoded;
         try
         {
-            decoded = SdsMeshLoader.DecodeLod0(frame);
+            decoded = SdsMeshLoader.DecodeLod(frame, lod);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or IndexOutOfRangeException or ArgumentException)
         {
@@ -53,7 +56,7 @@ public static class BridgeMeshExporter
         }
         if (decoded == null)
         {
-            skipReason = "mesh has no usable LOD0 buffers";
+            skipReason = "mesh has no usable geometry buffers";
             return null;
         }
         if (decoded.Declaration.HasFlag(VertexFlags.Skin) && frame is not FrameObjectModel)
@@ -64,7 +67,7 @@ public static class BridgeMeshExporter
 
         WeldedMesh welded = WeldFor(decoded);
 
-        List<MeshMaterialInfo> materials = ResolveMaterials(frame, document, decoded.Indices.Length);
+        List<MeshMaterialInfo> materials = ResolveMaterials(frame, document, decoded.Indices.Length, decoded.Lod);
 
         // Material slot per KEPT triangle (degenerates were filtered by the weld — see WeldedMesh).
         ushort[] perSourceTriangle = BuildFaceMaterials(materials, decoded.Indices.Length);
@@ -196,7 +199,8 @@ public static class BridgeMeshExporter
     /// </para>
     /// </summary>
     private static byte[]? ResolveSkin(FrameObjectModel model, DecodedMesh decoded) =>
-        SdsMeshLoader.ResolveBoneRemap(model, SdsMeshLoader.BuildParts(model, decoded.Indices.Length), decoded);
+        SdsMeshLoader.ResolveBoneRemap(
+            model, SdsMeshLoader.BuildParts(model, decoded.Indices.Length, decoded.Lod), decoded);
 
     private static string SkeletonId(FrameObjectModel model, ISceneDocument document)
     {
@@ -286,13 +290,16 @@ public static class BridgeMeshExporter
     }
 
     private static List<MeshMaterialInfo> ResolveMaterials(
-        FrameObjectSingleMesh frame, ISceneDocument document, int indexCount)
+        FrameObjectSingleMesh frame, ISceneDocument document, int indexCount, int lod)
     {
         var result = new List<MeshMaterialInfo>();
         List<string> textureDirs = TextureSearchDirs(document);
 
+        // The slot list of the level being sent: a coarser level drops materials the fine one draws, and
+        // handing Blender LOD0's list would label its faces with slots this geometry does not have.
         FrameMaterial fm = frame.Material;
-        if (fm?.Materials is { Count: > 0 } && fm.Materials[0] is { Length: > 0 } mats)
+        if (fm?.Materials is { Count: > 0 } && lod < fm.Materials.Count
+            && fm.Materials[lod] is { Length: > 0 } mats)
         {
             MafiaMaterials.EnsureLoaded();
             foreach (MaterialStruct mat in mats)

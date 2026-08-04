@@ -67,12 +67,18 @@ internal static class SharedBufferIndex
                     {
                         continue;
                     }
-                    if (!seen.Add(geometry.LOD[0].VertexBufferRef.Hash)) continue;
-                    if (!map.TryGetValue(geometry.LOD[0].VertexBufferRef.Hash, out List<string>? archives))
+                    // Every level, not just the finest: a push into LOD1 rewrites LOD1's buffer, and that one
+                    // is shared across archives exactly the way LOD0's is.
+                    foreach (Formats.Frames.Resources.FrameLOD level in geometry.LOD)
                     {
-                        map[geometry.LOD[0].VertexBufferRef.Hash] = archives = [];
+                        ulong hash = level.VertexBufferRef.Hash;
+                        if (!seen.Add(hash)) continue;
+                        if (!map.TryGetValue(hash, out List<string>? archives))
+                        {
+                            map[hash] = archives = [];
+                        }
+                        archives.Add(file.Name);
                     }
-                    archives.Add(file.Name);
                 }
             }
 

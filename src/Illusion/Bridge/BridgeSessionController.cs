@@ -44,6 +44,7 @@ internal sealed class BridgeSessionController : IDisposable
 
     private readonly D3DImageHost _host;
     private readonly Dictionary<string, SceneNode> _exported = new();
+
     private readonly HashSet<ISceneDocument> _topologyWarned = new();
 
     /// <summary>
@@ -338,7 +339,10 @@ internal sealed class BridgeSessionController : IDisposable
                     continue;
                 }
 
-                MeshObjectPayload? payload = BridgeMeshExporter.TryExport(request.Node, request.Document, out string? reason);
+                // The level is the ROW's: selecting "LOD 1" under a car body sends that geometry, and the
+                // push comes back into it. A frame's own row (a single-level mesh) is level 0.
+                MeshObjectPayload? payload = BridgeMeshExporter.TryExport(
+                    request.Node, request.Document, out string? reason, request.Leaf.Lod);
                 if (payload == null)
                 {
                     skips.Add(request.Leaf.Name + " — " + reason);
@@ -682,8 +686,9 @@ internal sealed class BridgeSessionController : IDisposable
                         Array.Fill(payload.LoopOrigIndex, -1);
                     }
 
+                    // Back into the level the row stands for — the same one it was exported from.
                     BridgeMeshApplier.ApplyResult? result =
-                        BridgeMeshApplier.TryApply(fn, payload, out string? reason);
+                        BridgeMeshApplier.TryApply(fn, payload, out string? reason, node.Lod);
                     if (result == null)
                     {
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });
@@ -731,7 +736,9 @@ internal sealed class BridgeSessionController : IDisposable
                             if (single.Geometry is { LOD.Length: > 0 } block
                                 && FindDocument(node) is { } owner)
                             {
-                                editedBuffers.Add((node.Name, block.LOD[0].VertexBufferRef.Hash,
+                                // The buffer of the level that was edited — each level has its own, and naming
+                                // LOD0's here would survey a buffer this push never touched.
+                                editedBuffers.Add((node.Name, block.LOD[result.Lod].VertexBufferRef.Hash,
                                     owner.SourceArchive.Name));
                             }
                         }
