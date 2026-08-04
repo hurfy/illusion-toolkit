@@ -1,11 +1,15 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using System.Windows.Data;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.EntityData;
+using Illusion.Assets.Prefabs;
 using Illusion.Domain;
 using Illusion.Domain.Materials;
 using Illusion.Domain.Properties;
+using Illusion.Formats.Prefab;
 using Illusion.Rendering.Gizmos;
 using Illusion.Scene;
 using Illusion.Viewport;
@@ -50,6 +54,8 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
             BuildPropertyGroups();
             BuildMaterials();
             BuildParentCandidates();
+            BuildPrefab();
+            BuildTuning();
         }
         RaiseAll();
     }
@@ -101,6 +107,527 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         Raise(nameof(ObjectType));
         foreach (PropertyGroupViewModel g in _commonGroups) g.Refresh();
         foreach (PropertyGroupViewModel g in _typeGroups) g.Refresh();
+    }
+
+    // ── Prefab (archive root only) ──
+
+    private PrefabAssembly? _prefab;
+    private string? _prefabArchive;
+    private int _prefabToken;
+
+    /// <summary>Whether the open archive carries a PREFAB — the Prefab tab's visibility. False until the read
+    /// finishes, so the tab appears rather than sitting empty (257 of 1324 archives carry one at all).</summary>
+    public bool HasPrefab => _prefab != null;
+
+    private IReadOnlyList<PrefabEntryRowsViewModel> _prefabRows = [];
+
+    /// <summary>The prefab's entries as rows the panel can bind — each reference a picker over the archive's
+    /// own frames.</summary>
+    public IReadOnlyList<PrefabEntryRowsViewModel> PrefabEntries => _prefabRows;
+
+    /// <summary>Raised when a prefab edit lands, so the host can record it and say so. The action undoes and
+    /// redoes it; the string is the line for the notice banner.</summary>
+    public event Action<FileInfo, string, IEditAction>? PrefabEdited;
+
+    private void BuildPrefabRows()
+    {
+        // Which bands were open before. A pick, an add or a remove rewrites the file and rebuilds these
+        // rows, and folding the band shut under the user's hands the moment they changed something in it is
+        // the panel throwing away where they were.
+        var wasOpen = _prefabRows
+            .SelectMany(e => e.Groups)
+            .Where(g => g.IsExpanded)
+            .Select(g => g.Title)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (_prefab == null || _prefabArchive == null) { _prefabRows = []; return; }
+
+        var archive = new FileInfo(_prefabArchive);
+        var entries = new List<PrefabEntryRowsViewModel>();
+        foreach (PrefabEntryView entry in _prefab.Entries)
+        {
+            var groups = new List<PrefabGroupRowsViewModel>();
+            foreach (PrefabGroupView group in entry.Groups)
+            {
+                CarItemKind? adds = AddableIn(group.Title);
+                var rows = new List<PrefabRowViewModel>();
+                foreach (PrefabRefView row in group.Rows)
+                {
+                    var vm = new PrefabRowViewModel(row, _prefab.FrameChoices,
+                        (r, choice) => CommitPrefabPick(archive, r, choice))
+                    {
+                        Removable = RemovableFor(row),
+                        // The PART's index, not the frame's: axles are listed one per row but stored two at a
+                        // time, and the pair is the only unit the file can lose without desyncing the rest.
+                        RemoveIndex = row.PartIndex,
+                    };
+                    if (vm.Removable != null) vm.OnRemove(r => CommitPrefabRemove(archive, r));
+                    vm.OnSetValue((r, axis, value) => CommitPrefabValue(archive, r, axis, value));
+                    rows.Add(vm);
+                }
+                var band = new PrefabGroupRowsViewModel(group, rows, adds,
+                    adds == null ? null : g => CommitPrefabAdd(archive, g));
+                band.IsExpanded = wasOpen.Contains(band.Title);
+                groups.Add(band);
+            }
+            entries.Add(new PrefabEntryRowsViewModel(entry, groups));
+        }
+        _prefabRows = entries;
+
+        // A rebuild (an edit, an undo) must not silently widen the tab back out from under the search.
+        if (_prefabSearch.Trim().Length > 0)
+        {
+            foreach (PrefabGroupRowsViewModel group in entries.SelectMany(e => e.Groups))
+            {
+                group.Search(_prefabSearch.Trim());
+            }
+        }
+    }
+
+    // One picked frame, written straight into the working copy — a prefab edit has no in-memory stage of its
+    // own, the same as a collision box. The host turns it into an undo entry and a pending build.
+    private bool CommitPrefabPick(FileInfo archive, PrefabRefView row, FrameChoice choice)
+    {
+        if (row.Slot is not { } slot) return false;
+
+        PrefabEditing.Change? change = PrefabEditing.SetFrame(
+            archive, slot, row.Index, choice.Hash, row.Label);
+        if (change == null) return false;
+
+        PrefabEdited?.Invoke(archive,
+            $"{row.Label} now points at {choice.Name}.",
+            new PrefabPickEdit(change, RefreshPrefabAfterUndo));
+        return true;
+    }
+
+    // Which band gains a part when its + is pressed. The bands that are a fixed set of slots — a car has one
+    // headlight and one rest bone — have none, and show no button rather than a dead one.
+    private static CarItemKind? AddableIn(string group) => group switch
+    {
+        "Seats" => CarItemKind.Seat,
+        "Doors" => CarItemKind.Door,
+        "Windows" => CarItemKind.Window,
+        "Axles" => CarItemKind.AxlePair,
+        "Climb boxes" => CarItemKind.ClimbBox,
+        "Driving wheels" => CarItemKind.DrivingWheel,
+        "Fuel tanks" => CarItemKind.FuelTank,
+        "Exhausts" => CarItemKind.Exhaust,
+        "Wipers" => CarItemKind.Wiper,
+        _ => null,
+    };
+
+    // Which rows stand for a whole part. A part made of several fields carries it on its HEADER — the line
+    // that names it — while a bare list's row is the part itself. A brake drum belongs to its axle and a
+    // seat's door is a reference the seat holds; neither is a thing that can be dropped on its own.
+    private static CarItemKind? RemovableFor(PrefabRefView row) => row.Item ?? row.Slot switch
+    {
+        CarFrameSlot.Wiper => CarItemKind.Wiper,
+        CarFrameSlot.DrivingWheel => CarItemKind.DrivingWheel,
+        CarFrameSlot.FuelTank => CarItemKind.FuelTank,
+        CarFrameSlot.Exhaust => CarItemKind.Exhaust,
+        _ => null,
+    };
+
+    // A new part is a copy of the last one there, pointed at the first frame in the archive — the user then
+    // moves it where it belongs. Inventing where a seat sits would make a part that exists and does nothing.
+    private void CommitPrefabAdd(FileInfo archive, PrefabGroupRowsViewModel group)
+    {
+        if (group.Adds is not { } kind || _prefab is not { FrameChoices.Count: > 0 } prefab) return;
+
+        PrefabEditing.ItemChange? change = PrefabEditing.AddItem(
+            archive, kind, prefab.FrameChoices[0].Hash, group.Title);
+        if (change == null) return;
+
+        PrefabEdited?.Invoke(archive,
+            $"Added a {kind.ToString().ToLowerInvariant()} — point it at the right frame.",
+            new PrefabItemEdit(change, added: true, RefreshPrefabAfterUndo));
+        RefreshPrefabAfterUndo();
+    }
+
+    private void CommitPrefabRemove(FileInfo archive, PrefabRowViewModel row)
+    {
+        if (row.Removable is not { } kind) return;
+
+        PrefabEditing.ItemChange? change = PrefabEditing.RemoveItem(
+            archive, kind, row.RemoveIndex, row.Label);
+        if (change == null) return;
+
+        PrefabEdited?.Invoke(archive,
+            $"Removed a {kind.ToString().ToLowerInvariant()}.",
+            new PrefabItemEdit(change, added: false, RefreshPrefabAfterUndo));
+        RefreshPrefabAfterUndo();
+    }
+
+    // One number typed into a field. Unlike a pick, this does NOT rebuild the panel: retyping a depth while
+    // the rows are being replaced under the caret is how a field loses what is being typed into it.
+    private bool CommitPrefabValue(FileInfo archive, PrefabRefView row, int axis, float value)
+    {
+        if (row.ValueSlot is not { } slot) return false;
+
+        PrefabEditing.ValueChange? change = PrefabEditing.SetValue(
+            archive, slot, row.Index, axis, value, row.Label);
+        if (change == null) return false;
+
+        PrefabEdited?.Invoke(archive, $"{row.Label} set.", new PrefabValueEdit(change, RefreshPrefabAfterUndo));
+        return true;
+    }
+
+    // After an undo or redo the file has moved underneath the panel; re-read it rather than guess.
+    private void RefreshPrefabAfterUndo()
+    {
+        _prefabArchive = null;      // defeat the same-archive cache — the file really did change
+        BuildPrefab();
+    }
+
+    /// <summary>The headline over the entries: how many, and whether anything is broken.</summary>
+    public string PrefabSummary
+    {
+        get
+        {
+            if (_prefab == null) return "";
+            int entries = _prefab.Entries.Count;
+            int dangling = _prefab.Entries.Sum(e => e.DanglingCount);
+            string count = entries == 1 ? "1 entry" : $"{entries} entries";
+            return dangling == 0 ? count : $"{count} · {dangling} dangling references";
+        }
+    }
+
+    public bool PrefabHasDangling => _prefab?.HasDangling ?? false;
+
+    private string _prefabSearch = "";
+
+    /// <summary>
+    /// Narrows the Prefab tab to what matches — by the name of a row or by the frame it names. A car's
+    /// assembly is over two hundred lines and the question is usually "where is X", not "show me everything".
+    /// </summary>
+    public string PrefabSearch
+    {
+        get => _prefabSearch;
+        set
+        {
+            _prefabSearch = value ?? "";
+            foreach (PrefabGroupRowsViewModel group in _prefabRows.SelectMany(e => e.Groups))
+            {
+                group.Search(_prefabSearch.Trim());
+            }
+            Raise(nameof(PrefabSearch));
+            Raise(nameof(PrefabNothingFound));
+        }
+    }
+
+    /// <summary>Whether the search left nothing on screen — otherwise an empty tab reads as a broken one.</summary>
+    public bool PrefabNothingFound =>
+        _prefabSearch.Trim().Length > 0
+        && _prefabRows.SelectMany(e => e.Groups).All(g => !g.IsVisible);
+
+    // Reading one costs opening the frame resource to build the name table, so it runs off the UI thread and
+    // the tab appears when the answer arrives. Token-guarded: selecting another archive mid-read must not be
+    // overwritten by the first one landing late. Kept per ARCHIVE rather than per selection — clicking from
+    // one door to the next inside a car must not re-read the file each time.
+    /// <summary>Re-reads the staged archive's prefab. Called when the SCENE changes, not just the selection:
+    /// the tab is about the archive, and it has to be there the moment a car opens.</summary>
+    public void RefreshPrefab() => BuildPrefab();
+
+    private async void BuildPrefab()
+    {
+        FileInfo? archive = ContextArchive();
+        if (archive != null && _prefabArchive != null
+            && string.Equals(archive.FullName, _prefabArchive, StringComparison.OrdinalIgnoreCase))
+        {
+            return;     // same archive, already read — the answer cannot have changed
+        }
+
+        int token = ++_prefabToken;
+        _prefab = null;
+        _prefabArchive = archive?.FullName;
+        RaisePrefab();
+        if (archive == null) return;
+
+        PrefabAssembly? read = null;
+        try { read = await Task.Run(() => PrefabAssembly.Read(archive)); }
+        catch (Exception) { /* an archive the panel cannot read is a tab that does not appear */ }
+
+        if (token != _prefabToken) return;
+        _prefab = read;
+        BuildPrefabRows();
+        RaisePrefab();
+    }
+
+    private void RaisePrefab()
+    {
+        Raise(nameof(HasPrefab));
+        Raise(nameof(PrefabEntries));
+        Raise(nameof(PrefabSummary));
+        Raise(nameof(PrefabHasDangling));
+    }
+
+    // ── Tuning (archive root only) ──
+    //
+    // The entity-data tables of the staged archive. Same shape as the Prefab tab above and for the same
+    // reason: both describe the ARCHIVE rather than the selection, both write the working copy the moment a
+    // value is typed, and both hand the host an undo entry to record.
+
+    private CarTuning? _tuning;
+    private string? _tuningArchive;
+    private int _tuningToken;
+
+    /// <summary>Whether the open archive carries an entity-data table the core has a layout for — the Tuning
+    /// tab's visibility. A car does; most archives do not.</summary>
+    public bool HasTuning => _tuning != null;
+
+    private IReadOnlyList<TuningTableRowsViewModel> _tuningRows = [];
+    private int _tuningIndex;
+
+    /// <summary>The tables as rows the panel can bind — the picker's list.</summary>
+    public IReadOnlyList<TuningTableRowsViewModel> TuningTables => _tuningRows;
+
+    /// <summary>
+    /// The table on screen. ONE at a time: a car ships six of them at 771 fields each, and stacking those
+    /// end to end made the tab four thousand rows long — the picker is the difference between choosing a
+    /// variant and scrolling past the other five.
+    /// </summary>
+    public TuningTableRowsViewModel? SelectedTuningTable
+    {
+        get => _tuningIndex < _tuningRows.Count ? _tuningRows[_tuningIndex] : null;
+        set
+        {
+            int index = value == null ? 0 : IndexOfTable(value);
+            if (index < 0 || index == _tuningIndex) return;
+
+            // The bands that were open stay open across the switch, and so does the search: the questions
+            // "what is the camber here" and "and in the tuned one" are the same question twice, and closing
+            // everything in between is the panel making the user ask it again.
+            var wasOpen = _tuningRows[_tuningIndex].Bands
+                .Where(b => b.IsExpanded)
+                .Select(b => b.Title)
+                .ToHashSet(StringComparer.Ordinal);
+
+            _tuningIndex = index;
+            foreach (TuningBandRowsViewModel band in _tuningRows[index].Bands)
+            {
+                band.Search(_tuningSearch.Trim());
+                if (_tuningSearch.Trim().Length == 0) band.IsExpanded = wasOpen.Contains(band.Title);
+            }
+            Raise(nameof(SelectedTuningTable));
+            Raise(nameof(TuningNothingFound));
+        }
+    }
+
+    /// <summary>Whether there is anything to switch BETWEEN — one table needs no picker.</summary>
+    public bool HasManyTuningTables => _tuningRows.Count > 1;
+
+    private int IndexOfTable(TuningTableRowsViewModel table)
+    {
+        for (int i = 0; i < _tuningRows.Count; i++)
+        {
+            if (ReferenceEquals(_tuningRows[i], table)) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>Raised when a tuning edit lands, so the host can record it and say so.</summary>
+    public event Action<FileInfo, string, IEditAction>? TuningEdited;
+
+    private void BuildTuningRows()
+    {
+        // Which bands were open before: a rebuild that folds them shut is the panel throwing away where the
+        // user was.
+        var wasOpen = _tuningRows
+            .SelectMany(t => t.Bands)
+            .Where(b => b.IsExpanded)
+            .Select(b => b.Title)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (_tuning == null || _tuningArchive == null) { _tuningRows = []; return; }
+
+        var archive = new FileInfo(_tuningArchive);
+        var tables = new List<TuningTableRowsViewModel>();
+        foreach (TuningTableView table in _tuning.Tables)
+        {
+            var bands = new List<TuningBandRowsViewModel>();
+            foreach (TuningBandView band in table.Bands)
+            {
+                var elements = new List<TuningElementRowsViewModel>();
+                foreach (TuningElementView element in band.Elements)
+                {
+                    var rows = element.Rows
+                        .Select(r => new TuningRowViewModel(
+                            r, (field, value) => CommitTuningValue(archive, table, field, value)))
+                        .ToList();
+                    elements.Add(new TuningElementRowsViewModel(element.Title, rows));
+                }
+                var vm = new TuningBandRowsViewModel(band.Title, elements);
+                vm.IsExpanded = wasOpen.Contains(vm.Title);
+                bands.Add(vm);
+            }
+            tables.Add(new TuningTableRowsViewModel(table, bands));
+        }
+        _tuningRows = tables;
+        // An edit rebuilds these rows; landing back on table 1 after retuning table 4 would be the panel
+        // moving the user somewhere they did not ask to go.
+        _tuningIndex = Math.Clamp(_tuningIndex, 0, Math.Max(0, tables.Count - 1));
+
+        if (_tuningSearch.Trim().Length > 0 && SelectedTuningTable != null)
+        {
+            foreach (TuningBandRowsViewModel band in SelectedTuningTable.Bands)
+            {
+                band.Search(_tuningSearch.Trim());
+            }
+        }
+    }
+
+    // One value typed into a field. Like a prefab number, this does NOT rebuild the panel: replacing the rows
+    // under the caret is how a box loses what is being typed into it.
+    private bool CommitTuningValue(
+        FileInfo archive, TuningTableView table, TuningFieldView field, TuningEditing.TuningValue value)
+    {
+        TuningEditing.Change? change = TuningEditing.Set(
+            table.Path, table.Index, field.Offset, value, field.Name);
+        if (change == null) return false;
+
+        TuningEdited?.Invoke(archive, $"{field.Name} set.", new TuningValueEdit(change, RefreshTuningAfterUndo));
+        return true;
+    }
+
+    private void RefreshTuningAfterUndo()
+    {
+        _tuningArchive = null;      // defeat the same-archive cache — the file really did change
+        BuildTuning();
+    }
+
+    /// <summary>The headline over the tables: how many, and how much of them is named.</summary>
+    public string TuningSummary
+    {
+        get
+        {
+            if (_tuning == null) return "";
+            int tables = _tuning.Tables.Count;
+            string count = tables == 1 ? "1 table" : $"{tables} tables";
+            return $"{count} · {_tuning.FieldCount} fields";
+        }
+    }
+
+    private string _tuningSearch = "";
+
+    /// <summary>Narrows the Tuning tab to what matches — a car's table is 771 fields, so the question is
+    /// nearly always "where is X" rather than "show me everything".</summary>
+    public string TuningSearch
+    {
+        get => _tuningSearch;
+        set
+        {
+            _tuningSearch = value ?? "";
+            // Only the table on screen: searching the five that are not showing would report hits nobody
+            // can see and leave the tab saying nothing matches while a band below is full of matches.
+            foreach (TuningBandRowsViewModel band in SelectedTuningTable?.Bands ?? [])
+            {
+                band.Search(_tuningSearch.Trim());
+            }
+            Raise(nameof(TuningSearch));
+            Raise(nameof(TuningNothingFound));
+        }
+    }
+
+    /// <summary>Whether the search left nothing on screen — an empty tab otherwise reads as a broken one.</summary>
+    public bool TuningNothingFound =>
+        _tuningSearch.Trim().Length > 0
+        && (SelectedTuningTable?.Bands ?? []).All(b => !b.IsVisible);
+
+    /// <summary>Re-reads the staged archive's entity data. Called when the SCENE changes, not just the
+    /// selection: the tab is about the archive, and it has to be there the moment a car opens.</summary>
+    public void RefreshTuning() => BuildTuning();
+
+    private async void BuildTuning()
+    {
+        FileInfo? archive = ContextArchive();
+        if (archive != null && _tuningArchive != null
+            && string.Equals(archive.FullName, _tuningArchive, StringComparison.OrdinalIgnoreCase))
+        {
+            return;     // same archive, already read — the answer cannot have changed
+        }
+
+        int token = ++_tuningToken;
+        _tuning = null;
+        _tuningArchive = archive?.FullName;
+        RaiseTuning();
+        if (archive == null) return;
+
+        CarTuning? read = null;
+        try { read = await Task.Run(() => CarTuning.Read(archive)); }
+        catch (Exception) { /* an archive the panel cannot read is a tab that does not appear */ }
+
+        if (token != _tuningToken) return;
+        _tuning = read;
+        BuildTuningRows();
+        RaiseTuning();
+    }
+
+    private void RaiseTuning()
+    {
+        Raise(nameof(HasTuning));
+        Raise(nameof(TuningTables));
+        Raise(nameof(SelectedTuningTable));
+        Raise(nameof(HasManyTuningTables));
+        Raise(nameof(TuningSummary));
+    }
+
+    /// <summary>
+    /// The archive the Prefab tab is describing. The selection decides it when the selection belongs to one —
+    /// that is what makes the tab right in the map editor, where a dozen archives are loaded at once. With
+    /// nothing selected it falls back to the SCENE: a stage holding exactly one archive is unambiguous, and
+    /// waiting for a click before saying what the car is made of would be waiting for nothing.
+    /// </summary>
+    private FileInfo? ContextArchive()
+    {
+        if (ArchiveOf(_node) is { } selected) return selected;
+
+        FileInfo? only = null;
+        foreach (SceneNode root in _viewport.Tree.Roots)
+        {
+            foreach (FileInfo archive in ArchivesUnder(root))
+            {
+                if (only == null) { only = archive; continue; }
+                if (!string.Equals(only.FullName, archive.FullName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;    // more than one staged: nothing to point at without a selection
+                }
+            }
+        }
+        return only;
+    }
+
+    private static IEnumerable<FileInfo> ArchivesUnder(SceneNode node)
+    {
+        if (node.Source is ISceneDocument document) yield return document.SourceArchive;
+        foreach (SceneNode child in node.Children)
+        {
+            foreach (FileInfo found in ArchivesUnder(child)) yield return found;
+        }
+    }
+
+    /// <summary>
+    /// The .sds the selected node belongs to — looked for UPWARD first and downward second, because which
+    /// direction works depends on the window. The map editor's tree shows the real chain (folder → archive →
+    /// FrameResource → frames), so a selected object finds its document by walking up. The resource editor
+    /// shows a FLATTENED tree (<c>SceneTree.RebuildStageRoots</c>) whose rows start at the frame roots — the
+    /// archive and frame-resource rows exist as parents but are never displayed, so there is nothing there to
+    /// click and the tab has to hang off whatever the user CAN select. Hence up, then down.
+    /// </summary>
+    private static FileInfo? ArchiveOf(SceneNode? node)
+    {
+        if (node == null) return null;
+        if (node.OwningDocumentNode()?.Source is ISceneDocument owner) return owner.SourceArchive;
+        return Below(node);
+
+        static FileInfo? Below(SceneNode node)
+        {
+            if (node.Source is ISceneDocument own) return own.SourceArchive;
+            foreach (SceneNode child in node.Children)
+            {
+                if (Below(child) is { } found) return found;
+            }
+            return null;
+        }
     }
 
     // ── Materials (mesh only) ──
