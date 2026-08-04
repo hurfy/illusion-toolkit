@@ -13,8 +13,11 @@ namespace Illusion.Assets.Collisions;
 /// <param name="Shape">The physics shape it names.</param>
 /// <param name="ShapeFile">Full path of the .ids written into the extracted folder.</param>
 /// <param name="Bone">Index of the bone the stub hangs off.</param>
+/// <param name="Volume">The prefab collision volume that makes the shape real — without it the archive
+/// carries a shape nothing uses.</param>
 public sealed record AddedCollisionBox(
-    FrameObjectCollision Frame, ItemDescFile Shape, string ShapeFile, int Bone);
+    FrameObjectCollision Frame, ItemDescFile Shape, string ShapeFile, int Bone,
+    CarPhysicsVolumes.VolumeChange Volume);
 
 /// <summary>
 /// Gives a car part something to be shot at.
@@ -25,11 +28,18 @@ public sealed record AddedCollisionBox(
 /// to the body has neither, so shots pass straight through it — which is the whole reason this exists.
 /// </para>
 /// <para>
-/// Measured on the shipped cars (<c>--probe-car-collision</c>), which is what makes the shape below the right
-/// one to write: 106 car archives carry no <c>.col</c> at all and answer 1174 of 1174 stubs out of their own
-/// ItemDesc entries, matched on the record's FILE hash; every one of those 1174 shapes has the IDENTITY as its
-/// own transform, so the stub's frame is the only thing that places it. Boxes are not a workaround either —
-/// the cars ship 307 of them next to 599 convex hulls and 253 capsules.
+/// THREE things, not two, and the third is the one that took a wrong turn to find. The shape and the stub are
+/// not enough: the game reads a car's physics out of the PREFAB, where every deformable part carries the
+/// collision volumes that place its shapes (<see cref="CarPhysicsVolumes"/>). A shape and a stub with no
+/// volume produce exactly what was reported — geometry a player walks through and bullets pass through — and
+/// that is why a bone without a deformable part is refused here rather than served.
+/// </para>
+/// <para>
+/// Measured on the shipped cars (<c>--probe-car-collision</c>, <c>--probe-car-physics</c>): 106 car archives
+/// carry no <c>.col</c> at all and answer 1174 of 1174 stubs out of their own ItemDesc entries, matched on the
+/// record's FILE hash, while 1097 of 1097 prefab volumes name the same records by their DATA hash. Every one
+/// of those shapes has the IDENTITY as its own transform, so the placement is entirely in the two matrices.
+/// Boxes are not a workaround either — 232 of the volumes place one.
 /// </para>
 /// <para>
 /// A box is deliberate: it is described by three numbers, while a convex hull is a PhysX-cooked blob and the
@@ -43,30 +53,32 @@ public static class CarCollisionBuilder
     private const int ItemDescVersion = 3;
 
     /// <summary>
-    /// Adds a box-shaped collision shape to <paramref name="model"/>'s bone and wires it up: a new ItemDesc
-    /// record written into the extracted folder AND announced in its manifest, plus a stub frame naming it,
-    /// attached to the bone so it moves with the part.
+    /// Adds a primitive collision shape to <paramref name="model"/>'s bone and wires it up: a new ItemDesc
+    /// record written into the extracted folder AND announced in its manifest, a collision volume in the
+    /// car's prefab (the half the game reads), plus a stub frame naming it, attached to the bone so it moves
+    /// with the part.
     /// </summary>
-    /// <param name="dimensions">Box size, in the same units as the frame transforms.</param>
-    /// <param name="localInBoneSpace">Where the box sits relative to the bone.</param>
+    /// <param name="kind">Box, Sphere or Capsule. A convex hull is not on the list and cannot be: it is a
+    /// PhysX-cooked blob and the vendored cooker knows exactly one verb, <c>-CookTriangleMesh</c>. The
+    /// primitives are pure numbers, so they need no cooker at all.</param>
+    /// <param name="size">Box: half-extents. Sphere: X is the radius. Capsule: X is the radius and Y the
+    /// length of the straight section, which lies along the shape's local Z.</param>
+    /// <param name="localInBoneSpace">Where the shape sits relative to the bone.</param>
     /// <returns>Null with a <paramref name="refusal"/> when it cannot be done; nothing is written then.</returns>
-    public static AddedCollisionBox? AddBox(
-        FrameObjectModel model, int bone, string name, Vector3 dimensions,
+    public static AddedCollisionBox? AddShape(
+        FrameObjectModel model, int bone, string name, RigidBodyShape kind, Vector3 size,
         Matrix4x4 localInBoneSpace, string extractedFolder, out string? refusal)
     {
         ArgumentNullException.ThrowIfNull(model);
         refusal = null;
 
         if (string.IsNullOrWhiteSpace(name)) { refusal = "the shape needs a name"; return null; }
-        if (dimensions.X <= 0f || dimensions.Y <= 0f || dimensions.Z <= 0f)
-        {
-            refusal = "a box needs a positive size on every axis";
-            return null;
-        }
+        if (!Describes(kind, size, out string? sizeRefusal)) { refusal = sizeRefusal; return null; }
 
-        int boneCount;
-        try { boneCount = model.GetSkeletonObject().BoneNames?.Length ?? 0; }
+        HashName[] boneNames;
+        try { boneNames = model.GetSkeletonObject().BoneNames ?? []; }
         catch (Exception) { refusal = "the model's rig cannot be read"; return null; }
+        int boneCount = boneNames.Length;
         if (bone < 0 || bone >= boneCount) { refusal = "that bone is not part of this model's rig"; return null; }
         // The joint index rides as a single byte, so a rig may be longer than a stub can point into.
         if (bone > byte.MaxValue) { refusal = "that bone is past the 255th, which an attachment cannot name"; return null; }
@@ -96,31 +108,63 @@ public static class CarCollisionBuilder
             return null;
         }
 
+        // The bone has to BE a deformable part, because that is what the prefab hangs a collision volume off
+        // and the volume is what the game reads. Refusing here is the point: writing the shape and the stub
+        // alone produces geometry that looks armoured and is not.
+        string boneName = boneNames[bone].ToString() ?? "";
+        IReadOnlyList<string> partBones = CarPhysicsVolumes.PartBones(extractedFolder, resource);
+        if (!partBones.Contains(boneName, StringComparer.Ordinal))
+        {
+            refusal = partBones.Count == 0
+                ? "this archive has no car prefab, so there is nowhere to declare a collision volume"
+                : $"\"{boneName}\" is not a deformable part of this car, and only a deformable part can carry "
+                    + "collision. Bones that can: " + string.Join(", ", partBones);
+            return null;
+        }
+
+        // BOTH hashes of every shape already here, not just the file hash.
+        //
+        // A shape carries two ids and they are looked up by different readers — the stub finds it by the FILE
+        // hash, the prefab volume by the DATA hash — and both are minted from the frame's NAME. Deleting a
+        // collision leaves its ItemDesc record behind on purpose (an unnamed record is inert, and another
+        // volume may still name it), so adding a shape with the same name again used to salt the file hash
+        // clear of the orphan and hand out the orphan's DATA hash unchanged. Two records then answered to one
+        // data hash, the new volume resolved to the ORPHAN, and its stub could not be found from it: the
+        // shape drew at the prefab placement instead of at its stub, so it ignored the scale and stood still
+        // while the gizmo moved.
         IReadOnlyList<string> existing = manifest.GetFiles("ItemDesc");
         var takenHashes = new HashSet<ulong>();
         foreach (string file in existing)
         {
-            try { takenHashes.Add(ItemDescFile.Load(file).Hash); }
+            try
+            {
+                ItemDescFile already = ItemDescFile.Load(file);
+                takenHashes.Add(already.Hash);
+                if (already.Element != null) takenHashes.Add(already.Element.DataHash);
+            }
             catch (Exception) { /* a shape we cannot read still must not have its hash reused */ }
         }
 
         ulong hash = MintHash(name, takenHashes);
+        ulong dataHash = MintHash(name + "#data", takenHashes);
         var shape = new ItemDescFile
         {
             Hash = hash,
             Type = ItemDescType.RigidBody,
-            SubType = (byte)RigidBodyShape.Box,
+            SubType = (byte)kind,
             Element = new RigidBodyElement
             {
-                // Every shipped shape carries a data hash of its own, distinct from the file hash and from
-                // anything derivable — the lookup that matters is the FILE hash (1174 of 1174), so this only
-                // has to be unique.
-                DataHash = MintHash(name + "#data", takenHashes),
-                Shape = RigidBodyShape.Box,
+                // Two hashes, two readers. The stub finds the record by the FILE hash (1174 of 1174); the
+                // prefab volume that actually places it names this one (1097 of 1097). Both only have to be
+                // unique inside the archive.
+                DataHash = dataHash,
+                Shape = kind,
                 MaterialId = 0,
                 Layer = -1,          // every shape on every shipped car
                 Transform = Identity3x4(),
-                BoxDimensions = dimensions,
+                BoxDimensions = kind == RigidBodyShape.Box ? size : default,
+                Radius = kind == RigidBodyShape.Box ? 0f : size.X,
+                Height = kind == RigidBodyShape.Capsule ? size.Y : 0f,
             },
         };
 
@@ -137,6 +181,17 @@ public static class CarCollisionBuilder
         {
             refusal = "the shape could not be written: " + ex.Message;
             try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { /* best effort */ }
+            return null;
+        }
+
+        // The half the game reads. Written before the frame graph is touched so a refusal here leaves nothing
+        // half-wired: without a volume the shape is inert, and an inert shape is the bug this exists to fix.
+        CarPhysicsVolumes.VolumeChange? volume =
+            CarPhysicsVolumes.Add(extractedFolder, boneName, localInBoneSpace, dataHash);
+        if (volume == null)
+        {
+            refusal = "the car's prefab would not take a collision volume for this bone";
+            RollBackShape(extractedFolder, path);
             return null;
         }
 
@@ -158,11 +213,19 @@ public static class CarCollisionBuilder
         // Hanging it off the bone is what makes it move with the part.
         model.AttachToJoint(stub, (byte)bone);
 
-        return new AddedCollisionBox(stub, shape, path, bone);
+        return new AddedCollisionBox(stub, shape, path, bone, volume);
+    }
+
+    /// <summary>Unwrites a shape that was written and then could not be used.</summary>
+    private static void RollBackShape(string extractedFolder, string path)
+    {
+        try { SdsManifest.Load(extractedFolder).RemoveEntry(Path.GetFileName(path)); }
+        catch (Exception ex) when (ex is IOException or SdsFormatException) { /* reported by the next Build */ }
+        try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { /* best effort */ }
     }
 
     /// <summary>
-    /// Undoes <see cref="AddBox"/>: the stub leaves the graph and the bone, the shape file goes, and the
+    /// Undoes <see cref="AddShape"/>: the stub leaves the graph and the bone, the shape file goes, and the
     /// manifest stops naming it.
     /// <para>
     /// All three, because they are one thing. Leaving the manifest entry behind was assumed harmless — the
@@ -188,6 +251,10 @@ public static class CarCollisionBuilder
             // The file still goes below; a manifest that cannot be rewritten is reported by the next Build.
         }
 
+        // The prefab volume goes with it: a volume left naming a shape that no longer exists is a car whose
+        // physics the game builds out of a missing record.
+        CarPhysicsVolumes.Remove(added.Volume);
+
         model.DetachFromJoints(added.Frame);
         added.Frame.SetParent(ParentInfo.ParentType.ParentIndex1, null);
         added.Frame.SetParent(ParentInfo.ParentType.ParentIndex2, null);
@@ -198,7 +265,7 @@ public static class CarCollisionBuilder
 
     /// <summary>
     /// Puts a removed shape back on disk and back in the manifest — what a REDO needs. Re-running
-    /// <see cref="AddBox"/> would mint a second hash and a second file, so an undo/redo pair would leave the
+    /// <see cref="AddShape"/> would mint a second hash and a second file, so an undo/redo pair would leave the
     /// archive carrying two shapes where the user made one.
     /// </summary>
     public static void Restore(AddedCollisionBox added, byte[] shapeBytes)
@@ -214,10 +281,38 @@ public static class CarCollisionBuilder
                 SdsManifest.Load(folder)
                     .AddEntry("ItemDesc", Path.GetFileName(added.ShapeFile), ItemDescVersion);
             }
+            CarPhysicsVolumes.Restore(added.Volume);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SdsFormatException)
         {
             // Reported by the next Build rather than thrown into an undo/redo step.
+        }
+    }
+
+    /// <summary>Whether the numbers make sense for the kind of shape asked for.</summary>
+    private static bool Describes(RigidBodyShape kind, Vector3 size, out string? refusal)
+    {
+        refusal = null;
+        switch (kind)
+        {
+            case RigidBodyShape.Box when size.X > 0f && size.Y > 0f && size.Z > 0f:
+                return true;
+            case RigidBodyShape.Box:
+                refusal = "a box needs a positive size on every axis";
+                return false;
+            case RigidBodyShape.Sphere when size.X > 0f:
+                return true;
+            case RigidBodyShape.Sphere:
+                refusal = "a sphere needs a positive radius";
+                return false;
+            case RigidBodyShape.Capsule when size.X > 0f && size.Y > 0f:
+                return true;
+            case RigidBodyShape.Capsule:
+                refusal = "a capsule needs a positive radius and length";
+                return false;
+            default:
+                refusal = $"{kind} cannot be created — only a box, a sphere or a capsule is pure numbers";
+                return false;
         }
     }
 

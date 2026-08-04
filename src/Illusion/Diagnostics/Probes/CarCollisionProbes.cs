@@ -292,8 +292,9 @@ internal static class CarCollisionProbes
             int stubsBefore = fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count();
             int shapesBefore = SdsManifest.Load(scratch).GetFiles("ItemDesc").Count;
 
-            AddedCollisionBox? added = CarCollisionBuilder.AddBox(
-                model, hood, "illusion_probe_box_Collision", new System.Numerics.Vector3(0.30f, 0.20f, 0.05f),
+            AddedCollisionBox? added = CarCollisionBuilder.AddShape(
+                model, hood, "illusion_probe_box_Collision", RigidBodyShape.Box,
+                new System.Numerics.Vector3(0.30f, 0.20f, 0.05f),
                 System.Numerics.Matrix4x4.CreateTranslation(0f, 0.10f, 0.02f), scratch, out string? refusal);
 
             sb.AppendLine($"\n════ adding a box to bone \"{(hood >= 0 && hood < bones.Length ? bones[hood] : "?")}\" ════");
@@ -339,11 +340,20 @@ internal static class CarCollisionProbes
             check("every stub in the archive resolves to a shape the overlay can draw",
                 resolvedAll.Count == stubs, $"{resolvedAll.Count} of {stubs}");
 
+            // Every shape draws as SOMETHING, in line pairs. Not "24 vertices each" any more: a box is still
+            // twelve edges, but a capsule is now drawn as a capsule and a sphere as three circles, because a
+            // box around a capsule stands √2·r off the axis and reads as half again too big.
             var lines = new List<System.Numerics.Vector3>();
+            int drawn = 0;
             foreach (ResolvedCollisionShape one in resolvedAll.Values)
+            {
+                int before = lines.Count;
                 CarCollisionShapes.AppendWireframe(lines, one, System.Numerics.Matrix4x4.Identity);
-            check("each shape draws as a closed 12-edge wireframe",
-                lines.Count == resolvedAll.Count * 24, $"{lines.Count} vertices for {resolvedAll.Count} shapes");
+                if (lines.Count > before) drawn++;
+            }
+            check("every shape draws, as whole line segments",
+                drawn == resolvedAll.Count && lines.Count % 2 == 0,
+                $"{drawn} of {resolvedAll.Count} shapes, {lines.Count} vertices");
 
             // The box the probe just added, drawn: its corners must sit at the half-size that was asked for.
             var boxLines = new List<System.Numerics.Vector3>();

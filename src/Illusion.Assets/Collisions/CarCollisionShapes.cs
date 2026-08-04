@@ -64,9 +64,18 @@ public static class CarCollisionShapes
     public static void AppendWireframe(
         List<Vector3> lines, ResolvedCollisionShape resolved, Matrix4x4 world)
     {
-        ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(resolved);
-        if (resolved.Shape.Element is not RigidBodyElement rigid) return;
+        AppendWireframe(lines, resolved.Shape, world);
+    }
+
+    /// <inheritdoc cref="AppendWireframe(List{Vector3}, ResolvedCollisionShape, Matrix4x4)"/>
+    /// <remarks>The shape on its own, for a caller that reached it through the prefab rather than through a
+    /// stub — most of a car's volumes have no stub frame at all.</remarks>
+    public static void AppendWireframe(List<Vector3> lines, ItemDescFile shape, Matrix4x4 world)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(shape);
+        if (shape.Element is not RigidBodyElement rigid) return;
 
         // A cooked hull is the common case on a car (599 of the 1174 shipped shapes), so drawing it as a
         // token marker would put a 30 cm cube where a whole door is — which is exactly what it looked like.
@@ -80,15 +89,24 @@ public static class CarCollisionShapes
             return;
         }
 
-        Vector3 half = rigid.Shape switch
+        switch (rigid.Shape)
         {
-            RigidBodyShape.Box => rigid.BoxDimensions,
-            RigidBodyShape.Sphere => new Vector3(rigid.Radius),
-            RigidBodyShape.Capsule or RigidBodyShape.Cylinder =>
-                new Vector3(rigid.Radius, (rigid.Height * 0.5f) + rigid.Radius, rigid.Radius),
-            _ => new Vector3(0.15f),
-        };
-        AppendBox(lines, half, world);
+            case RigidBodyShape.Box:
+                AppendBox(lines, rigid.BoxDimensions, world);
+                return;
+            case RigidBodyShape.Sphere:
+                AppendSphere(lines, rigid.Radius, world);
+                return;
+            case RigidBodyShape.Capsule:
+                AppendCapsule(lines, rigid.Radius, rigid.Height, rounded: true, world);
+                return;
+            case RigidBodyShape.Cylinder:
+                AppendCapsule(lines, rigid.Radius, rigid.Height, rounded: false, world);
+                return;
+            default:
+                AppendBox(lines, new Vector3(0.15f), world);
+                return;
+        }
     }
 
     /// <summary>
@@ -183,6 +201,103 @@ public static class CarCollisionShapes
         BitConverter.ToSingle(bytes, at),
         BitConverter.ToSingle(bytes, at + 4),
         BitConverter.ToSingle(bytes, at + 8));
+
+    /// <summary>
+    /// A capsule (or a cylinder, with <paramref name="rounded"/> off) drawn as what it is, along its own
+    /// axis — which is local <b>Z</b>, not the Y a reading of the PhysX convention would suggest.
+    ///
+    /// <para>
+    /// Measured rather than assumed (<c>--probe-car-physics</c>): of 251 shipped capsules, the geometry each
+    /// one is wrapped around is longest along local Z on 232, and Z is also the choice whose own numbers —
+    /// 2r across, height + 2r along — sit closest to that geometry. Drawing them along Y put a long thin box
+    /// diagonally across the part it was meant to hug.
+    /// </para>
+    /// <para>
+    /// Drawn as a capsule and not as its bounding box for the same reason: a box's corners stand
+    /// <c>√2·r</c> off the axis where the capsule stands <c>r</c>, so the shape reads as half again too big
+    /// exactly where someone is trying to judge whether it covers a part.
+    /// </para>
+    /// </summary>
+    /// <param name="height">Length of the straight section, as the format stores it — the caps add
+    /// <paramref name="radius"/> at each end on top of it.</param>
+    public static void AppendCapsule(
+        List<Vector3> lines, float radius, float height, bool rounded, Matrix4x4 world)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        float half = height * 0.5f;
+        const int Segments = 16;
+
+        AppendCircle(lines, radius, half, world, Segments);
+        AppendCircle(lines, radius, -half, world, Segments);
+
+        // Four rails along the straight section.
+        for (int i = 0; i < 4; i++)
+        {
+            float angle = i * MathF.PI * 0.5f;
+            var at = new Vector3(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, 0f);
+            lines.Add(Vector3.Transform(at + new Vector3(0f, 0f, half), world));
+            lines.Add(Vector3.Transform(at + new Vector3(0f, 0f, -half), world));
+        }
+        if (!rounded) return;
+
+        // The two caps, as a pair of half-arcs each — enough to read as round without drawing a sphere.
+        foreach (int end in new[] { 1, -1 })
+        {
+            for (int plane = 0; plane < 2; plane++)
+            {
+                Vector3 previous = default;
+                for (int s = 0; s <= Segments / 2; s++)
+                {
+                    float t = s * MathF.PI / (Segments / 2);
+                    float across = MathF.Cos(t) * radius;
+                    float along = (MathF.Sin(t) * radius * end) + (half * end);
+                    var at = plane == 0
+                        ? new Vector3(across, 0f, along)
+                        : new Vector3(0f, across, along);
+                    Vector3 world3 = Vector3.Transform(at, world);
+                    if (s > 0) { lines.Add(previous); lines.Add(world3); }
+                    previous = world3;
+                }
+            }
+        }
+    }
+
+    /// <summary>A sphere as three great circles — the cheapest drawing that reads as round.</summary>
+    public static void AppendSphere(List<Vector3> lines, float radius, Matrix4x4 world)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        const int Segments = 16;
+        AppendCircle(lines, radius, 0f, world, Segments);
+        for (int plane = 0; plane < 2; plane++)
+        {
+            Vector3 previous = default;
+            for (int s = 0; s <= Segments; s++)
+            {
+                float t = s * 2f * MathF.PI / Segments;
+                var at = plane == 0
+                    ? new Vector3(MathF.Cos(t) * radius, 0f, MathF.Sin(t) * radius)
+                    : new Vector3(0f, MathF.Cos(t) * radius, MathF.Sin(t) * radius);
+                Vector3 world3 = Vector3.Transform(at, world);
+                if (s > 0) { lines.Add(previous); lines.Add(world3); }
+                previous = world3;
+            }
+        }
+    }
+
+    /// <summary>One circle in the local XY plane at <paramref name="atZ"/> along the axis.</summary>
+    private static void AppendCircle(
+        List<Vector3> lines, float radius, float atZ, Matrix4x4 world, int segments)
+    {
+        Vector3 previous = default;
+        for (int s = 0; s <= segments; s++)
+        {
+            float t = s * 2f * MathF.PI / segments;
+            var at = new Vector3(MathF.Cos(t) * radius, MathF.Sin(t) * radius, atZ);
+            Vector3 world3 = Vector3.Transform(at, world);
+            if (s > 0) { lines.Add(previous); lines.Add(world3); }
+            previous = world3;
+        }
+    }
 
     /// <summary>The twelve edges of a box, transformed into world space.</summary>
     public static void AppendBox(List<Vector3> lines, Vector3 half, Matrix4x4 world)

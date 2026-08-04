@@ -286,10 +286,19 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <summary>Name of the selected bone, for the menu to say what the box would be attached to.</summary>
     public string? SelectedBoneName => CarCollisionEditing.SelectedBone?.BoneName;
 
-    /// <summary>Gives the selected bone a box for bullets to hit — undoable, and selected on the way out so
-    /// the gizmo can place it.</summary>
-    public void AddCollisionBox(System.Numerics.Vector3 dimensions) =>
-        CarCollisionEditing.AddBoxToSelectedBone(dimensions);
+    /// <summary>The deformable parts of the selected car a new shape could be given to — the dialog asks
+    /// which, because the answer decides whether the shape is part of the CAR or part of one panel.</summary>
+    public IReadOnlyList<Assets.Collisions.CarPartChoice> CollisionPartChoices =>
+        CarCollisionEditing.PartChoices();
+
+    /// <summary>Gives a part a physics shape — undoable, selected on the way out so the gizmo can place it,
+    /// and the shape layer is switched on so it is visible the moment it exists.</summary>
+    public void AddCollisionShape(
+        Formats.ItemDesc.RigidBodyShape kind, System.Numerics.Vector3 size, int bone)
+    {
+        CarCollisionEditing.AddBoxToPart(kind, size, bone);
+        RaiseDirtyChanged();   // the Layers menu shows the shape layer as on now
+    }
 
     /// <summary>Whether a city_crash archive is loaded, so props can be placed into it.</summary>
     public bool CanPlaceCrashObject => Streamer.CrashLayer != null;
@@ -606,6 +615,9 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     /// <inheritdoc cref="ScenePersistence.PendingBuildArchives"/>
     public IReadOnlyList<FileInfo> PendingBuildArchives() => Persistence.PendingBuildArchives();
+
+    /// <inheritdoc cref="ScenePersistence.MarkArchiveModified"/>
+    public void MarkArchiveModified(FileInfo sds) => Persistence.MarkArchiveModified(sds);
 
     /// <summary>One archive that failed to pack during a build (kept buildable so the user can retry).</summary>
     public readonly record struct BuildFailure(string Archive, string Error);

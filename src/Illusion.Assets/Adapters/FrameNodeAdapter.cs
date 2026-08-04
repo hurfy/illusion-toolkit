@@ -32,11 +32,21 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
     /// <summary>The document this frame belongs to — which archive it will be written back into.</summary>
     public SceneDocumentAdapter Document => _document;
 
-    /// <summary>Setting cascades world transforms through the frame subtree (vendor setter behavior).</summary>
+    /// <summary>Setting cascades world transforms through the frame subtree (vendor setter behavior).
+    /// <para>
+    /// Moving a COLLISION stub is also recorded on the document: on a car that placement exists twice, here
+    /// and in the prefab, and the prefab is the copy the game reads. Every route that moves a frame — the
+    /// gizmo, the modal keys, the property panel — comes through this setter, so this is the one place the
+    /// two copies can be kept from drifting apart.
+    /// </para></summary>
     public Matrix4x4 LocalTransform
     {
         get => _frame.LocalTransform;
-        set => _frame.LocalTransform = value;
+        set
+        {
+            _frame.LocalTransform = value;
+            if (_frame is FrameObjectCollision stub) _document.MarkCollisionStubMoved(stub);
+        }
     }
 
     /// <summary>The frame's world transform with its actor placement folded in: a frame an actor spawns is a

@@ -288,6 +288,22 @@ public class FrameObjectModel : FrameObjectSingleMesh
             modelRotation * rotation, scale, Vector3Extensions.TransformCoordinate(position, model));
     }
 
+    /// <summary>
+    /// Where something given in one of this model's joint spaces ends up in the world. This is the same
+    /// composition <see cref="FrameObjectBase.SetWorldTransform"/> uses to place an attached frame — rotation
+    /// through the joint's rotation, position through the whole joint matrix — exposed for callers that have
+    /// to place something which is not a frame at all: a car's collision volumes live in the PREFAB, in the
+    /// space of the bone their deformable part is, and only a few of them have a stub frame to borrow.
+    /// </summary>
+    public Matrix4x4 PlaceOnJoint(Matrix4x4 local, int joint)
+    {
+        Matrix4x4 parent = GetJointWorldTransform(joint);
+        MatrixExtensions.TryDecomposeRS(local, out Vector3 scale, out Quaternion rotation, out Vector3 position);
+        MatrixExtensions.TryDecomposeRS(parent, out _, out Quaternion parentRotation, out _);
+        return MatrixExtensions.SetMatrix(
+            parentRotation * rotation, scale, Vector3Extensions.TransformCoordinate(position, parent));
+    }
+
     public override string ToString()
     {
         return string.Format("{0}", Name.ToString());

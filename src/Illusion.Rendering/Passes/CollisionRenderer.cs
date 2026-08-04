@@ -38,7 +38,7 @@ internal struct CollisionOutlineConstants
 public sealed unsafe class CollisionRenderer : IDisposable
 {
     private const float FillAlpha = 0.22f;
-    private const float OutlineRadiusPx = 3.5f;   // border half-width ("рамка", a bit thick)
+    private const float OutlineRadiusPx = 3.5f;   // border half-width (deliberately a bit thick)
     private const float OutlineAlpha = 0.95f;
 
     // Instanced fill/mask: pos (slot 0) + per-instance world (slot 1); PSMain = flat fill, PSMask = color coverage.

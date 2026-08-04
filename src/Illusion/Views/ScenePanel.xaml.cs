@@ -40,6 +40,33 @@ public partial class ScenePanel : UserControl
 
     public ScenePanel() => InitializeComponent();
 
+    // The Prefab tab's two buttons. Plain Click handlers reading the row off the DataContext, the same shape
+    // the scene tree's context menu uses — a command would have to carry the row anyway.
+    private void PrefabAdd_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PrefabGroupRowsViewModel group }) group.Add();
+    }
+
+    private void PrefabRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: PrefabRowViewModel row }) return;
+        // A part is a handful of numbers the user cannot see from here, and dropping one is not a keystroke
+        // away from being undone in the game — ask, and say what it is.
+        if (AppDialog.Show(Window.GetWindow(this), new DialogOptions
+            {
+                Title = "Remove part",
+                Heading = row.RemoveTip + "?",
+                Text = "It stops being part of the car the next time the archive is built. Ctrl+Z puts it "
+                     + "back exactly as it was.",
+                Icon = DialogIcon.Question,
+                Buttons = DialogButtons.YesCancel,
+                ConfirmText = "Remove",
+            }).Confirmed)
+        {
+            row.Remove();
+        }
+    }
+
     // What the tree is bound to — the roots themselves, or the flattened stage view. Kept so the empty state
     // can ask whether there is anything to show without caring which of the two it is.
     private ObservableCollection<SceneNode>? _shown;
@@ -109,11 +136,34 @@ public partial class ScenePanel : UserControl
         _selection = new SelectionViewModel(viewport);
         PropertyTabs.DataContext = _selection;
 
+        // A prefab pick writes the working copy the moment it is made, so the three things that follow are
+        // the host's: it goes on the undo stack, the archive joins the build list, and the user is told.
+        _selection.PrefabEdited += (archive, message, edit) =>
+        {
+            viewport.History.Push(edit);
+            viewport.MarkArchiveModified(archive);
+            viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
+        };
+
+        // A tuning edit is the same deal: the number is already in the working copy, so the host records it,
+        // adds the archive to the build list and says so.
+        _selection.TuningEdited += (archive, message, edit) =>
+        {
+            viewport.History.Push(edit);
+            viewport.MarkArchiveModified(archive);
+            viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
+        };
+
         viewport.SceneChanged += () => Dispatcher.Invoke(() =>
         {
             UpdateSceneStats();
             _groupsView.Refresh();
             UpdateEmptyState();
+            // The Prefab tab describes the ARCHIVE, not the selection, so it has to follow what is staged —
+            // otherwise it only appears once something has been clicked, and a car that has just opened
+            // shows nothing at all.
+            _selection.RefreshPrefab();
+            _selection.RefreshTuning();
         });
         UpdateEmptyState();
 
@@ -223,15 +273,22 @@ public partial class ScenePanel : UserControl
 
         // A collision box hangs off a PART, so the item only lights up on a bone and says which one.
         string? bone = _viewport.SelectedBoneName;
-        TreeAddCollisionBoxItem.Header = bone != null ? $"Add Collision Box… ({bone})" : "Add Collision Box…";
+        TreeAddCollisionBoxItem.Header = bone != null ? $"Add Collision Shape… ({bone})" : "Add Collision Shape…";
         TreeAddCollisionBoxItem.IsEnabled = _viewport.CanAddCollisionBox;
     }
 
     private void AddCollisionBox_Click(object sender, RoutedEventArgs e)
     {
         if (_viewport.SelectedBoneName is not { } bone) return;
-        var dialog = new CollisionBoxWindow(bone) { Owner = Window.GetWindow(this) };
-        if (dialog.ShowDialog() == true && dialog.Dimensions is { } size) _viewport.AddCollisionBox(size);
+        var dialog = new CollisionBoxWindow(_viewport.CollisionPartChoices, bone)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        if (dialog.ShowDialog() == true && dialog.Size is { } size && dialog.Kind is { } kind
+            && dialog.Part is { } part)
+        {
+            _viewport.AddCollisionShape(kind, size, part.Bone);
+        }
     }
 
     private void DeleteMenuItem_Click(object sender, RoutedEventArgs e) => _viewport.DeleteSelected();

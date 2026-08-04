@@ -68,9 +68,38 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     /// <inheritdoc cref="ISceneDocument.MarkNameTableDirty"/>
     public void MarkNameTableDirty() => _nameTableDirty = true;
 
+    private readonly HashSet<FrameObjectCollision> _movedCollisionStubs = new();
+
+    /// <summary>
+    /// Records that a collision stub has been moved, so the next save carries the new placement through to the
+    /// half of the archive the game reads.
+    /// <para>
+    /// On a car the same placement is written down twice — as this frame's matrix and as a collision volume in
+    /// the PREFAB — and only the prefab is read. Writing just the frame is exactly the change that looked like
+    /// it worked and did nothing. Only stubs that actually moved are carried over: 37 of the 1097 shipped
+    /// pairs already disagree, and rewriting those from a frame nobody touched would change cars nobody asked
+    /// about.
+    /// </para>
+    /// </summary>
+    public void MarkCollisionStubMoved(FrameObjectCollision stub) => _movedCollisionStubs.Add(stub);
+
+    /// <summary>
+    /// This archive's car collision, as the PREFAB describes it — every deformable part's volumes, resolved
+    /// against the frame graph. Empty for an archive that is not a car. Read fresh each time: the prefab lives
+    /// on disk and several editors write it.
+    /// </summary>
+    public IReadOnlyList<Collisions.PlacedPhysicsVolume> PhysicsVolumes() =>
+        Collisions.CarPhysicsVolumes.Load(MafiaEnvironment.ExtractedDir(SourceArchive), _frame);
+
     public string SaveWorkingCopy()
     {
         string written = SdsWriter.SaveFrameResource(_frame, SourceArchive);
+        if (_movedCollisionStubs.Count > 0)
+        {
+            Collisions.CarPhysicsVolumes.SyncStubs(
+                MafiaEnvironment.ExtractedDir(SourceArchive), _movedCollisionStubs);
+            _movedCollisionStubs.Clear();
+        }
         if (_nameTableDirty)
         {
             // Must run AFTER SaveFrameResource: WriteToStream ran UpdateFrameData, so FrameObjects order and the

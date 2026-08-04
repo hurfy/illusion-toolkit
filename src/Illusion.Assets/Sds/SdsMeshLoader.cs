@@ -126,8 +126,14 @@ public static class SdsMeshLoader
                 if (!d.Equals(self, StringComparison.OrdinalIgnoreCase)) others.Add(d);
 
         var meshes = new List<MeshData>();
-        FrameResource? fr = OpenFrameResource(sdsFile, out _, out ActorPlacements placements);
+        FrameResource? fr = OpenFrameResource(sdsFile, out string folder, out ActorPlacements placements);
         if (fr == null) return (new List<SdsFrameNode>(), meshes, null);
+
+        // A car writes each collision placement down twice — as a stub frame here and as a volume in its
+        // prefab — and the prefab is the copy the game reads. Where they disagree the stub is the one that is
+        // wrong, so it is snapped onto the truth before anyone can see it or drag it. No-op for anything that
+        // is not a car: the lookup costs one manifest read when there is no PREFAB to find.
+        Collisions.CarPhysicsVolumes.AlignStubsToPrefab(folder, fr);
 
         var document = new SceneDocumentAdapter(fr, sdsFile, placements);
         var roots = BuildRoots(fr, document, others, meshes, null);
@@ -575,6 +581,131 @@ public static class SdsMeshLoader
             // Skip a broken/non-standard mesh, don't crash the rest of the scene.
             return null;
         }
+    }
+
+    /// <summary>
+    /// Which bone of the model's OWN list each vertex is weighted to, four per vertex — the reading the
+    /// renderer uses, and the only one that answers "which bone does this part ride" out loud.
+    /// <para>
+    /// Reading the ids straight out of the vertex buffer names the wrong bone: they are pool-local, an index
+    /// into the remap pool of whichever face group draws the vertex. Null for a model with no usable skin.
+    /// </para>
+    /// </summary>
+    public static byte[]? GlobalBoneIds(FrameObjectModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        DecodedMesh? decoded = DecodeLod0(model);
+        return decoded == null ? null : ResolveBoneRemap(model, BuildParts(model, decoded.Indices.Length), decoded);
+    }
+
+    /// <summary>
+    /// WHY a model's skin does or does not resolve, in words. <see cref="GlobalBoneIds"/> answers null for
+    /// half a dozen different reasons and they are not interchangeable: a mesh that lost its skin channel, a
+    /// remap table with fewer groups than the mesh has materials, and an id pointing past the table are three
+    /// different bugs. An unresolvable skin is never cosmetic — the renderer, the bridge's export and the
+    /// game all read through this, and the bridge quietly falls back to the RAW pool-local ids, which is how
+    /// a vertex group ends up labelled "bumper" while it selects a window.
+    /// </summary>
+    public static string DescribeBoneRemap(FrameObjectModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        DecodedMesh? decoded = DecodeLod0(model);
+        if (decoded == null) return "the mesh has no usable LOD0 buffers";
+        if (decoded.BoneIndices == null || decoded.BoneWeights == null)
+        {
+            return "the vertex buffer carries no skin channel at all";
+        }
+
+        FrameBlendInfo blend;
+        try { blend = model.GetBlendInfoObject(); }
+        catch (Exception) { return "the blend info cannot be read"; }
+        if (blend.BoneIndexInfos is not { Length: > 0 } lods) return "the blend info carries no LODs";
+
+        FrameBlendInfo.BoneIndexInfo info = lods[0];
+        byte[] pools = info.BonesPerRemapPool ?? [];
+        byte[] remap = info.BoneRemapIDs ?? [];
+        FrameBlendInfo.SkinnedMaterialInfo[] groups = info.SkinnedMaterialInfo ?? [];
+        MeshPart[] parts = BuildParts(model, decoded.Indices.Length);
+
+        var text = new System.Text.StringBuilder();
+        text.Append(System.Globalization.CultureInfo.InvariantCulture,
+            $"{parts.Length} material parts, {groups.Length} skinned-material groups, {pools.Length} pools "
+            + $"({string.Join("+", pools)} = {remap.Length} remap entries)");
+        if (pools.Length == 0) return text + " — NO POOLS";
+        if (remap.Length == 0) return text + " — EMPTY REMAP TABLE";
+        if (groups.Length < parts.Length)
+        {
+            return text + " — FEWER GROUPS THAN PARTS: the mesh draws materials the remap table cannot answer for";
+        }
+
+        int at = 0;
+        var poolStart = new int[pools.Length];
+        for (int p = 0; p < pools.Length; p++) { poolStart[p] = at; at += pools[p]; }
+        if (at > remap.Length) return text + " — POOLS OVERRUN THE REMAP TABLE";
+
+        for (int part = 0; part < parts.Length; part++)
+        {
+            int pool = groups[part].AssignedPoolIndex;
+            if (pool >= pools.Length)
+            {
+                return text + $" — part {part} names pool {pool}, which does not exist";
+            }
+            int end = Math.Min(parts[part].StartIndex + parts[part].IndexCount, decoded.Indices.Length);
+            for (int i = parts[part].StartIndex; i < end; i++)
+            {
+                int vertex = (int)decoded.Indices[i];
+                if (vertex < 0 || (vertex * 4) + 3 >= decoded.BoneIndices.Length) continue;
+                for (int k = 0; k < 4; k++)
+                {
+                    int slot = poolStart[pool] + decoded.BoneIndices[(vertex * 4) + k];
+                    if (slot >= remap.Length)
+                    {
+                        return text + $" — vertex {vertex} names id "
+                            + $"{decoded.BoneIndices[(vertex * 4) + k]} in pool {pool} (size {pools[pool]}), "
+                            + "which is past the end of the remap table";
+                    }
+                }
+            }
+        }
+        // How many influences each face group tells the game to blend, and out of which pool. The game reads
+        // this per material, not per vertex: a vertex carrying two influences inside a group that declares
+        // one is a vertex whose second bone the game never applies — and a group that declares more than its
+        // vertices carry blends bytes that mean nothing.
+        // WHICH bones each pool can name. A pool is a palette a draw can reach into, and a material can only
+        // weight its vertices to bones its own pool holds — so "this bone is not in that pool" is a complete
+        // explanation for a part that will not take a weight, and there is no other way to see it.
+        HashName[] rigBones = model.GetSkeletonObject().BoneNames ?? [];
+        string BoneName(byte id) => id < rigBones.Length ? rigBones[id].ToString() ?? $"#{id}" : $"#{id}";
+        for (int p = 0; p < pools.Length; p++)
+        {
+            if (pools[p] == 0) continue;
+            text.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"\n        pool {p} ({pools[p]} bones): ");
+            text.Append(string.Join(", ",
+                Enumerable.Range(poolStart[p], pools[p]).Select(i => BoneName(remap[i]))));
+        }
+
+        text.Append("\n        per material: ");
+        for (int part = 0; part < parts.Length; part++)
+        {
+            int carried = 0;
+            int end = Math.Min(parts[part].StartIndex + parts[part].IndexCount, decoded.Indices.Length);
+            for (int i = parts[part].StartIndex; i < end; i++)
+            {
+                int vertex = (int)decoded.Indices[i];
+                if (vertex < 0 || (vertex * 4) + 3 >= decoded.BoneWeights.Length) continue;
+                int here = 0;
+                for (int k = 0; k < 4; k++)
+                {
+                    if (decoded.BoneWeights[(vertex * 4) + k] > 0f) here++;
+                }
+                carried = Math.Max(carried, here);
+            }
+            text.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"[{part}: pool {groups[part].AssignedPoolIndex}, declares "
+                + $"{groups[part].NumWeightsPerVertex}, carries {carried}]");
+        }
+        return text.ToString();
     }
 
     /// <summary>

@@ -47,9 +47,14 @@ internal sealed class CarCollisionController
     private bool _show;
 
     /// <summary>
-    /// Redraws the shape wireframe for whatever is selected now. Cheap enough to run on every selection change:
-    /// it only ever walks ONE part's stubs, which is a handful, and re-reads that archive's ItemDesc files —
-    /// twelve small files on a car.
+    /// Redraws the collision of whatever is selected now, as the PREFAB describes it — which is the copy the
+    /// game reads. A volume that has a stub frame is drawn where the stub is rather than where the prefab
+    /// says, because the stub is the handle being dragged and the save is what makes the two agree; a volume
+    /// with no stub (every window, every snow volume) is drawn where it is.
+    /// <para>
+    /// Cheap enough to run on every selection change: it walks ONE part's volumes and re-reads that archive's
+    /// prefab and its dozen small ItemDesc files.
+    /// </para>
     /// </summary>
     internal void RefreshOverlay()
     {
@@ -58,57 +63,107 @@ internal sealed class CarCollisionController
         if (!_show) { renderer.SetPartShapeLines([]); return; }
 
         var lines = new List<Vector3>();
-        foreach ((FrameObjectCollision stub, SceneDocumentAdapter document) in SelectedStubs())
+        foreach ((PlacedPhysicsVolume volume, SceneDocumentAdapter document, FrameObjectCollision? handle)
+                 in SelectedVolumes())
         {
-            string extracted = MafiaEnvironment.ExtractedDir(document.SourceArchive);
-            Dictionary<ulong, ResolvedCollisionShape> shapes = CarCollisionShapes.Load(extracted, [stub]);
-            if (!shapes.TryGetValue(stub.Hash, out ResolvedCollisionShape? resolved)) continue;
-            CarCollisionShapes.AppendWireframe(lines, resolved, document.Node(stub).WorldTransform);
+            // The stub this volume is drawn by: its own when the archive resolves one, otherwise the stub
+            // that is SELECTED — a shape added seconds ago is being dragged by that stub, and drawing it at
+            // the prefab placement instead leaves it standing still while the gizmo walks away.
+            FrameObjectCollision? by = volume.Stub ?? handle;
+            Matrix4x4 world = by != null
+                ? document.Node(by).WorldTransform
+                : volume.World;
+            if (volume.Shape != null) CarCollisionShapes.AppendWireframe(lines, volume.Shape, world);
+            else CarCollisionShapes.AppendBox(lines, volume.Volume.Size * 0.5f, world);
         }
         renderer.SetPartShapeLines(lines);
     }
 
     /// <summary>
-    /// The collision stubs the selection speaks for: everything hanging off a selected BONE, or the selected
-    /// stub itself. Selecting the part shows what protects it; selecting one shape shows just that one.
+    /// The collision volumes the selection speaks for: everything on the deformable part a selected BONE is,
+    /// or the single volume a selected stub places. Selecting the part shows what protects it; selecting one
+    /// shape shows just that one.
     /// </summary>
-    private IEnumerable<(FrameObjectCollision Stub, SceneDocumentAdapter Document)> SelectedStubs()
+    private IEnumerable<(PlacedPhysicsVolume Volume, SceneDocumentAdapter Document, FrameObjectCollision? Handle)>
+        SelectedVolumes()
     {
+        SceneDocumentAdapter? document = null;
+        FrameObjectCollision? single = null;
+        int bone = -1;
+
         if (_host.SelectedNode?.Source is FrameNodeAdapter { Frame: FrameObjectCollision one } picked)
         {
-            yield return (one, picked.Document);
+            document = picked.Document;
+            single = one;
+        }
+        else if (SelectedBone is { } selected)
+        {
+            document = selected.Document;
+            bone = selected.Index;
+        }
+        if (document == null) yield break;
+
+        IReadOnlyList<PlacedPhysicsVolume> all = document.PhysicsVolumes();
+        if (single == null)
+        {
+            foreach (PlacedPhysicsVolume volume in all.Where(v => v.Bone == bone))
+            {
+                yield return (volume, document, null);
+            }
             yield break;
         }
-        if (SelectedBone is not { } bone) yield break;
-        foreach (FrameObjectModel.AttachmentReference reference in bone.Model.AttachmentReferences ?? [])
+
+        // The one this stub places, matched on identity first and then on the shape it names — a stub only
+        // just added is the same object, but a reload or a re-resolve can hand back a different instance for
+        // the same shape, and a shape that draws under its bone and vanishes when clicked is worse than
+        // useless.
+        var mine = all.Where(v => ReferenceEquals(v.Stub, single)
+            || (v.Shape != null && v.Shape.Hash == single.Hash)).ToList();
+
+        // Nothing matched: show the whole part rather than an empty viewport. Selecting a shape must never
+        // show LESS than selecting the bone it hangs off — that reads as "the shape is gone".
+        if (mine.Count == 0)
         {
-            if (reference.JointIndex == bone.Index && reference.Attachment is FrameObjectCollision stub)
-            {
-                yield return (stub, bone.Document);
-            }
+            mine = [.. all.Where(v => v.Bone == single.AttachedJoint && single.AttachedTo != null)];
         }
+        foreach (PlacedPhysicsVolume volume in mine) yield return (volume, document, single);
     }
 
     /// <summary>
-    /// Adds a box collision to the selected bone and selects it, so the gizmo can place it straight away.
-    /// Reports through the host's notice line; nothing is written when it refuses.
+    /// The deformable parts of the selected car — what the dialog offers. Which one a shape is given to is
+    /// the question that decides its behaviour, so it is asked rather than inferred from the selection.
     /// </summary>
-    /// <param name="dimensions">Box size along each axis.</param>
-    internal void AddBoxToSelectedBone(Vector3 dimensions)
+    internal IReadOnlyList<CarPartChoice> PartChoices()
     {
-        if (SelectedBone is not { } bone)
+        if (SelectedBone is not { } bone) return [];
+        return CarPhysicsVolumes.PartChoices(
+            MafiaEnvironment.ExtractedDir(bone.Document.SourceArchive), bone.Model.Resource);
+    }
+
+    /// <summary>
+    /// Gives one of the car's deformable parts a collision box and selects it, so the gizmo can place it
+    /// straight away. Reports through the host's notice line; nothing is written when it refuses.
+    /// </summary>
+    /// <param name="kind">Box, sphere or capsule — the primitives, which are pure numbers.</param>
+    /// <param name="size">Box: half-extents. Sphere: X is the radius. Capsule: X radius, Y length.</param>
+    /// <param name="joint">The part's bone — both copies of the placement are read in ITS space.</param>
+    internal void AddBoxToPart(Illusion.Formats.ItemDesc.RigidBodyShape kind, Vector3 size, int joint)
+    {
+        if (SelectedBone is not { } selected)
         {
             _host.RaiseNotice("select a bone first — a collision box hangs off a part, not off the scene", true);
             return;
         }
 
         SceneNode? boneNode = _host.SelectedNode;
-        FrameObjectModel model = bone.Model;
-        string extracted = MafiaEnvironment.ExtractedDir(bone.Document.SourceArchive);
-        string name = UniqueName(model, bone.BoneName);
+        FrameObjectModel model = selected.Model;
+        string extracted = MafiaEnvironment.ExtractedDir(selected.Document.SourceArchive);
+        string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
+        string boneName = joint >= 0 && joint < bones.Length ? bones[joint] : selected.BoneName;
+        string name = UniqueName(model, boneName);
 
-        AddedCollisionBox? added = CarCollisionBuilder.AddBox(
-            model, bone.Index, name, dimensions, Matrix4x4.Identity, extracted, out string? refusal);
+        AddedCollisionBox? added = CarCollisionBuilder.AddShape(
+            model, joint, name, kind, size, Matrix4x4.Identity, extracted, out string? refusal);
         if (added == null)
         {
             _host.RaiseNotice("no collision box added: " + (refusal ?? "unknown reason"), true);
@@ -122,7 +177,7 @@ internal sealed class CarCollisionController
         {
             row = new SceneNode($"{name}  (Collision)", "Attachment", false)
             {
-                Source = bone.Document.Node(added.Frame),
+                Source = selected.Document.Node(added.Frame),
             };
             boneNode.AddChild(row);
             boneNode.IsExpanded = true;
@@ -140,12 +195,17 @@ internal sealed class CarCollisionController
                 boneNode.Children.Remove(row);
             }
         });
+        // Turn the layer on: a shape that exists and is invisible reads as "nothing happened", and the
+        // whole point of adding one is to place it by eye.
+        ShowShapes = true;
         _host.History.Push(edit);
         _host.Persistence.MarkFrameModified(boneNode ?? _host.SelectedNode!);
         if (row != null) _host.Select(row);
 
+        // Say which PART it belongs to, not just where the row landed: the row sits under the bone that was
+        // selected until the archive is loaded again, while the shape belongs to the part that was chosen.
         _host.RaiseNotice(
-            $"collision box added to \"{bone.BoneName}\" — drag it into place, then Save and Build. "
+            $"collision box added to \"{boneName}\" — drag it into place, then Save and Build. "
             + "Ctrl+Z takes it back.");
     }
 

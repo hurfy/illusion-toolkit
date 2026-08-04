@@ -96,6 +96,10 @@ internal sealed class TransformEditController
         }
         _host.Selection.UpdateSelectionHighlight();
         _host.RaiseSelectionTransformChanged();
+        // A car's collision overlay is drawn where its STUB stands, so dragging the stub has to redraw it.
+        // Without this the shape sits still while the gizmo moves away from it, which reads as "the gizmo
+        // does nothing" — the frame really did move, only nothing repainted the lines.
+        _host.CarCollisionEditing.RefreshOverlay();
         // First real move → publish the baseline and reveal the panel. The mode is the DRAG's, not the tool
         // shelf's: a keyboard-started scale leaves the shelf on whatever it was, and asking the shelf is what
         // used to label a resize "Position".
@@ -206,6 +210,7 @@ internal sealed class TransformEditController
 
         _host.Selection.SetSelection(live, live[^1]);  // re-select the group; also refreshes outline + pivot
         _host.RaiseSelectionTransformChanged();        // and the numeric fields of the active node
+        _host.CarCollisionEditing.RefreshOverlay();    // …and the collision lines, which follow the stub
     }
 
     // Pushes fresh world matrices (already cascaded by the LocalTransform setter) onto a node's GPU meshes.
