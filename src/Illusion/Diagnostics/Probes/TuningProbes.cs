@@ -437,6 +437,40 @@ internal static class TuningProbes
         }
     }
 
+    /// <summary>
+    /// What the rail's template actually put on the tab: the geometry the icon Path ended up drawing, or null
+    /// when nothing reached it. Needs the template applied, so the panel goes into an off-screen window and
+    /// is laid out.
+    /// </summary>
+    private static System.Windows.Media.Geometry? DrawnIcon(Views.ScenePanel panel, string header)
+    {
+        if (panel.Parent == null)
+        {
+            var window = new System.Windows.Window
+            {
+                Width = 500,
+                Height = 700,
+                Left = -20_000,
+                Top = -20_000,
+                ShowInTaskbar = false,
+                WindowStyle = System.Windows.WindowStyle.None,
+                Content = panel,
+            };
+            window.Show();
+            window.UpdateLayout();
+        }
+
+        System.Windows.Controls.TabItem? tab = panel.PropertyTabs.Items
+            .OfType<System.Windows.Controls.TabItem>()
+            .FirstOrDefault(t => (t.Header as string) == header);
+        if (tab == null) return null;
+        tab.ApplyTemplate();
+        return (tab.Template?.FindName("Vector", tab) as System.Windows.Shapes.Path)?.Data;
+    }
+
+    private static string DrawnIconDetail(Views.ScenePanel panel, string header) =>
+        DrawnIcon(panel, header) == null ? $"the {header} tab's Path drew nothing" : "";
+
     private static void Pump(Func<bool> until)
     {
         DateTime end = DateTime.UtcNow.AddSeconds(10);
@@ -460,6 +494,14 @@ internal static class TuningProbes
         check("...and carries the entity-data icon rather than a bare header",
             tab != null && Views.TabIcon.GetIcon(tab) != null, "");
 
+        // Set on the tab is not the same as DRAWN on the tab: the rail's template reaches the icon through a
+        // binding path, and a path that goes nowhere fails at runtime with a logged warning and an empty
+        // Path — nothing a build would ever object to. The only way to see it is to run the template.
+        check("...and the icon reaches the rail's template rather than binding to nothing",
+            DrawnIcon(panel, "Tuning") != null, DrawnIconDetail(panel, "Tuning"));
+        check("the Prefab tab's icon is drawn too", DrawnIcon(panel, "Prefab") != null,
+            DrawnIconDetail(panel, "Prefab"));
+
         // The table picker is a strip of numbered buttons rather than a drop-down: with six tables, one
         // click each beats open-list-read-pick every time. It sits in the header card, outside any data
         // template, so it is in the logical tree whether or not the tab has ever been drawn.
@@ -468,6 +510,13 @@ internal static class TuningProbes
             strip != null && strip.ItemTemplate != null, "");
         check("...whose buttons split the width evenly, like a segmented control",
             strip?.ItemsPanel?.LoadContent() is System.Windows.Controls.Primitives.UniformGrid { Rows: 1 }, "");
+
+        // Both stand under Render rather than appearing with a selection: they describe the whole archive,
+        // not whatever happens to be clicked.
+        var top = panel.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
+            .Take(3).Select(t => t.Header as string).ToList();
+        check("Render, Tuning and Prefab are the standing tabs, in that order",
+            top is ["Render", "Tuning", "Prefab"], string.Join(" ", top));
 
         // The tab's own place on the rail. Tuning is what a car IS asked about first — how it drives — so it
         // sits above the assembly tab rather than below it.

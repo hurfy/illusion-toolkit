@@ -79,7 +79,15 @@ internal sealed class SceneTree
     {
         bool hasChildren = fn.Children.Count > 0 || fn.Skeleton != null;
         var node = new SceneNode(fn.Name, fn.Kind, hasChildren) { Category = fn.Category, Source = fn.Source };
-        if (fn.Mesh != null) { node.Pending = fn.Mesh; meshLeaves.Add(node); }
+        if (fn.Mesh != null)
+        {
+            node.Pending = fn.Mesh;
+            meshLeaves.Add(node);
+            // Some meshes are scenery for the engine rather than for the eye. Unticked here, before the node
+            // ever reaches a parent, so the holder frame's aggregate comes out right on the first pass and
+            // the mesh is never uploaded visible and then hidden a frame later.
+            if (Scene.DefaultHidden.IsEmitterShell(fn.Name)) node.IsVisible = false;
+        }
         if (fn.Skeleton is { } skeleton) node.AddChild(BuildSkeletonTree(skeleton));
         foreach (Assets.Sds.SdsFrameNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves));
         return node;

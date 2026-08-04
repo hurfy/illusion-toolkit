@@ -1,5 +1,9 @@
+<!-- The v: prefix is declared for the binding PATHS below — (v:TabIcon.Icon). WPF resolves those even without
+     it (measured: the icons draw either way), but a prefix nothing declares is one every reader and every
+     analyser has to guess at. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:v="clr-namespace:Illusion.Views">
 
     <!-- Chrome shared by every window that edits a loaded archive: the scene tree's type icons and row
          controls, the toolbar and tool-shelf buttons, the property-panel cards and inputs. It used to live in

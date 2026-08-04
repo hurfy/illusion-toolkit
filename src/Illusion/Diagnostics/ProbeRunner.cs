@@ -70,6 +70,12 @@ internal static class ProbeRunner
             case "--probe-resize":
                 ResizeProbes.RunResizeProbe();
                 return true;
+            // What a car archive holds besides the car, and what the scene opens with hidden: the emitter
+            // shells surveyed across every shipped car. Optional arg = the car.
+            // Output: %TEMP%\illusion_hidden_defaults.txt
+            case "--probe-hidden-defaults":
+                HiddenDefaultProbes.RunHiddenDefaultsProbe(args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // GPU smoke: context + renderer (compiling both shaders) + instanced draw.
             case "--probe-gpu":
                 GpuProbes.RunGpuProbe();
