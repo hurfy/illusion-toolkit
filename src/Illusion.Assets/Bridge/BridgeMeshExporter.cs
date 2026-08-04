@@ -78,25 +78,38 @@ public static class BridgeMeshExporter
         byte[] boneIndices = [];
         float[] boneWeights = [];
         string? skeletonId = null;
+        string? skinWarning = null;
         if (frame is FrameObjectModel model && decoded.BoneIndices is { } ids && decoded.BoneWeights is { } weights)
         {
-            byte[] resolved = ResolveSkin(model, decoded, ids);
-            boneIndices = new byte[welded.Positions.Length * 4];
-            boneWeights = new float[welded.Positions.Length * 4];
-            var claimed = new bool[welded.Positions.Length];
-            for (int split = 0; split < welded.SplitToWelded.Length; split++)
+            byte[]? resolved = ResolveSkin(model, decoded);
+            if (resolved == null)
             {
-                int target = welded.SplitToWelded[split];
-                if (target < 0 || target >= claimed.Length || claimed[target]) continue;
-                if (((split * 4) + 3) >= resolved.Length) continue;
-                claimed[target] = true;
-                for (int k = 0; k < 4; k++)
-                {
-                    boneIndices[(target * 4) + k] = resolved[(split * 4) + k];
-                    boneWeights[(target * 4) + k] = weights[(split * 4) + k];
-                }
+                // The archive's own skin cannot be read. Sending the raw ids instead — which is what this
+                // used to do — hands Blender vertex groups named after the WRONG bones, and every edit made
+                // through them is silently wrong. No skin is the honest answer.
+                skinWarning = "this mesh's skin cannot be resolved, so it was sent without bone weights — "
+                    + "its vertex groups would have been named after the wrong bones. "
+                    + SdsMeshLoader.DescribeBoneRemap(model);
             }
-            skeletonId = SkeletonId(model, document);
+            else
+            {
+                boneIndices = new byte[welded.Positions.Length * 4];
+                boneWeights = new float[welded.Positions.Length * 4];
+                var claimed = new bool[welded.Positions.Length];
+                for (int split = 0; split < welded.SplitToWelded.Length; split++)
+                {
+                    int target = welded.SplitToWelded[split];
+                    if (target < 0 || target >= claimed.Length || claimed[target]) continue;
+                    if (((split * 4) + 3) >= resolved.Length) continue;
+                    claimed[target] = true;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        boneIndices[(target * 4) + k] = resolved[(split * 4) + k];
+                        boneWeights[(target * 4) + k] = weights[(split * 4) + k];
+                    }
+                }
+                skeletonId = SkeletonId(model, document);
+            }
         }
 
         return new MeshObjectPayload
@@ -105,6 +118,7 @@ public static class BridgeMeshExporter
             BoneIndices = boneIndices,
             BoneWeights = boneWeights,
             SkeletonId = skeletonId,
+            SkinWarning = skinWarning,
             Name = frame.Name?.ToString() ?? "mesh",
             // The NODE's world, not the frame's: an actor-placed object is a prototype parked at the origin,
             // and its spawn matrix lives in the .act. Sending the frame's own world would drop it at (0,0,0)
@@ -172,12 +186,17 @@ public static class BridgeMeshExporter
         };
     }
 
-    /// <summary>The skinned model's bone ids resolved to its own bone list — on the wire they index a
-    /// per-LOD remap pool instead (see <c>--probe-skinning</c>). Falls back to the raw ids when the blend
-    /// info does not line up, which is the same "leave it alone" the loader does.</summary>
-    private static byte[] ResolveSkin(FrameObjectModel model, DecodedMesh decoded, byte[] raw) =>
-        SdsMeshLoader.ResolveBoneRemap(model, SdsMeshLoader.BuildParts(model, decoded.Indices.Length), decoded)
-        ?? raw;
+    /// <summary>
+    /// The skinned model's bone ids resolved to its own bone list — on the wire they index a per-LOD remap
+    /// pool instead (see <c>--probe-skinning</c>). NULL when the blend info does not line up with the mesh.
+    /// <para>
+    /// It used to fall back to the raw ids, and that fallback was a trap: pool-local ids name different bones
+    /// entirely, so Blender built its vertex groups under the wrong names and every edit made through them
+    /// was wrong with nothing to show for it. The caller sends no skin at all instead, and says why.
+    /// </para>
+    /// </summary>
+    private static byte[]? ResolveSkin(FrameObjectModel model, DecodedMesh decoded) =>
+        SdsMeshLoader.ResolveBoneRemap(model, SdsMeshLoader.BuildParts(model, decoded.Indices.Length), decoded);
 
     private static string SkeletonId(FrameObjectModel model, ISceneDocument document)
     {

@@ -344,6 +344,112 @@ internal static class BridgeSkinProbes
                     BoneIndices = moved,
                     BoneWeights = movedWeights,
                 };
+                // The same push with the weights STRIPPED — what Blender sends when it cannot find the rig,
+                // or when no vertex group is named after a bone. It applies (nothing else is wrong with it)
+                // and changes nothing, which is exactly why it has to say so: without this flag a re-weight
+                // can be pressed all day, report "nothing changed", and leave the modeller with no idea that
+                // their vertex groups never left Blender.
+                var stripped = new MeshObjectPayload
+                {
+                    Id = reweight.Id,
+                    Name = reweight.Name,
+                    World = reweight.World,
+                    Local = reweight.Local,
+                    Positions = reweight.Positions,
+                    LoopVertexIndices = reweight.LoopVertexIndices,
+                    LoopNormals = reweight.LoopNormals,
+                    LoopUvs = reweight.LoopUvs,
+                    LoopOrigIndex = reweight.LoopOrigIndex,
+                    FaceMaterials = reweight.FaceMaterials,
+                    Materials = reweight.Materials,
+                    VertexDeclaration = reweight.VertexDeclaration,
+                    DecompressionOffset = reweight.DecompressionOffset,
+                    DecompressionFactor = reweight.DecompressionFactor,
+                };
+                BridgeMeshApplier.ApplyResult? silent =
+                    BridgeMeshApplier.TryApply(model, stripped, out string? silentWhy);
+                Check("a skinned push that carries no vertex weights says so instead of going quiet",
+                    silent is { SkinNotSent: true },
+                    silent == null ? (silentWhy ?? "refused") : $"unchanged={silent.Unchanged}");
+
+                // The second push of a session, reproduced. The first one rebuilt the mesh and renumbered its
+                // vertices; Blender still holds the OLD map, so every source index now names a different
+                // vertex. The rebuild inherits bones, damage groups and raw bytes THROUGH that map, so a
+                // stale one scrambles the skin — the car reaches the game as spikes, and the next pull reads
+                // the unresolvable skin back as mislabelled vertex groups. Whatever the applier decides here,
+                // the one thing it may never do is leave behind a skin that cannot be resolved.
+                var staleFrame = (Formats.Frames.ObjectTypes.FrameObjectSingleMesh)((Assets.Adapters.FrameNodeAdapter)model).Frame;
+                int staleCount = Math.Max(1, SdsMeshLoader.DecodeLod0(staleFrame)?.NumVerts ?? 1);
+                var stale = new MeshObjectPayload
+                {
+                    Id = reweight.Id,
+                    Name = reweight.Name,
+                    World = reweight.World,
+                    Local = reweight.Local,
+                    Positions = reweight.Positions,
+                    LoopVertexIndices = reweight.LoopVertexIndices,
+                    LoopNormals = reweight.LoopNormals,
+                    LoopUvs = reweight.LoopUvs,
+                    LoopOrigIndex = [.. reweight.LoopOrigIndex.Select(o => o < 0 ? o : (o + 7) % staleCount)],
+                    FaceMaterials = reweight.FaceMaterials,
+                    Materials = reweight.Materials,
+                    VertexDeclaration = reweight.VertexDeclaration,
+                    DecompressionOffset = reweight.DecompressionOffset,
+                    DecompressionFactor = reweight.DecompressionFactor,
+                    BoneIndices = reweight.BoneIndices,
+                    BoneWeights = reweight.BoneWeights,
+                };
+                BridgeMeshApplier.ApplyResult? scrambled =
+                    BridgeMeshApplier.TryApply(model, stale, out string? scrambledWhy);
+                if (scrambled == null)
+                {
+                    Check("a push built on a stale vertex map is refused rather than applied", true,
+                        scrambledWhy ?? "");
+                }
+                else
+                {
+                    scrambled.ApplyNew();
+                    bool resolves = ((Assets.Adapters.FrameNodeAdapter)model).Frame is
+                        Formats.Frames.ObjectTypes.FrameObjectModel after
+                        && SdsMeshLoader.GlobalBoneIds(after) != null;
+                    scrambled.RestoreOriginal();
+                    Check("a push built on a stale vertex map never leaves an unresolvable skin behind",
+                        resolves, resolves ? "" : "the mesh came back with a skin the game cannot read");
+                }
+
+                // A vertex in no group at all. The toolkit used to guess one from the nearest vertex, which is
+                // a guess that looks like a working push and puts a bonnet part on a door — so it is refused
+                // now, while the modeller is still in Blender and can fix it.
+                var orphan = new MeshObjectPayload
+                {
+                    Id = reweight.Id,
+                    Name = reweight.Name,
+                    World = reweight.World,
+                    Local = reweight.Local,
+                    Positions = reweight.Positions,
+                    LoopVertexIndices = reweight.LoopVertexIndices,
+                    LoopNormals = reweight.LoopNormals,
+                    LoopUvs = reweight.LoopUvs,
+                    LoopOrigIndex = reweight.LoopOrigIndex,
+                    FaceMaterials = reweight.FaceMaterials,
+                    Materials = reweight.Materials,
+                    VertexDeclaration = reweight.VertexDeclaration,
+                    DecompressionOffset = reweight.DecompressionOffset,
+                    DecompressionFactor = reweight.DecompressionFactor,
+                    BoneIndices = reweight.BoneIndices,
+                    BoneWeights = [.. reweight.BoneWeights],
+                };
+                int firstDrawn = orphan.LoopVertexIndices.Length > 0 ? (int)orphan.LoopVertexIndices[0] : -1;
+                if (firstDrawn >= 0)
+                {
+                    for (int k = 0; k < 4; k++) orphan.BoneWeights[(firstDrawn * 4) + k] = 0f;
+                    BridgeMeshApplier.ApplyResult? refused =
+                        BridgeMeshApplier.TryApply(model, orphan, out string? refusedWhy);
+                    Check("a rigged push with a vertex in no group is refused, not guessed at",
+                        refused == null && (refusedWhy ?? "").Contains("no vertex group", StringComparison.Ordinal),
+                        refusedWhy ?? "it applied");
+                }
+
                 BridgeMeshApplier.ApplyResult? rewired =
                     BridgeMeshApplier.TryApply(model, reweight, out string? rewireWhy);
                 Check("a re-weight with no geometry change is accepted", rewired != null, rewireWhy ?? "");

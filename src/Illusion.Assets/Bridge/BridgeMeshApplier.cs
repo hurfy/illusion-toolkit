@@ -78,6 +78,20 @@ public static class BridgeMeshApplier
         /// <summary>The push was byte-identical — nothing to mutate, ack as applied.</summary>
         public bool Unchanged { get; internal set; }
 
+        /// <summary>
+        /// The mesh is SKINNED and the push carried no vertex weights at all — so every vertex group in
+        /// Blender was ignored, whether it changed or not.
+        ///
+        /// <para>
+        /// This is the failure that has no symptom of its own: re-weighting a vertex changes nothing in the
+        /// file, so the push reports "nothing changed" and stays silent, and geometry with no group of its
+        /// own quietly keeps the skin of whatever vertex was nearest — which is how a part modelled on the
+        /// bonnet ends up riding a door. The addon only sends weights when it can find the rig and the
+        /// groups are named after its bones; when it cannot, it says nothing, so this has to.
+        /// </para>
+        /// </summary>
+        public bool SkinNotSent { get; internal set; }
+
         /// <summary>The push changed the mesh's topology — the whole LOD0 was rebuilt (lower LODs
         /// and collision keep their old shape until their own pipelines exist).</summary>
         public bool TopologyRebuilt => Rebuild != null;
@@ -129,12 +143,74 @@ public static class BridgeMeshApplier
     /// (unsupported object, malformed payload, an edge the rebuild does not cover yet).</summary>
     public static ApplyResult? TryApply(IFrameNode node, MeshObjectPayload payload, out string? skipReason)
     {
+        if (UngroupedVertices(node, payload) is var stray and > 0)
+        {
+            skipReason = $"{stray} vertices are in no vertex group. On a rigged model every vertex has to "
+                + "name the bone it belongs to; one that names none is guessed at from whatever vertex "
+                + "happens to be nearest, which is how a part modelled on the bonnet ends up riding a door. "
+                + "Assign them to a group named after a bone and push again.";
+            return null;
+        }
+
         ApplyResult? result = TryApplyCountPreserving(node, payload, out skipReason);
         if (result != null) return result;
-        if (skipReason == null || !skipReason.StartsWith("topology changed", StringComparison.Ordinal))
-            return null;
+        if (skipReason == null || !NeedsRebuild(skipReason)) return null;
         return TryApplyRebuild(node, payload, out skipReason);
     }
+
+    /// <summary>
+    /// Whether a failed fast path is one the REBUILD can still answer. Two reasons mean the same thing here:
+    /// the mesh in Blender no longer lines up with the one in the archive, vertex for vertex.
+    /// <para>
+    /// "Topology changed" is the obvious case — geometry added or removed. An out-of-range source index is
+    /// the STALE case, and it used to be fatal: a push that rebuilt the archive's mesh left the Blender scene
+    /// still carrying the OLD <c>_orig_index</c> mapping, and since a rebuild usually ends up with fewer split
+    /// vertices than it started with, the very next push pointed past the end and was refused outright. From
+    /// the user's side that is "I move a vertex, or take one out of a group, press push, and nothing happens"
+    /// — with no way to tell that the scene had gone stale. The rebuild derives everything from the payload
+    /// and needs no mapping at all, so it is exactly the right answer to a mapping that has expired.
+    /// </para>
+    /// </summary>
+    /// <summary>
+    /// How many of a rigged mesh's DRAWN vertices carry no bone influence at all.
+    ///
+    /// <para>
+    /// Zero for anything that is not a skinned model, and zero when the push carried no weights at all —
+    /// that is a different fault with its own report (<see cref="ApplyResult.SkinNotSent"/>), and treating it
+    /// as "every vertex is ungrouped" would refuse a push nobody could fix from inside Blender.
+    /// </para>
+    /// <para>
+    /// Only vertices something actually draws are counted: a Blender scene accumulates loose vertices that no
+    /// face uses, and refusing a push over geometry that is not even in the mesh would be the toolkit being
+    /// pedantic about nothing.
+    /// </para>
+    /// </summary>
+    private static int UngroupedVertices(IFrameNode node, MeshObjectPayload payload)
+    {
+        if (node is not FrameNodeAdapter { Frame: FrameObjectModel }) return 0;
+        float[] weights = payload.BoneWeights;
+        if (weights.Length < payload.Positions.Length * 4) return 0;
+
+        var drawn = new bool[payload.Positions.Length];
+        foreach (uint index in payload.LoopVertexIndices)
+        {
+            if (index < drawn.Length) drawn[index] = true;
+        }
+
+        int stray = 0;
+        for (int v = 0; v < payload.Positions.Length; v++)
+        {
+            if (!drawn[v]) continue;
+            float total = weights[(v * 4) + 0] + weights[(v * 4) + 1]
+                + weights[(v * 4) + 2] + weights[(v * 4) + 3];
+            if (total <= 0f) stray++;
+        }
+        return stray;
+    }
+
+    private static bool NeedsRebuild(string reason) =>
+        reason.StartsWith("topology changed", StringComparison.Ordinal)
+        || reason.Contains("source vertex index out of range", StringComparison.Ordinal);
 
     /// <summary>Computes the count-preserving application of <paramref name="payload"/> to
     /// <paramref name="node"/>'s mesh. Null with a reason when it cannot apply (topology changed,
@@ -215,6 +291,9 @@ public static class BridgeMeshApplier
         // vertex groups on this path would leave the same silence that made a hood panel ride the door.
         int fromBlender = 0;
         byte[]? reweighted = null;
+        bool skinExpected = frame is FrameObjectModel && decoded.Declaration.HasFlag(VertexFlags.Skin);
+        bool skinSent = payload.BoneIndices.Length >= payload.Positions.Length * 4
+            && payload.BoneWeights.Length >= payload.Positions.Length * 4;
         if (frame is FrameObjectModel weighted
             && decoded.Declaration.HasFlag(VertexFlags.Skin)
             && payload.BoneIndices is { } pushedIds && payload.BoneWeights is { } pushedWeights
@@ -270,7 +349,14 @@ public static class BridgeMeshApplier
 
         if (touchedCount == 0)
         {
-            return new ApplyResult { Unchanged = true, TouchedVertices = 0 };
+            // "Nothing changed" and "the vertex groups never arrived" look identical from here, and the
+            // second one is the whole reason a re-weight can be pressed all day with no effect. Say which.
+            return new ApplyResult
+            {
+                Unchanged = true,
+                TouchedVertices = 0,
+                SkinNotSent = skinExpected && !skinSent,
+            };
         }
 
         // Quantization range: a touched vertex may have left the old AABB → recompute offset/factor
@@ -334,6 +420,7 @@ public static class BridgeMeshApplier
             NewDecompressionFactor = newFactor,
             TouchedVertices = touchedCount,
             SkinFromBlender = fromBlender,
+            SkinNotSent = skinExpected && !skinSent,
             Requantized = requantize,
         };
 
@@ -770,6 +857,7 @@ public static class BridgeMeshApplier
             NewDecompressionFactor = newFactor,
             TouchedVertices = touched,
             SkinFromBlender = fromBlender,
+            SkinNotSent = isSkinned && rigBones > 0 && !pushedSkin,
             Requantized = requantize,
             Rebuild = new RebuildData
             {
@@ -1244,6 +1332,30 @@ public static class BridgeMeshApplier
                     return false;
                 }
                 vertices[v].BoneIDs[k] = local;
+            }
+        }
+
+        // Read back what was just written, the way the GAME reads it: pool start + the vertex's own id must
+        // land on the global bone that vertex was meant to have.
+        //
+        // Nothing above proves that. Every step here is locally sensible and the composition can still come
+        // out unreadable — and when it does there is no error anywhere: the car is packed, the game resolves
+        // the ids against a table that no longer answers for them, and the body tears into spikes. Worse, the
+        // next PULL sees the same unresolvable skin and falls back to the raw pool-local ids, so the vertex
+        // groups in Blender come back mislabelled and every later push builds on the wrong names. Refusing is
+        // the only outcome that leaves the archive as good as it was.
+        for (int v = 0; v < vertices.Length; v++)
+        {
+            int pool = poolOfVertex[v];
+            if (pool < 0) continue;
+            for (int k = 0; k < 4; k++)
+            {
+                if (vertices[v].BoneWeights[k] <= 0f) continue;
+                int slot = poolStart[pool] + vertices[v].BoneIDs[k];
+                if (slot < remap.Length && remap[slot] == globalOf[(v * 4) + k]) continue;
+                reason = "the rebuilt skin does not read back — a vertex's bone id resolves to the wrong "
+                    + "bone through its own remap pool. Nothing was written; the mesh is as it was.";
+                return false;
             }
         }
 

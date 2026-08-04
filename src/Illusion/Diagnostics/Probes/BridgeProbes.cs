@@ -1322,6 +1322,23 @@ internal static class BridgeProbes
                         && frame.GetVertexBuffer(0)!.Data.AsSpan().SequenceEqual(oldVertexBytes));
                 }
 
+                // Scenario 1b: a STALE scene. An earlier push rebuilt the archive's mesh, so the mapping
+                // Blender still holds points past the end of it. This used to be refused outright — the user
+                // moved a vertex, pressed push, and nothing happened, with nothing to say why.
+                MeshObjectPayload? stale = BridgeMeshExporter.TryExport(fn, document, out _);
+                if (stale != null)
+                {
+                    int beyond = SdsMeshLoader.DecodeLod0(frame)?.NumVerts ?? 0;
+                    stale.LoopOrigIndex = [.. stale.LoopOrigIndex.Select(o => o + beyond)];
+                    var staleResult = BridgeMeshApplier.TryApply(fn, stale, out string? staleReason);
+                    Check($"{label}: a stale source mapping rebuilds instead of being refused",
+                        staleResult is { TopologyRebuilt: true }, staleReason ?? "");
+                    staleResult?.RestoreOriginal();
+                    Check($"{label}: …and taking it back leaves the mesh exactly as it was",
+                        ReferenceEquals(frame.Geometry.LOD[0], oldLodRef)
+                        && frame.GetVertexBuffer(0)!.Data.AsSpan().SequenceEqual(oldVertexBytes));
+                }
+
                 // Scenario 2: subdivide the FIRST face with a centroid vertex (origIndex −1 corners).
                 MeshObjectPayload? sub = BridgeMeshExporter.TryExport(fn, document, out _);
                 if (sub == null) continue;

@@ -62,9 +62,15 @@ class ILLUSION_PT_bridge(bpy.types.Panel):
         layout.operator(ILLUSION_OT_push.bl_idname, icon='EXPORT')
         layout.prop(context.window_manager, "illusion_auto_push")
 
+        # The push result, as one coloured line. Green with a tick when the toolkit took it, red with a
+        # short reason when it did not — pushing and being unable to tell which happened is the thing this
+        # strip exists to prevent.
         last_ack = server.state.get("last_push_ack")
         if last_ack:
-            layout.label(text=last_ack, icon='INFO')
+            ok = server.state.get("last_push_ok", True)
+            row = layout.row()
+            row.alert = not ok
+            row.label(text=last_ack, icon='CHECKMARK' if ok else 'ERROR')
 
 
 _CLASSES = (ILLUSION_OT_push, ILLUSION_PT_bridge)

@@ -78,12 +78,18 @@ def _dispatch(client, msg):
         applied = len(msg.get("applied") or [])
         skipped = msg.get("skipped") or []
         errors = msg.get("errors") or []
-        summary = f"Applied {applied}"
-        if skipped:
-            summary += f", skipped {len(skipped)}"
-        if errors:
-            summary += f", errors {len(errors)}"
+        # One line, and its COLOUR is the message: green means the toolkit took it, red means it did not.
+        # The full reason goes to the log; the panel is a strip a few centimetres wide, and a paragraph in
+        # it reads as noise on every push including the ones that worked.
+        ok = not skipped and not errors
+        if ok:
+            summary = f"Pushed {applied} object(s)" if applied else "Nothing to push"
+        else:
+            first = errors[0] if errors else (skipped[0].get("reason") or "refused")
+            summary = _shorten(str(first))
         server.state["last_push_ack"] = summary
+        server.state["last_push_ok"] = ok
+        _tag_redraw()
         for skip in skipped:
             server.log(f"push skipped {skip.get('id', '?')}: {skip.get('reason', '')}")
         for error in errors:
@@ -93,6 +99,28 @@ def _dispatch(client, msg):
     else:
         server.send(protocol.make(
             protocol.ERROR, message=f"unknown message type '{mtype}'", fatal=False), client)
+
+
+def _shorten(text, limit=64):
+    """One short line for the panel — the whole reason is in the log."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0]
+    return (cut or text[:limit]) + "..."
+
+
+def _tag_redraw():
+    """Repaint the sidebar. A panel only redraws when Blender feels like it, so a status written on an
+    incoming message would otherwise sit invisible until the mouse happened to move over the strip —
+    which reads exactly like the push having done nothing."""
+    try:
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+    except AttributeError:
+        pass  # no window manager yet (headless / during load)
 
 
 def _handle_hello(client, msg):

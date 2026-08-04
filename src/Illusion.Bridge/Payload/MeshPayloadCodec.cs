@@ -65,6 +65,19 @@ public sealed class MeshObjectPayload
     /// <summary>Weights parallel to <see cref="BoneIndices"/>; they sum to one per vertex.</summary>
     public float[] BoneWeights { get; set; } = Array.Empty<float>();
 
+    /// <summary>
+    /// Why a skinned mesh was sent WITHOUT its skin, or null when nothing is wrong. Never serialized — it is
+    /// the toolkit telling itself something on the way out.
+    /// <para>
+    /// The alternative used to be sending the bone ids as they sit in the vertex buffer, which are pool-local
+    /// and name entirely different bones. Blender then built vertex groups named after the wrong bones, and
+    /// every edit made through them was wrong in a way nothing could see: a group labelled "bumper" selecting
+    /// a window. Sending no skin at all is worse to work with and honest, which is the trade this field
+    /// exists to make.
+    /// </para>
+    /// </summary>
+    public string? SkinWarning { get; set; }
+
     /// <summary>Id of the kind="skeleton" object this mesh is skinned to; null when it has no skin.</summary>
     public string? SkeletonId { get; set; }
 }

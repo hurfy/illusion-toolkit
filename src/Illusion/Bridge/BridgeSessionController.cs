@@ -45,6 +45,13 @@ internal sealed class BridgeSessionController : IDisposable
     private readonly D3DImageHost _host;
     private readonly Dictionary<string, SceneNode> _exported = new();
     private readonly HashSet<ISceneDocument> _topologyWarned = new();
+
+    /// <summary>
+    /// Objects whose mesh this session has rebuilt, by payload id — so the map Blender still holds between
+    /// its corners and the archive's vertices is known to be out of date. Cleared for an object the moment it
+    /// is exported to Blender again, which is when the two are back in step.
+    /// </summary>
+    private readonly HashSet<string> _rebuiltThisSession = new(StringComparer.Ordinal);
     private BridgeClient? _client;
     private Process? _blender;
     private int _loadCounter;
@@ -338,6 +345,15 @@ internal sealed class BridgeSessionController : IDisposable
                     continue;
                 }
 
+                // Blender is being handed the mesh as it stands now, so whatever it held before is replaced
+                // and the two are back in step — this object's map can be trusted again.
+                _rebuiltThisSession.Remove(payload.Id);
+
+                // A skinned mesh going out WITHOUT its skin. Silence here is what let a broken archive spread:
+                // Blender shows vertex groups either way, and there is no way to tell from inside it whether
+                // they mean anything.
+                if (payload.SkinWarning != null) skips.Add(request.Leaf.Name + " — " + payload.SkinWarning);
+
                 // A skinned model's rig travels with it, once per model — the mesh points at it by id.
                 // Without it Blender gets a car as one solid body, which is exactly what it is not.
                 if (payload.SkeletonId != null && rigs.Add(payload.SkeletonId)
@@ -582,6 +598,7 @@ internal sealed class BridgeSessionController : IDisposable
             int touchedTotal = 0;
             int collisionSeen = 0, collisionMoved = 0;
             var notesEarly = new List<string>();
+            var skinNotSent = new List<string>();
             var sharedMeshNotes = new List<string>();
             var editedBuffers = new List<(string Name, ulong Hash, string Archive)>();
             var geometry = new List<GeometryEditController.GeometryItem>();
@@ -652,6 +669,19 @@ internal sealed class BridgeSessionController : IDisposable
                         continue;
                     }
 
+                    // A mesh this session has already REBUILT no longer matches the numbering Blender was
+                    // given. Blender's per-corner source indices are the map between the two, and a rebuild
+                    // renumbers every vertex — so the map is now a lie that still looks valid: the indices
+                    // are in range and the face set matches (the archive holds exactly what Blender sent
+                    // last time), so the fast path accepts it and writes positions and weights into the
+                    // WRONG slots. That is the second push in a session tearing a car apart while the first
+                    // one worked. Blanking the map forces the rebuild, which needs no map at all.
+                    if (_rebuiltThisSession.Contains(payload.Id) && payload.LoopOrigIndex.Length > 0)
+                    {
+                        payload.LoopOrigIndex = new int[payload.LoopOrigIndex.Length];
+                        Array.Fill(payload.LoopOrigIndex, -1);
+                    }
+
                     BridgeMeshApplier.ApplyResult? result =
                         BridgeMeshApplier.TryApply(fn, payload, out string? reason);
                     if (result == null)
@@ -659,11 +689,23 @@ internal sealed class BridgeSessionController : IDisposable
                         ack.Skipped.Add(new PushSkip { Id = payload.Id, Reason = reason ?? "not applicable" });
                         continue;
                     }
+                    // A skinned mesh whose push carried no weights at all: every vertex group in Blender was
+                    // ignored. It has no symptom of its own — re-weighting changes no bytes, so the push
+                    // reports "nothing changed" and says nothing — and new geometry silently keeps the skin
+                    // of whatever vertex was nearest, which is how a part modelled on the bonnet ends up
+                    // riding a door.
+                    if (result.SkinNotSent) skinNotSent.Add(payload.Name);
+
+                    // From here on this object's mesh no longer has the numbering Blender was given.
+                    if (result.TopologyRebuilt) _rebuiltThisSession.Add(payload.Id);
+
                     if (result.TopologyRebuilt && FindDocument(node) is { } doc
                         && _host.Dispatcher.Invoke(() => _topologyWarned.Add(doc)))
                     {
                         notesEarly.Add("topology rebuilt — lower LODs and collision keep the OLD shape "
-                            + "(the object may pop or collide as before at distance)");
+                            + "(the object may pop or collide as before at distance). Press Tab again to "
+                            + "re-pull before the next edit: the scene in Blender still maps onto the mesh "
+                            + "as it was, and every push from here on has to rebuild.");
                     }
 
                     if (!result.Unchanged)
@@ -892,6 +934,13 @@ internal sealed class BridgeSessionController : IDisposable
             });
 
             var notes = new List<string>(notesEarly);
+            if (skinNotSent.Count > 0)
+            {
+                notes.Add($"{string.Join(", ", skinNotSent.Take(3))}: no vertex weights came back — every "
+                    + "vertex group was ignored, and geometry with no group keeps the skin of the nearest "
+                    + "old vertex. Blender only sends them when the mesh is PARENTED to the rig (or carries "
+                    + "its Armature modifier) and each group is named exactly after a bone.");
+            }
             // Every hull now reports its own outcome (a reshape is detected per object and skipped by name),
             // so the batch-level guess this used to make — "hulls came back and none moved, so someone
             // probably edited a shape" — is gone. It was wrong in both directions: it fired when a modder
@@ -920,14 +969,14 @@ internal sealed class BridgeSessionController : IDisposable
             if (ack.Skipped.Count > 0)
                 notes.AddRange(ack.Skipped.Take(4).Select(s => $"{ShortId(s.Id)} — {s.Reason}"));
 
-            // A clean apply is silent — the viewport updating IS the feedback (like Save). Only
-            // partial outcomes need words.
-            if (notes.Count > 0)
-            {
-                Notice?.Invoke($"Blender push: {ack.Applied.Count} object(s) applied"
-                    + (touchedTotal > 0 ? $", {touchedTotal} vertices changed" : "")
-                    + ".\n" + string.Join("\n", notes), false);
-            }
+            // Every push says something now. A clean apply used to be silent on the theory that the viewport
+            // updating IS the feedback — but a re-weight changes no pixels, and a push that was refused
+            // changes none either, so "nothing happened on screen" covered success and failure alike and the
+            // two were indistinguishable. One line either way, and the failures carry their reason.
+            bool refused = ack.Skipped.Count > 0 || ack.Errors.Count > 0;
+            Notice?.Invoke($"Blender push: {ack.Applied.Count} object(s) applied"
+                + (touchedTotal > 0 ? $", {touchedTotal} vertices changed" : "")
+                + "." + (notes.Count > 0 ? "\n" + string.Join("\n", notes) : ""), refused);
 
             WarnAboutOtherArchives(editedBuffers);
         }

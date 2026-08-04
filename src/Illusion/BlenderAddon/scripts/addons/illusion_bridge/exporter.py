@@ -207,6 +207,23 @@ def _export_armature(obj, blocks):
     }
 
 
+def _find_armature(obj):
+    """The rig this mesh is skinned to, however it is attached.
+
+    The importer sets BOTH links — it parents the mesh to the armature and gives it an Armature modifier —
+    but only one of them survives everything a modeller does. Joining, duplicating or re-linking an object
+    can drop the parent while the modifier stays. Looking only at the parent meant the weights were silently
+    not exported, which has no symptom of its own: the toolkit reports "nothing changed" and new geometry
+    keeps the skin of whatever vertex was nearest.
+    """
+    if obj.parent is not None and obj.parent.type == 'ARMATURE':
+        return obj.parent
+    for modifier in obj.modifiers:
+        if modifier.type == 'ARMATURE' and modifier.object is not None:
+            return modifier.object
+    return None
+
+
 def _export_skin(obj, me, n_verts, blocks, arrays):
     """Send the vertex groups home as bone influences, four per vertex.
 
@@ -219,7 +236,7 @@ def _export_skin(obj, me, n_verts, blocks, arrays):
     Silent no-op for a mesh with no rig, and for any vertex in no group at all — the toolkit falls back to
     what it already knows for those, which is better than an empty skin.
     """
-    armature = obj.parent if obj.parent is not None and obj.parent.type == 'ARMATURE' else None
+    armature = _find_armature(obj)
     if armature is None or not obj.vertex_groups:
         return
     try:
