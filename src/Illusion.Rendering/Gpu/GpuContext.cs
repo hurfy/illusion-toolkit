@@ -87,6 +87,54 @@ public sealed unsafe class GpuContext : IDisposable
         if (hr < 0) SilkMarshal.ThrowHResult(hr);                   // a real failure (not S_FALSE) — surface it
     }
 
+    /// <summary>
+    /// Lets go of whatever render target is bound and pushes the release through to the driver.
+    ///
+    /// <para>
+    /// The output-merger stage holds a reference to the target it last drew into, so a surface released while
+    /// still bound is a surface something is still pointing at. Called before one is discarded — for
+    /// correctness, not for memory: measurement (<c>--probe-resize</c>) says unbinding first makes no
+    /// difference at all to how much video memory a drag holds. That is decided by how many surfaces get
+    /// built, and the driver returns none of them until well after the drag is over.
+    /// </para>
+    /// </summary>
+    public void UnbindRenderTargets()
+    {
+        Context11.OMSetRenderTargets(0, (ID3D11RenderTargetView**)null, (ID3D11DepthStencilView*)null);
+        Context11.Flush();
+    }
+
+    /// <summary>
+    /// Video memory this process currently occupies, in bytes — 0 when the adapter will not say (the query
+    /// is DXGI 1.4). Diagnostics only: it is what tells a probe whether discarded surfaces were really freed.
+    /// </summary>
+    public long VideoMemoryUsed()
+    {
+        try
+        {
+            using ComPtr<IDXGIDevice> dxgiDevice = Device11.QueryInterface<IDXGIDevice>();
+            var adapter = default(ComPtr<IDXGIAdapter>);
+            try
+            {
+                if (dxgiDevice.Handle == null || dxgiDevice.GetAdapter(ref adapter) < 0) return 0;
+                using ComPtr<IDXGIAdapter3> adapter3 = adapter.QueryInterface<IDXGIAdapter3>();
+                if (adapter3.Handle == null) return 0;
+
+                QueryVideoMemoryInfo info = default;
+                if (adapter3.QueryVideoMemoryInfo(0, MemorySegmentGroup.Local, ref info) < 0) return 0;
+                return (long)info.CurrentUsage;
+            }
+            finally
+            {
+                adapter.Dispose();
+            }
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private void CreateD3D11()
     {
         // BgraSupport is mandatory: D3DImage works with BGRA surfaces.

@@ -64,6 +64,12 @@ internal static class ProbeRunner
             case "--probe-packperf":
                 PackPerfProbes.RunPackPerfProbe(args.Length >= 2 ? args[1] : null);
                 return true;
+            // What a splitter drag costs the GPU: the price of one surface rebuild, whether a drag's worth of
+            // discarded surfaces is really freed, and how many of the hundreds of size requests reach the
+            // driver through ViewportSurface. Output: %TEMP%\illusion_resize.txt
+            case "--probe-resize":
+                ResizeProbes.RunResizeProbe();
+                return true;
             // GPU smoke: context + renderer (compiling both shaders) + instanced draw.
             case "--probe-gpu":
                 GpuProbes.RunGpuProbe();

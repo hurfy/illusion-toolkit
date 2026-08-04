@@ -28,7 +28,7 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 {
     private readonly D3DImage _image = new();
     private GpuContext? _gpu;
-    private SharedRenderTarget? _target;
+    private ViewportSurface? _surface;
     private bool _initialized;
 
     /// <summary>The render pipeline ("scene"). Created on load; geometry is added by the subclass/caller, never here.</summary>
@@ -245,6 +245,7 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         _initialized = true;
 
         _gpu = new GpuContext();
+        _surface = new ViewportSurface(_gpu);
         Renderer = new SceneRenderer(_gpu)
         {
             Mode = _renderMode,
@@ -253,7 +254,8 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
             LightDirection = _lightDirection,
         };
         if (_pendingSkyPath != null) Renderer.LoadSky(_pendingSkyPath);
-        Resize();
+        RequestSurfaceSize();
+        _surface.Commit(SetBackBuffer);   // the first surface is wanted now, not one frame from now
         OnSceneInitialized();   // subclass hook: environment / content init (the renderer now exists)
 
         if (Window.GetWindow(this) is { } host) AttachKeyTracking(host);
@@ -271,45 +273,59 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
     private void OnFrontBufferChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (_image.IsFrontBufferAvailable) Resize(force: true);
+        // The front buffer comes back after a lock screen, a remote-desktop session or a driver reset — with
+        // no surface attached. Rebuild on the next frame even though the size never changed.
+        if (_image.IsFrontBufferAvailable) _surface?.Invalidate();
     }
 
     protected override void OnRenderSizeChanged(SizeChangedInfo info)
     {
         base.OnRenderSizeChanged(info);
-        Resize();
+        RequestSurfaceSize();
     }
 
     protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
     {
         base.OnDpiChanged(oldDpi, newDpi);
-        Resize(force: true);
+        RequestSurfaceSize();
     }
 
-    private void Resize(bool force = false)
+    /// <summary>
+    /// Tells the surface what size the control now is — and nothing more. Dragging a panel edge raises a size
+    /// change per mouse report, so this runs hundreds of times a second; building a surface here is what made
+    /// a drag stall the viewport and then run it out of video memory. The frame loop does the building.
+    /// </summary>
+    private void RequestSurfaceSize()
     {
-        if (_gpu == null) return;
+        if (_surface == null) return;
         // Size the D3D surface in device pixels, not DIPs — ActualWidth/Height are device-independent, and
         // a 96-DPI-sized surface on a 125%/150% display is upscaled by WPF into a visibly blurry viewport.
         // The D3DImage itself stays at its default 96 DPI, so its intrinsic size (in DIPs) equals the surface
         // pixel size; Stretch.Fill maps it back onto the control's DIP bounds and the two transforms cancel
         // into a 1:1 physical-pixel mapping. Picking is unaffected — it uses DIP coordinates on both sides.
         DpiScale dpi = VisualTreeHelper.GetDpi(this);
-        int w = Math.Max(1, (int)Math.Round(ActualWidth * dpi.DpiScaleX));
-        int h = Math.Max(1, (int)Math.Round(ActualHeight * dpi.DpiScaleY));
-        if (!force && _target != null && _target.Width == w && _target.Height == h) return;
+        _surface.Request(
+            (int)Math.Round(ActualWidth * dpi.DpiScaleX),
+            (int)Math.Round(ActualHeight * dpi.DpiScaleY));
+    }
 
-        _target?.Dispose();
-        _target = new SharedRenderTarget(_gpu, w, h);
+    /// <summary>How many surfaces this viewport has built. Diagnostics: it is what a resize is judged by.</summary>
+    public int SurfaceRebuilds => _surface?.Allocations ?? 0;
 
+    private void SetBackBuffer(nint surface)
+    {
         _image.Lock();
-        _image.SetBackBuffer(D3DResourceType.IDirect3DSurface9, _target.SurfacePointer);
+        _image.SetBackBuffer(D3DResourceType.IDirect3DSurface9, surface);
         _image.Unlock();
     }
 
     private void OnRendering(object? sender, EventArgs e)
     {
-        if (Renderer == null || _target == null || !_image.IsFrontBufferAvailable) return;
+        if (Renderer == null || _surface == null || !_image.IsFrontBufferAvailable) return;
+
+        // Catch the surface up with the size layout last asked for — once per frame, whatever the drag did.
+        _surface.Commit(SetBackBuffer);
+        if (_surface.Target is not { } target) return;   // nothing to draw into; try again next frame
 
         double now = _clock.Elapsed.TotalSeconds;
         float dt = (float)Math.Min(0.1, now - _lastSeconds);
@@ -325,8 +341,8 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         _image.Lock();
         try
         {
-            Renderer.Render(_target);
-            _image.AddDirtyRect(new Int32Rect(0, 0, _target.Width, _target.Height));
+            Renderer.Render(target);
+            _image.AddDirtyRect(new Int32Rect(0, 0, target.Width, target.Height));
         }
         finally
         {
@@ -664,15 +680,15 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         }
         _keys.Clear(); // stale key state must not survive an Unloaded→Loaded (tab switch) cycle
         SceneRenderer? renderer = Renderer;
-        SharedRenderTarget? target = _target;
+        ViewportSurface? surface = _surface;
         GpuContext? gpu = _gpu;
         Renderer = null;
-        _target = null;
+        _surface = null;
         _gpu = null;
         return () =>
         {
             renderer?.Dispose();
-            target?.Dispose();
+            surface?.Dispose();
             gpu?.Dispose();
         };
     }
