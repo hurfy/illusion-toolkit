@@ -46,13 +46,26 @@ public sealed class DetachedFrames
     /// <summary>Builds the detachment for the given subtree frames of <paramref name="document"/>.
     /// Null when the document is not a frame document or the list carries no vendor frames — the caller
     /// falls back to a tree-only removal rather than failing the delete.</summary>
-    public static DetachedFrames? Capture(ISceneDocument document, IReadOnlyList<IFrameNode> frames)
+    /// <param name="extractedFolder">Where this archive's working copy lives — the prefab a deleted collision
+    /// stub has to be taken out of. Derived from the archive when omitted; the regression harness passes a
+    /// scratch copy so it never writes into the player's install.</param>
+    public static DetachedFrames? Capture(
+        ISceneDocument document, IReadOnlyList<IFrameNode> frames, string? extractedFolder = null)
     {
         if (document is not SceneDocumentAdapter adapter) return null;
         var set = new HashSet<FrameObjectBase>();
         foreach (IFrameNode f in frames)
             if (f is FrameNodeAdapter fna) set.Add(fna.Frame);
-        return set.Count == 0 ? null : new DetachedFrames(adapter.Frame, set);
+        if (set.Count == 0) return null;
+
+        // Where this archive's prefab lives, so a deleted collision stub can take its volume with it.
+        string? folder = extractedFolder;
+        if (folder == null)
+        {
+            try { folder = MafiaEnvironment.ExtractedDir(adapter.SourceArchive); }
+            catch (Exception) { /* not a game archive — then there is no prefab to touch either */ }
+        }
+        return new DetachedFrames(adapter.Frame, set) { _extracted = folder };
     }
 
     /// <summary>Removes the frames from the resource (initial apply and redo).</summary>
@@ -88,8 +101,72 @@ public sealed class DetachedFrames
                     CaptureLink(scene.Children, frame, insideSet: false);
         }
 
+        // A frame hung off a BONE is held by one more list nobody else captures: the skinned model's
+        // attachment table. Leaving it there is not cosmetic — on save the writer resolves each entry with
+        //     AttachmentIndex = offsets[6] + _frameObjects.IndexOfValue(attachment.Attachment.RefID)
+        // and a frame that is no longer in FrameObjects makes IndexOfValue return -1, so the archive is
+        // written with an index pointing one slot BEFORE the frame-object block. The game follows it and
+        // crashes on load. This bites every attached frame — a door handle, a lock, a Dummy, a collision
+        // stub — not just the one that found it.
+        _attachments.Clear();
+        foreach (FrameObjectModel model in _resource.FrameObjects.Values.OfType<FrameObjectModel>())
+        {
+            if (_set.Contains(model)) continue;   // the whole model is going; its table goes with it
+            FrameObjectModel.AttachmentReference[] references = model.AttachmentReferences ?? [];
+            for (int i = 0; i < references.Length; i++)
+            {
+                if (references[i].Attachment is not { } held || !_set.Contains(held)) continue;
+                _attachments.Add(new DetachedAttachment(model, i, references[i]));
+            }
+        }
+        foreach (DetachedAttachment detached in _attachments)
+        {
+            detached.Model.DetachFromJoints(detached.Reference.Attachment!);
+        }
+
+        DetachCollisionVolumes();
+
         foreach (FrameObjectBase frame in _set)
             _resource.FrameObjects.Remove(frame.RefID);
+    }
+
+    /// <summary>An attachment slot a delete took away, and everything needed to put it back.</summary>
+    private sealed record DetachedAttachment(
+        FrameObjectModel Model, int Index, FrameObjectModel.AttachmentReference Reference);
+
+    private readonly List<DetachedAttachment> _attachments = new();
+
+    /// <summary>This archive's extracted folder, or null when it has none — where the car prefab lives.</summary>
+    private string? _extracted;
+
+    /// <summary>Collision volumes that went with a deleted stub, for undo.</summary>
+    private readonly List<Collisions.CarPhysicsVolumes.VolumeChange> _volumes = new();
+
+    /// <summary>
+    /// Takes the collision a deleted stub places away with it. A stub is only half of a car's collision —
+    /// the prefab volume is the half the game reads — so removing the frame alone leaves a car that still
+    /// collides exactly as before while the editor shows nothing there.
+    /// </summary>
+    private void DetachCollisionVolumes()
+    {
+        _volumes.Clear();
+        if (_extracted == null) return;
+        foreach (FrameObjectCollision stub in _set.OfType<FrameObjectCollision>())
+        {
+            if (Collisions.CarPhysicsVolumes.TakeForStub(_extracted, stub) is { } removed)
+            {
+                _volumes.Add(removed);
+            }
+        }
+    }
+
+    private void ReattachCollisionVolumes()
+    {
+        foreach (Collisions.CarPhysicsVolumes.VolumeChange removed in _volumes)
+        {
+            Collisions.CarPhysicsVolumes.Restore(removed);
+        }
+        _volumes.Clear();
     }
 
     // Records the frame's slot in a holder list and removes it — but only for holders outside the detached
@@ -132,6 +209,26 @@ public sealed class DetachedFrames
         foreach (ExternalLink link in _links.OrderBy(l => l.Index))
             link.Holder.Insert(Math.Min(link.Index, link.Holder.Count), link.Frame);
         _links.Clear();
+
+        // The bone attachments, back in the slot they were taken from — ascending, so several attachments on
+        // one model land in their original order rather than reversed.
+        foreach (DetachedAttachment detached in _attachments.OrderBy(a => a.Index))
+        {
+            if (detached.Reference.Attachment is not { } frame) continue;
+            // AttachToJoint sets BOTH halves — the model's list and the frame's own link back to the joint —
+            // and appends. Moving the new entry to the slot it came from is what keeps an undone delete
+            // byte-faithful; the stored index itself is recomputed at save time either way.
+            detached.Model.AttachToJoint(frame, detached.Reference.JointIndex);
+            var references = new List<FrameObjectModel.AttachmentReference>(
+                detached.Model.AttachmentReferences ?? []);
+            if (references.Count == 0) continue;
+            FrameObjectModel.AttachmentReference appended = references[^1];
+            references.RemoveAt(references.Count - 1);
+            references.Insert(Math.Min(detached.Index, references.Count), appended);
+            detached.Model.AttachmentReferences = [.. references];
+        }
+        _attachments.Clear();
+        ReattachCollisionVolumes();
     }
 
     // Rebuilds a block dictionary in its pre-delete key order (entries born later keep their place at the
