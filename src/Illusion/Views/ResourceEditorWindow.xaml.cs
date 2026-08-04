@@ -67,9 +67,6 @@ public partial class ResourceEditorWindow : Window
         // Names the helper glyph under the cursor — the glyphs themselves carry no text.
         GlyphLabel.Attach(Stage);
 
-        // The layers list is a look, not a decision: hovering the button is enough to open it — same as the
-        // map editor, because where you switch what the viewport draws must not depend on the window.
-        HoverPopup.Attach(LayersBtn, LayersPopup);
         Stage.BridgeStateChanged += () => Dispatcher.BeginInvoke(UpdateBridgeUi);
         Stage.SelectionChanged += UpdateBridgeUi;
         UpdateBridgeUi();
@@ -212,6 +209,24 @@ public partial class ResourceEditorWindow : Window
             return;
         }
 
+        // The two resources that already HAVE an editor open onto it. Both describe the whole archive rather
+        // than any one selected object, so their tabs stand on their own — clicking the tile is the obvious
+        // way to reach them, and it used to do nothing at all.
+        if (resource.Kind == SdsResourceKind.Prefab)
+        {
+            ClearTexture();
+            UpdateStageChrome();
+            Scene.ShowPrefab();
+            return;
+        }
+        if (resource.Kind == SdsResourceKind.EntityData)
+        {
+            ClearTexture();
+            UpdateStageChrome();
+            Scene.ShowTuning();
+            return;
+        }
+
         if (resource.Kind is not (SdsResourceKind.Texture or SdsResourceKind.Mipmap
             or SdsResourceKind.AnimatedTexture))
         {
@@ -240,9 +255,41 @@ public partial class ResourceEditorWindow : Window
         TextureImage.Source = null;
     }
 
+    /// <summary>
+    /// An archive's file name as a title. The names are lower-case and underscored
+    /// (<c>berkley_kingfisher_pha</c>) because they are file names, and a window heading set in one is a
+    /// window heading nobody reads — so the underscores become spaces and each word gets its capital. The
+    /// trailing marker Mafia II files carry (<c>_pha</c>, <c>_z</c>) is dropped: it says nothing to the
+    /// person looking at the car.
+    /// </summary>
+    private static string PrettyName(string fileName)
+    {
+        string[] words = fileName.Split('_', StringSplitOptions.RemoveEmptyEntries);
+        var kept = new List<string>(words.Length);
+        foreach (string word in words)
+        {
+            if (kept.Count > 0 && word.Length <= 3 && word.All(char.IsLower) && !word.Any(char.IsDigit))
+            {
+                continue;   // a trailing variant marker, not a word
+            }
+            kept.Add(word.Length == 1
+                ? word.ToUpperInvariant()
+                : char.ToUpperInvariant(word[0]) + word[1..]);
+        }
+        return kept.Count > 0 ? string.Join(' ', kept) : fileName;
+    }
+
     private void UpdateStageChrome()
     {
-        StagedText.Text = _staged?.Name ?? "nothing loaded";
+        // The resource's own icon and its name — the same glyph the browser marks it with, so the title
+        // bar and the shelf below say the same thing about the same file.
+        StagedText.Text = _staged is { } staged ? PrettyName(staged.Name) : "nothing loaded";
+        StagedIcon.Visibility = _staged != null ? Visibility.Visible : Visibility.Collapsed;
+        if (_staged is { } shown)
+        {
+            StagedIcon.Data = ResourceTypeIcons.Glyph(shown.Resource);
+            StagedIcon.Stroke = ResourceTypeIcons.Tint(shown.Resource);
+        }
 
         // Three forms, one surface: a texture, a scene, or the page that says there is neither.
         // The texture WINS over the scene, and that ordering is the whole of it: you can only reach a
@@ -419,14 +466,6 @@ public partial class ResourceEditorWindow : Window
             });
         }
         finally { Mouse.OverrideCursor = null; }
-    }
-
-    private void LayersPopup_Closed(object sender, EventArgs e) => LayersBtn.IsChecked = false;
-
-    private void PartShapes_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsInitialized || Stage == null) return;
-        Stage.ShowPartShapes = PartShapesToggle.IsChecked == true;
     }
 
     private void Build_Click(object sender, RoutedEventArgs e)

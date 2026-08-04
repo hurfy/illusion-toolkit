@@ -61,8 +61,10 @@ internal static class LayoutProbes
             // One opaque band across the row, and nothing painting over it: two translucent layers would show
             // the tray as a lighter patch, and a tray-painted band would stop where its buttons end.
             // The layers list is the toolbar's growth valve: layers go in there, not into new toolbar buttons.
-            // Zones · crash objects · collision hulls · AI navigation · part collision.
-            Check("every display layer is in the layers list", window.LayerRows.Children.Count == 5,
+            // Zones · crash objects · collision hulls · AI navigation. Car collision is NOT here — it moved
+            // onto the Render tab, where a car is actually worked on, and it is the one overlay you keep
+            // switching while placing a shape.
+            Check("every display layer is in the layers list", window.LayerRows.Children.Count == 4,
                 $"{window.LayerRows.Children.Count} rows");
 
             // Both toolbar flyouts open on hover; HoverPopup takes over their closing, which is what StaysOpen

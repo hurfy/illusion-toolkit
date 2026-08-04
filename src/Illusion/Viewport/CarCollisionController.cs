@@ -33,7 +33,7 @@ internal sealed class CarCollisionController
     /// <summary>Whether a box can be added right now — a bone has to be selected.</summary>
     internal bool CanAddBox => SelectedBone != null;
 
-    /// <summary>Whether the overlay is drawing the selected part's shapes.</summary>
+    /// <summary>Whether the overlay is drawing the car's collision.</summary>
     internal bool ShowShapes
     {
         get => _show;
@@ -47,86 +47,84 @@ internal sealed class CarCollisionController
     private bool _show;
 
     /// <summary>
-    /// Redraws the collision of whatever is selected now, as the PREFAB describes it — which is the copy the
-    /// game reads. A volume that has a stub frame is drawn where the stub is rather than where the prefab
-    /// says, because the stub is the handle being dragged and the save is what makes the two agree; a volume
-    /// with no stub (every window, every snow volume) is drawn where it is.
-    /// <para>
-    /// Cheap enough to run on every selection change: it walks ONE part's volumes and re-reads that archive's
-    /// prefab and its dozen small ItemDesc files.
-    /// </para>
+    /// The volumes of each loaded document, kept between redraws. Reading them means opening the archive's
+    /// prefab and every ItemDesc file it lists, and the overlay is now redrawn on every frame of a gizmo
+    /// drag — doing that off disk each time would put a dozen file reads inside the drag loop.
+    /// </summary>
+    private readonly Dictionary<SceneDocumentAdapter, IReadOnlyList<PlacedPhysicsVolume>> _cache = new();
+
+    /// <summary>
+    /// Redraws after re-reading the archives. This is the DEFAULT: anything that could have changed a volume
+    /// — an add, a remove, a save, a scene change, a number typed into the shape editor — goes through here,
+    /// so the cache can never serve a stale shape. Only the gizmo drag takes the cached path, and a drag is
+    /// exactly the moment when nothing on disk moves.
     /// </summary>
     internal void RefreshOverlay()
+    {
+        _cache.Clear();
+        Redraw();
+    }
+
+    /// <summary>Redraws from what was already read — for the inside of a gizmo drag, which runs per frame.</summary>
+    internal void RefreshOverlayWhileDragging() => Redraw();
+
+    /// <summary>
+    /// Redraws the car's collision as the PREFAB describes it, which is the copy the game reads.
+    ///
+    /// <para>
+    /// EVERYTHING the loaded cars carry, not just the selected part. Scoping it to the selection meant the
+    /// answer to "where is this car solid" depended on what happened to be clicked, and a shape you have to
+    /// hunt for by selecting bones one at a time is a shape you cannot judge.
+    /// </para>
+    /// <para>
+    /// A volume that has a stub frame is drawn where the STUB is rather than where the prefab says: the stub
+    /// is the handle being dragged, and the save is what makes the two agree. One with no stub — every
+    /// window, every snow volume — is drawn where the prefab puts it.
+    /// </para>
+    /// </summary>
+    private void Redraw()
     {
         if (_host.Rnd is not { } renderer) return;
         renderer.ShowPartShapes = _show;
         if (!_show) { renderer.SetPartShapeLines([]); return; }
 
         var lines = new List<Vector3>();
-        foreach ((PlacedPhysicsVolume volume, SceneDocumentAdapter document, FrameObjectCollision? handle)
-                 in SelectedVolumes())
+        foreach (SceneDocumentAdapter document in Documents())
         {
-            // The stub this volume is drawn by: its own when the archive resolves one, otherwise the stub
-            // that is SELECTED — a shape added seconds ago is being dragged by that stub, and drawing it at
-            // the prefab placement instead leaves it standing still while the gizmo walks away.
-            FrameObjectCollision? by = volume.Stub ?? handle;
-            Matrix4x4 world = by != null
-                ? document.Node(by).WorldTransform
-                : volume.World;
-            if (volume.Shape != null) CarCollisionShapes.AppendWireframe(lines, volume.Shape, world);
-            else CarCollisionShapes.AppendBox(lines, volume.Volume.Size * 0.5f, world);
+            if (!_cache.TryGetValue(document, out IReadOnlyList<PlacedPhysicsVolume>? volumes))
+            {
+                _cache[document] = volumes = document.PhysicsVolumes();
+            }
+            foreach (PlacedPhysicsVolume volume in volumes)
+            {
+                Matrix4x4 world = volume.Stub != null
+                    ? document.Node(volume.Stub).WorldTransform
+                    : volume.World;
+                if (volume.Shape != null) CarCollisionShapes.AppendWireframe(lines, volume.Shape, world);
+                else CarCollisionShapes.AppendBox(lines, volume.Volume.Size * 0.5f, world);
+            }
         }
         renderer.SetPartShapeLines(lines);
     }
 
-    /// <summary>
-    /// The collision volumes the selection speaks for: everything on the deformable part a selected BONE is,
-    /// or the single volume a selected stub places. Selecting the part shows what protects it; selecting one
-    /// shape shows just that one.
-    /// </summary>
-    private IEnumerable<(PlacedPhysicsVolume Volume, SceneDocumentAdapter Document, FrameObjectCollision? Handle)>
-        SelectedVolumes()
+    /// <summary>Every frame document on the stage right now. A document with no car prefab answers with an
+    /// empty list and costs one manifest read, which is why this can afford to ask all of them.</summary>
+    private IEnumerable<SceneDocumentAdapter> Documents()
     {
-        SceneDocumentAdapter? document = null;
-        FrameObjectCollision? single = null;
-        int bone = -1;
-
-        if (_host.SelectedNode?.Source is FrameNodeAdapter { Frame: FrameObjectCollision one } picked)
+        var seen = new HashSet<SceneDocumentAdapter>();
+        foreach (SceneNode root in _host.Tree.Roots)
         {
-            document = picked.Document;
-            single = one;
+            foreach (SceneDocumentAdapter document in DocumentsUnder(root, seen)) yield return document;
         }
-        else if (SelectedBone is { } selected)
-        {
-            document = selected.Document;
-            bone = selected.Index;
-        }
-        if (document == null) yield break;
+    }
 
-        IReadOnlyList<PlacedPhysicsVolume> all = document.PhysicsVolumes();
-        if (single == null)
+    private static IEnumerable<SceneDocumentAdapter> DocumentsUnder(SceneNode node, HashSet<SceneDocumentAdapter> seen)
+    {
+        if (node.Source is SceneDocumentAdapter document && seen.Add(document)) yield return document;
+        foreach (SceneNode child in node.Children)
         {
-            foreach (PlacedPhysicsVolume volume in all.Where(v => v.Bone == bone))
-            {
-                yield return (volume, document, null);
-            }
-            yield break;
+            foreach (SceneDocumentAdapter found in DocumentsUnder(child, seen)) yield return found;
         }
-
-        // The one this stub places, matched on identity first and then on the shape it names — a stub only
-        // just added is the same object, but a reload or a re-resolve can hand back a different instance for
-        // the same shape, and a shape that draws under its bone and vanishes when clicked is worse than
-        // useless.
-        var mine = all.Where(v => ReferenceEquals(v.Stub, single)
-            || (v.Shape != null && v.Shape.Hash == single.Hash)).ToList();
-
-        // Nothing matched: show the whole part rather than an empty viewport. Selecting a shape must never
-        // show LESS than selecting the bone it hangs off — that reads as "the shape is gone".
-        if (mine.Count == 0)
-        {
-            mine = [.. all.Where(v => v.Bone == single.AttachedJoint && single.AttachedTo != null)];
-        }
-        foreach (PlacedPhysicsVolume volume in mine) yield return (volume, document, single);
     }
 
     /// <summary>

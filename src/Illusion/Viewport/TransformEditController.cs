@@ -99,7 +99,7 @@ internal sealed class TransformEditController
         // A car's collision overlay is drawn where its STUB stands, so dragging the stub has to redraw it.
         // Without this the shape sits still while the gizmo moves away from it, which reads as "the gizmo
         // does nothing" — the frame really did move, only nothing repainted the lines.
-        _host.CarCollisionEditing.RefreshOverlay();
+        _host.CarCollisionEditing.RefreshOverlayWhileDragging();
         // First real move → publish the baseline and reveal the panel. The mode is the DRAG's, not the tool
         // shelf's: a keyboard-started scale leaves the shelf on whatever it was, and asking the shelf is what
         // used to label a resize "Position".

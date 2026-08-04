@@ -40,6 +40,17 @@ public partial class ScenePanel : UserControl
 
     public ScenePanel() => InitializeComponent();
 
+    /// <summary>
+    /// The collision overlay, on the Render tab rather than behind the Layers button. It draws the whole
+    /// car's collision, not the selected part's: "where is this car solid" is not a question whose answer
+    /// should depend on what happens to be clicked.
+    /// </summary>
+    private void PartShapes_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsInitialized || _viewport == null) return;
+        _viewport.ShowPartShapes = PartShapesToggle.IsChecked == true;
+    }
+
     // The Prefab tab's two buttons. Plain Click handlers reading the row off the DataContext, the same shape
     // the scene tree's context menu uses — a command would have to carry the row anyway.
     private void PrefabAdd_Click(object sender, RoutedEventArgs e)
@@ -94,6 +105,22 @@ public partial class ScenePanel : UserControl
         bool empty = _forceEmpty || _shown is not { Count: > 0 };
         EmptyScene.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         SceneTree.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>
+    /// Brings the Prefab tab up. The content browser calls it when its PREFAB tile is opened: the tile is
+    /// the obvious way in, and the tab describes the whole archive rather than a selection, so nothing else
+    /// would have brought it forward.
+    /// </summary>
+    public void ShowPrefab()
+    {
+        if (PrefabTab.Visibility == Visibility.Visible) PropertyTabs.SelectedItem = PrefabTab;
+    }
+
+    /// <summary>The same for the Tuning tab, which is what an EntityDataStorage tile opens onto.</summary>
+    public void ShowTuning()
+    {
+        if (TuningTab.Visibility == Visibility.Visible) PropertyTabs.SelectedItem = TuningTab;
     }
 
     /// <summary>A material tile was clicked — the host opens (or re-focuses) the material editor on it.</summary>
