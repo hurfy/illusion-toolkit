@@ -80,6 +80,44 @@ public sealed class SdsManifest
         return files;
     }
 
+    /// <summary>
+    /// Every child element of one entry, in document order — <c>Type · File · &lt;type-specific…&gt; · Version</c>.
+    /// Null when the manifest does not list the file.
+    ///
+    /// The way to move an entry to another archive without knowing anything about its type: a packing handler
+    /// reads its fields POSITIONALLY, so copying them verbatim is the only transfer that is right for all of
+    /// them. <see cref="Entries"/> deliberately carries only the pair the loaders need, and re-reading the
+    /// document here costs nothing — a manifest is a few hundred lines.
+    /// </summary>
+    public IReadOnlyList<(string Name, string Value)>? EntryFields(string fileName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(fileName);
+
+        string path = Path.Combine(Folder, "SDSContent.xml");
+        if (!File.Exists(path)) return null;
+
+        var document = new System.Xml.XmlDocument();
+        document.Load(path);
+        foreach (System.Xml.XmlNode entry in document.DocumentElement?.ChildNodes
+                 ?? (System.Xml.XmlNodeList)document.CreateDocumentFragment().ChildNodes)
+        {
+            var fields = new List<(string, string)>();
+            bool match = false;
+            foreach (System.Xml.XmlNode child in entry.ChildNodes)
+            {
+                if (child.NodeType != System.Xml.XmlNodeType.Element) continue;
+                fields.Add((child.Name, child.InnerText));
+                if (child.Name == "File"
+                    && string.Equals(child.InnerText, fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    match = true;
+                }
+            }
+            if (match) return fields;
+        }
+        return null;
+    }
+
     /// <summary>Whether the manifest already lists this file name (any type).</summary>
     public bool HasFile(string fileName)
     {
@@ -91,20 +129,11 @@ public sealed class SdsManifest
     }
 
     /// <summary>
-    /// Appends a single-payload entry to the folder's SDSContent.xml and rewrites it.
-    ///
-    /// Packing builds an archive from the MANIFEST, never from the folder — a file added on disk and left out
-    /// of here is silently dropped, and an archive that then names a resource nothing carries does not load.
-    /// So a file the toolkit invents (a fresh buffer pool, say) has to be announced here or not written at all.
-    /// A name already listed is left alone, which makes this safe to call after every save.
-    /// </summary>
-    /// <returns>True when the manifest gained an entry.</returns>
-    /// <summary>
     /// Drops a single-payload entry from the folder's SDSContent.xml and rewrites it.
     ///
-    /// The counterpart of <see cref="AddEntry"/>, and not optional: packing builds the archive from this file,
-    /// and an entry naming a file that is no longer on disk does not get skipped — it fails the whole Build.
-    /// So whatever removes a file the toolkit invented has to unsay it here as well.
+    /// The counterpart of <see cref="AddEntry(string, string, int)"/>, and not optional: packing builds the
+    /// archive from this file, and an entry naming a file that is no longer on disk does not get skipped — it
+    /// fails the whole Build. So whatever removes a file the toolkit invented has to unsay it here as well.
     /// </summary>
     /// <returns>True when the manifest lost an entry.</returns>
     public bool RemoveEntry(string fileName)
@@ -138,10 +167,38 @@ public sealed class SdsManifest
         return true;
     }
 
-    public bool AddEntry(string typeName, string fileName, int version)
+    /// <summary>
+    /// Appends a single-payload entry to the folder's SDSContent.xml and rewrites it.
+    ///
+    /// Packing builds an archive from the MANIFEST, never from the folder — a file added on disk and left out
+    /// of here is silently dropped, and an archive that then names a resource nothing carries does not load.
+    /// So a file the toolkit invents (a fresh buffer pool, say) has to be announced here or not written at all.
+    /// A name already listed is left alone, which makes this safe to call after every save.
+    /// </summary>
+    /// <returns>True when the manifest gained an entry.</returns>
+    public bool AddEntry(string typeName, string fileName, int version) =>
+        AddEntry(typeName, fileName, version, []);
+
+    /// <summary>
+    /// The same, for the types whose entry carries more than a file name.
+    ///
+    /// ORDER IS THE CONTRACT. A packing handler walks the entry's children POSITIONALLY
+    /// (<c>nav.MoveToNext()</c>), so an element in the wrong place is not ignored — it is read as the next
+    /// field. The layout is always <c>Type · File · &lt;extra…&gt; · Version</c>, and what belongs in
+    /// <paramref name="extra"/> is fixed per type: <c>Texture</c> takes <c>HasMIP</c>, <c>MemFile</c> takes
+    /// <c>Unk2_V4</c>, <c>XML</c> takes <c>XMLTag · Unk1 · Unk3 · FailedToDecompile</c>, and every other
+    /// single-payload type takes none. (Measured across 400 shipped manifests; the container types
+    /// <c>Script</c> and <c>Table</c> have a shape of their own and are not writable here.)
+    /// </summary>
+    /// <param name="extra">Elements between <c>File</c> and <c>Version</c>, in the order the handler reads
+    /// them.</param>
+    /// <returns>True when the manifest gained an entry.</returns>
+    public bool AddEntry(
+        string typeName, string fileName, int version, IReadOnlyList<(string Name, string Value)> extra)
     {
         ArgumentException.ThrowIfNullOrEmpty(typeName);
         ArgumentException.ThrowIfNullOrEmpty(fileName);
+        ArgumentNullException.ThrowIfNull(extra);
         if (HasFile(fileName)) return false;
 
         string path = Path.Combine(Folder, "SDSContent.xml");
@@ -150,9 +207,12 @@ public sealed class SdsManifest
         System.Xml.XmlNode root = document.DocumentElement
             ?? throw new SdsFormatException($"SDSContent.xml in '{Folder}' has no root element");
 
+        var fields = new List<(string Name, string Value)> { ("Type", typeName), ("File", fileName) };
+        fields.AddRange(extra);
+        fields.Add(("Version", version.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
         System.Xml.XmlElement entry = document.CreateElement("ResourceEntry");
-        foreach ((string name, string value) in new[]
-                 { ("Type", typeName), ("File", fileName), ("Version", version.ToString(System.Globalization.CultureInfo.InvariantCulture)) })
+        foreach ((string name, string value) in fields)
         {
             System.Xml.XmlElement child = document.CreateElement(name);
             child.InnerText = value;

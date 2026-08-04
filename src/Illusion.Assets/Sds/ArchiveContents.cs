@@ -164,9 +164,19 @@ public sealed class ArchiveContents
     public IReadOnlyList<SdsResource> Resources { get; }
 
     /// <summary>Reads one archive's manifest. Call on a background thread — it may extract first.</summary>
-    public static ArchiveContents Read(FileInfo archive)
+    public static ArchiveContents Read(FileInfo archive) =>
+        ReadFrom(archive, SdsMeshLoader.EnsureExtracted(archive));
+
+    /// <summary>
+    /// The same, from a working copy that is not the archive's own. Editing an archive's contents means
+    /// writing into the folder <see cref="MafiaEnvironment.ExtractedDir"/> names, which is the player's real
+    /// install — so the regression harness points this at a scratch copy instead and leaves the game alone.
+    /// </summary>
+    public static ArchiveContents ReadFrom(FileInfo archive, string folder)
     {
-        string folder = SdsMeshLoader.EnsureExtracted(archive);
+        ArgumentNullException.ThrowIfNull(archive);
+        ArgumentException.ThrowIfNullOrEmpty(folder);
+
         SdsManifest manifest = SdsManifest.Load(folder);
 
         var resources = new List<SdsResource>(manifest.Entries.Count);
@@ -197,8 +207,11 @@ public sealed class ArchiveContents
     /// silently throws the first one away, so the leading separator has to come off;
     /// and the XML handler writes its payload with a <c>.xml</c> suffix that it does not record.
     /// </summary>
-    private static string PayloadPath(string file, SdsResourceKind kind)
+    /// <remarks>An empty name is legal input: a few community-repacked archives carry a lock entry whose
+    /// File element is blank, and the browser has to survive whatever is in the game folder.</remarks>
+    public static string PayloadPath(string file, SdsResourceKind kind)
     {
+        ArgumentNullException.ThrowIfNull(file);
         string relative = file.Replace('/', Path.DirectorySeparatorChar)
             .TrimStart(Path.DirectorySeparatorChar);
         return kind == SdsResourceKind.Xml ? relative + ".xml" : relative;

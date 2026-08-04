@@ -53,21 +53,56 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                                BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                             <Path x:Name="Icon" Width="13" Height="13" Stretch="Uniform" Fill="Transparent"
-                                  Stroke="#C8FFFFFF" StrokeThickness="1.15" StrokeLineJoin="Round"
+                                  Stroke="{StaticResource TextStrong}" StrokeThickness="1.15" StrokeLineJoin="Round"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource BrowserUpArrow}"
                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                                 <Setter TargetName="Icon" Property="Stroke" Value="White" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Import: the same box as the Up button, widened for a label, because it is the one control in the
+             row that CHANGES the archive rather than looking at it. Disabled outside an opened archive —
+             there is nothing to import into while the pane is listing folders. -->
+        <Style x:Key="BrowserAction" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{StaticResource TextStrong}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1"
+                                Padding="9,0" SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.35" />
@@ -95,10 +130,10 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" Background="#2A2A2E" BorderBrush="#26FFFFFF"
+                        <Border x:Name="Bd" Background="{StaticResource SurfaceRaised}" BorderBrush="{StaticResource EdgeRaised}"
                                 BorderThickness="1,1,1,0" CornerRadius="7,7,0,0" SnapsToDevicePixels="True">
                             <TextBlock x:Name="Chev" FontFamily="Segoe MDL2 Assets" FontSize="8"
-                                       Text="&#xE70E;" Foreground="#9AFFFFFF" Margin="0,1,0,0"
+                                       Text="&#xE70E;" Foreground="{StaticResource TextMuted}" Margin="0,1,0,0"
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -106,8 +141,8 @@
                                 <Setter TargetName="Chev" Property="Text" Value="&#xE70D;" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3A3A40" />
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#40FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceRaisedHot}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeHot}" />
                                 <Setter TargetName="Chev" Property="Foreground" Value="White" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -123,21 +158,21 @@
             <Setter Property="Height" Value="24" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="CaretBrush" Value="White" />
-            <Setter Property="SelectionBrush" Value="#552D7DD2" />
+            <Setter Property="SelectionBrush" Value="{StaticResource SelectionText}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
-                        <Border x:Name="Bd" CornerRadius="4" Background="#1C1C20"
-                                BorderBrush="#24FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                        <Border x:Name="Bd" CornerRadius="4" Background="{StaticResource SurfaceInput}"
+                                BorderBrush="{StaticResource EdgeInput}" BorderThickness="1" SnapsToDevicePixels="True">
                             <ScrollViewer x:Name="PART_ContentHost" Margin="26,0,6,0" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#38FFFFFF" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource EdgeStrong}" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
-                                <Setter TargetName="Bd" Property="Background" Value="#25252A" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceInputHot}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -166,7 +201,7 @@
                                         <Setter Property="Background" Value="Transparent" />
                                         <Style.Triggers>
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter Property="Background" Value="#12FFFFFF" />
+                                                <Setter Property="Background" Value="{StaticResource FillHover}" />
                                             </Trigger>
                                         </Style.Triggers>
                                     </Style>
@@ -197,7 +232,7 @@
                                 <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Row" Property="Background" Value="#382D7DD2" />
+                                <Setter TargetName="Row" Property="Background" Value="{StaticResource SelectionFill}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -229,11 +264,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#14FFFFFF" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#382D7DD2" />
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#2D7DD2" />
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionFill}" />
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -245,7 +280,7 @@
     <!-- The tab is a sibling of the pane, not a child of it: it has to survive the pane being collapsed to
          a hairline, and it is drawn last so it lands over the divider and the stage above. -->
     <Grid>
-        <Border Background="#1B1B1E" BorderBrush="#1AFFFFFF" BorderThickness="0,1,0,0">
+        <Border Background="{StaticResource SurfacePane}" BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0">
 
             <!-- Body: folders | contents. Collapsed by the tab. -->
             <Grid x:Name="Body">
@@ -269,11 +304,11 @@
                         <TextBox x:Name="SearchBox" Style="{StaticResource BrowserSearch}"
                                  ToolTip="Search the whole library — folders and archives"
                                  TextChanged="Search_TextChanged" />
-                        <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="#80FFFFFF"
+                        <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextDim}"
                               StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
                               HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
-                        <TextBlock x:Name="SearchPlaceholder" Text="Search the library…" Foreground="#66FFFFFF"
+                        <TextBlock x:Name="SearchPlaceholder" Text="Search the library…" Foreground="{StaticResource TextFaint}"
                                    FontSize="11.5" Margin="28,0,0,0" VerticalAlignment="Center"
                                    IsHitTestVisible="False" />
                     </Grid>
@@ -302,7 +337,7 @@
                                           Stroke="{Binding Resource, Converter={StaticResource Tint}}" />
                                     <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="White" FontSize="11.5"
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="2" Text="{Binding TotalEntries}" Foreground="#66FFFFFF"
+                                    <TextBlock Grid.Column="2" Text="{Binding TotalEntries}" Foreground="{StaticResource TextFaint}"
                                                FontSize="10.5" VerticalAlignment="Center" Margin="8,0,2,0" />
                                 </Grid>
                             </HierarchicalDataTemplate>
@@ -310,7 +345,7 @@
                     </TreeView>
                 </Grid>
 
-                <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="#22000000" />
+                <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="{StaticResource Splitter}" />
 
                 <!-- Right: how the tiles are ordered, then what is filtered out of them, then the tiles. -->
                 <Grid Grid.Column="2" Margin="8">
@@ -324,6 +359,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <!-- Out of here: back to the folder holding the open archive, or up to the parent
                              folder. First in the row because it is the one control that changes WHAT the
@@ -337,24 +373,50 @@
                             <TextBox x:Name="FilterBox" Style="{StaticResource BrowserSearch}"
                                      ToolTip="Narrow down what is showing in this folder"
                                      TextChanged="Filter_TextChanged" />
-                            <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="#80FFFFFF"
+                            <Path Width="12" Height="12" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource TextDim}"
                                   StrokeThickness="1.15" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource BrowserFind}" Margin="8,0,0,0"
                                   HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
-                            <TextBlock x:Name="FilterPlaceholder" Text="Filter this folder…" Foreground="#66FFFFFF"
+                            <TextBlock x:Name="FilterPlaceholder" Text="Filter this folder…" Foreground="{StaticResource TextFaint}"
                                        FontSize="11.5" Margin="28,0,0,0" VerticalAlignment="Center"
                                        IsHitTestVisible="False" />
                         </Grid>
+
+                        <!-- The one control in the row that changes the archive rather than the view of it,
+                             so it stands at the far end, away from the three that only navigate. -->
+                        <Button x:Name="ImportBtn" Grid.Column="3" Style="{StaticResource BrowserAction}"
+                                Margin="8,0,0,0" Content="Import files…" Click="Import_Click"
+                                ToolTip="Bring files from disk into this archive — or just drop them on the tiles" />
                     </Grid>
 
                     <Grid Grid.Row="1">
                         <ListBox x:Name="Contents" BorderThickness="0" Background="Transparent"
                                  ItemContainerStyle="{StaticResource BrowserTile}"
                                  IsSynchronizedWithCurrentItem="False"
+                                 SelectionMode="Extended"
+                                 AllowDrop="True" DragOver="Contents_DragOver"
+                                 DragLeave="Contents_DragLeave" Drop="Contents_Drop"
                                  MouseDoubleClick="Contents_MouseDoubleClick"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  ScrollViewer.CanContentScroll="False">
+                            <!-- Right-click on the tiles. Same shape as the scene tree's menu next door: the
+                                 Opened handler stamps what is actually under the pointer onto the items
+                                 before they show, so a menu never offers an action for a row you did not
+                                 click. -->
+                            <ListBox.ContextMenu>
+                                <ContextMenu Opened="ContentsContextMenu_Opened">
+                                    <MenuItem x:Name="CopyItem" Header="Copy" InputGestureText="Ctrl+C"
+                                              Click="Copy_Click" />
+                                    <MenuItem x:Name="PasteItem" Header="Paste" InputGestureText="Ctrl+V"
+                                              Click="Paste_Click" />
+                                    <Separator />
+                                    <MenuItem x:Name="DeleteItem" Header="Delete" InputGestureText="Del"
+                                              Click="Delete_Click" />
+                                    <Separator />
+                                    <MenuItem x:Name="ImportItem" Header="Import files…" Click="Import_Click" />
+                                </ContextMenu>
+                            </ListBox.ContextMenu>
                             <!-- The tiles' own panel — and it stays the tiles' panel once the pane is banded
                                  by section, because ItemsPanel is the panel of the INNERMOST level. What
                                  lays the section blocks out is GroupStyle.Panel below; getting those two the
@@ -385,11 +447,11 @@
                                                     <TextBlock Foreground="White" FontSize="11.5"
                                                                FontWeight="SemiBold" VerticalAlignment="Center"
                                                                Text="{Binding Name, Converter={StaticResource SectionTitle}}" />
-                                                    <TextBlock Foreground="#66FFFFFF" FontSize="10.5"
+                                                    <TextBlock Foreground="{StaticResource TextFaint}" FontSize="10.5"
                                                                VerticalAlignment="Center" Margin="8,0,0,0"
                                                                Text="{Binding ItemCount}" />
                                                 </StackPanel>
-                                                <Border Height="1" Background="#14FFFFFF" Margin="0,6,12,0" />
+                                                <Border Height="1" Background="{StaticResource FillCard}" Margin="0,6,12,0" />
                                             </StackPanel>
                                         </DataTemplate>
                                     </GroupStyle.HeaderTemplate>
@@ -419,7 +481,7 @@
                                         <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
                                                    FontSize="11" FontWeight="SemiBold" TextAlignment="Center"
                                                    TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
+                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextFaint}" FontSize="10"
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding TotalEntries, StringFormat={}{0} archives}" />
                                     </Grid>
@@ -432,7 +494,7 @@
                                             <StackPanel MaxWidth="320">
                                                 <TextBlock Text="{Binding Name}" Foreground="White"
                                                            FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding FolderPath}" Foreground="#99FFFFFF"
+                                                <TextBlock Text="{Binding FolderPath}" Foreground="{StaticResource TextMuted}"
                                                            FontSize="11" Margin="0,2,0,0" />
                                             </StackPanel>
                                         </Grid.ToolTip>
@@ -450,7 +512,7 @@
                                         <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
                                                    FontSize="11" TextAlignment="Center"
                                                    TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
+                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextFaint}" FontSize="10"
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding Size, Converter={StaticResource ByteSize}}" />
                                     </Grid>
@@ -466,7 +528,7 @@
                                             <StackPanel MaxWidth="320">
                                                 <TextBlock Text="{Binding Name}" Foreground="White"
                                                            FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                <TextBlock Text="{Binding Type}" Foreground="#99FFFFFF"
+                                                <TextBlock Text="{Binding Type}" Foreground="{StaticResource TextMuted}"
                                                            FontSize="11" Margin="0,2,0,0" />
                                             </StackPanel>
                                         </Grid.ToolTip>
@@ -484,7 +546,7 @@
                                         <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="White"
                                                    FontSize="11" TextAlignment="Center"
                                                    TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
-                                        <TextBlock Grid.Row="2" Foreground="#70FFFFFF" FontSize="10"
+                                        <TextBlock Grid.Row="2" Foreground="{StaticResource TextFaint}" FontSize="10"
                                                    TextAlignment="Center" Margin="0,2,0,0"
                                                    Text="{Binding Converter={StaticResource ResourceSize}}" />
                                     </Grid>
@@ -494,9 +556,20 @@
 
                         <!-- Says why the pane is empty, which is otherwise indistinguishable from a stuck
                              browser. -->
-                        <TextBlock x:Name="EmptyText" Foreground="#66FFFFFF" FontSize="11.5"
+                        <TextBlock x:Name="EmptyText" Foreground="{StaticResource TextFaint}" FontSize="11.5"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                    Visibility="Collapsed" Text="Pick a folder on the left" />
+
+                        <!-- What a drag is over. Hit-test transparent, or the pane would stop receiving the
+                             drag the moment the hint appeared under the pointer. -->
+                        <Border x:Name="DropHint" Visibility="Collapsed" IsHitTestVisible="False"
+                                Background="{StaticResource SelectionFill}"
+                                BorderBrush="{StaticResource Accent}" BorderThickness="1.5"
+                                CornerRadius="6" Margin="-4">
+                            <TextBlock x:Name="DropHintText" Foreground="White" FontSize="12.5"
+                                       FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
+                                       Margin="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
                     </Grid>
                 </Grid>
             </Grid>

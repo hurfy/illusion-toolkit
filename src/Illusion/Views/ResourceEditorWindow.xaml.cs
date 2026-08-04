@@ -77,6 +77,7 @@ public partial class ResourceEditorWindow : Window
         Browser.EntryActivated += StageEntry;
         Browser.ResourceActivated += ShowResource;
         Browser.CollapsedChanged += UpdateBrowserRow;
+        Browser.ArchiveEdited += OnArchiveEdited;
 
         CommandBindings.Add(new CommandBinding(EditorCommands.Undo, (_, _) => Stage.Undo(),
             (_, e) => e.CanExecute = Stage.History.CanUndo && !IsTextFieldFocused()));
@@ -294,6 +295,21 @@ public partial class ResourceEditorWindow : Window
         BrowserSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>
+    /// The content browser changed what an archive carries. Three things follow, and none of them is the
+    /// browser's to know: the change goes on THIS window's undo stack, the archive joins the build list (its
+    /// working copy is now ahead of the .sds, and no frame edit will ever say so), and the user is told.
+    /// </summary>
+    private void OnArchiveEdited(ArchiveContentChange change)
+    {
+        if (change.Edit is { } edit)
+        {
+            Stage.History.Push(edit);
+            Stage.MarkArchiveModified(change.Archive);
+        }
+        Notices.Post(change.Message, change.IsError);
+    }
+
     // ── Keyboard ──
 
     /// <summary>
@@ -304,7 +320,11 @@ public partial class ResourceEditorWindow : Window
     {
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         bool typing = IsTextFieldFocused();
-        if ((!typing && (ToolShelf.HandleKey(key, Keyboard.Modifiers, e.IsRepeat) || HandleBridgeKey(key)))
+        // The browser first, and only while its tiles hold the focus: Delete and Ctrl+C mean a resource
+        // there and a scene object everywhere else, and a preview key reaches this window before it reaches
+        // the pane the user is actually working in.
+        if ((!typing && (Browser.HandleKey(key, Keyboard.Modifiers)
+                         || ToolShelf.HandleKey(key, Keyboard.Modifiers, e.IsRepeat) || HandleBridgeKey(key)))
             || EditorCommands.Handle(key, Keyboard.Modifiers, this))
         {
             e.Handled = true;

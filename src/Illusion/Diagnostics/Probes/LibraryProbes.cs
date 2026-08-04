@@ -642,6 +642,15 @@ internal static class LibraryProbes
         browser.IsCollapsed = false;
         Layout();
 
+        // The editing affordances. Everything they DO is checked by --probe-content-edit against a scratch
+        // copy; what matters here is that they only offer themselves where they mean something — an import
+        // needs an archive to import INTO, and outside one the button is dead rather than gone (a control
+        // that comes and goes moves the three beside it, and this row is full at the window's floor size).
+        check("the tiles take more than one selection", browser.Contents.SelectionMode == SelectionMode.Extended,
+            browser.Contents.SelectionMode.ToString());
+        check("importing is offered only inside an archive", !browser.CanImport, "listing a folder");
+        check("the tiles accept a drop", browser.Contents.AllowDrop, "");
+
         // Three pictures, because the pane takes three shapes worth eyeballing: a folder open, the inside of
         // an archive banded by section, and a search — where the tree folds away and the tiles come from
         // everywhere at once.
@@ -661,6 +670,16 @@ internal static class LibraryProbes
                 PumpUntil(() => Rows(browser).Exists(o => o is SdsResource));
                 Layout();
                 Shoot("illusion_library_archive.png");
+
+                check("...and inside one, importing is offered", browser.CanImport, "");
+                check("a drag of textures reads as importable",
+                    browser.DropAnswer(["a.dds", "b.dds"]) == "2/2",
+                    browser.DropAnswer(["a.dds", "b.dds"]) ?? "(refused)");
+                check("a drag of something else is refused outright",
+                    browser.DropAnswer(["a.exe"]) == null, "");
+                check("a mixed drag counts only what can come in",
+                    browser.DropAnswer(["a.dds", "b.exe", "c.fsb"]) == "2/3",
+                    browser.DropAnswer(["a.dds", "b.exe", "c.fsb"]) ?? "(refused)");
             }
         }
 

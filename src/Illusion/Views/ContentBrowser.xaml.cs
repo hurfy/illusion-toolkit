@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -7,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using Illusion.Assets.Library;
 using Illusion.Assets.Sds;
+using Illusion.Viewport;
 
 namespace Illusion.Views;
 
@@ -98,6 +100,13 @@ public partial class ContentBrowser : UserControl
 
     /// <summary>The browser was folded away or opened again — the host re-sizes its row.</summary>
     public event Action? CollapsedChanged;
+
+    /// <summary>
+    /// The open archive's contents changed on disk — a resource dropped, imported or pasted. The host is what
+    /// knows the undo stack, the notice banner and the build list, so the browser does the work and says what
+    /// it did rather than reaching for any of the three itself.
+    /// </summary>
+    public event Action<ArchiveContentChange>? ArchiveEdited;
 
     /// <summary>Whether the body is folded away, leaving only the tab. Driven by the tab itself; settable so
     /// the host can restore the last state.</summary>
@@ -274,6 +283,24 @@ public partial class ContentBrowser : UserControl
     private void UpdateUpButton() =>
         UpBtn.IsEnabled = _archiveEntry != null || ParentFolder() != null;
 
+    // Importing needs somewhere to import INTO. Outside an opened archive the button is dead rather than
+    // hidden: a control that comes and goes moves everything beside it, and this row is already three
+    // controls wide at the window's floor size.
+    internal void UpdateImportButton() => ImportBtn.IsEnabled = _archive != null;
+
+    /// <summary>Whether the Import button is offering itself — read by the regression harness, which has no
+    /// pointer to hover with.</summary>
+    internal bool CanImport => ImportBtn.IsEnabled;
+
+    /// <summary>What the pane would say to a drag carrying these paths, or null if it would refuse it
+    /// outright. The harness's stand-in for a drag it cannot perform.</summary>
+    internal string? DropAnswer(IReadOnlyList<string> paths)
+    {
+        if (_archive == null) return null;
+        int accepted = paths.Count(path => SdsImportTypes.Classify(path) != null);
+        return accepted == 0 ? null : $"{accepted}/{paths.Count}";
+    }
+
     // The folder that directly holds an archive, by the same first-match-from-the-roots walk the tree
     // highlight uses — so where "up" out of an archive goes and where the tree lands cannot disagree.
     private LibraryFolder? FolderOf(LibraryEntry entry)
@@ -380,6 +407,7 @@ public partial class ContentBrowser : UserControl
         ScrollToTop();
         UpdateEmptyState(rows.Count);
         UpdateUpButton();
+        UpdateImportButton();
     }
 
     // Bands the rows by section. Nothing has to be undone for the flat case: the rows are a fresh list every
@@ -715,7 +743,302 @@ public partial class ContentBrowser : UserControl
         Body.Visibility = IsCollapsed ? Visibility.Collapsed : Visibility.Visible;
         CollapsedChanged?.Invoke();
     }
+
+    // ── Editing what the archive carries ──
+
+    /// <summary>
+    /// The toolkit's own resource clipboard. Static on purpose: a copy taken in one editor window has to
+    /// paste in another, which is the whole point of being able to copy between archives, and there is no
+    /// document object that outlives both windows to hang it on.
+    /// <para>
+    /// Not the system clipboard. What is on it is a payload in an extracted working copy PLUS the manifest
+    /// fields that say what it is — Windows has no format for the second half, and a paste that had only the
+    /// file would have to guess every one of them.
+    /// </para>
+    /// </summary>
+    private static IReadOnlyList<ArchiveEditing.Clip> _clipboard = [];
+
+    /// <summary>The resources picked inside an opened archive. Empty while the pane lists folders.</summary>
+    private List<SdsResource> PickedResources() => Contents.SelectedItems.OfType<SdsResource>().ToList();
+
+    private void ContentsContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        List<SdsResource> picked = PickedResources();
+        bool inArchive = _archive != null;
+
+        CopyItem.IsEnabled = picked.Count > 0 && picked.Exists(r => SdsImportTypes.CanPaste(r.Type));
+        CopyItem.Header = picked.Count > 1 ? $"Copy {picked.Count} resources" : "Copy";
+        PasteItem.IsEnabled = inArchive && _clipboard.Count > 0;
+        PasteItem.Header = _clipboard.Count > 1 ? $"Paste {_clipboard.Count} resources" : "Paste";
+        DeleteItem.IsEnabled = picked.Count > 0;
+        DeleteItem.Header = picked.Count > 1 ? $"Delete {picked.Count} resources" : "Delete";
+        ImportItem.IsEnabled = inArchive;
+    }
+
+    /// <summary>
+    /// Del / Ctrl+C / Ctrl+V on the tiles. The HOST calls this, before it dispatches its own commands, and
+    /// only when the tiles have the focus — a preview key tunnels from the window down, so the window would
+    /// otherwise answer Delete with the scene's own delete while the pointer was in the browser. Returns
+    /// whether the key was used.
+    /// <para>Same shape as the tool shelf's own key handler next to it in that method, for the same
+    /// reason.</para>
+    /// </summary>
+    public bool HandleKey(Key key, ModifierKeys modifiers)
+    {
+        if (!Contents.IsKeyboardFocusWithin) return false;
+
+        bool control = (modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+        switch (key)
+        {
+            case Key.Delete when !control: DeletePicked(); return true;
+            case Key.C when control: CopyPicked(); return true;
+            case Key.V when control: PastePicked(); return true;
+            default: return false;
+        }
+    }
+
+    private void Copy_Click(object sender, RoutedEventArgs e) => CopyPicked();
+
+    private void Paste_Click(object sender, RoutedEventArgs e) => PastePicked();
+
+    private void Delete_Click(object sender, RoutedEventArgs e) => DeletePicked();
+
+    private void CopyPicked()
+    {
+        if (_archive is not { } archive) return;
+        List<SdsResource> picked = PickedResources();
+        if (picked.Count == 0) return;
+
+        _clipboard = ArchiveEditing.Copy(archive, picked);
+        if (_clipboard.Count == 0)
+        {
+            Report("Nothing there can be copied — those resources are wired into the archive that owns them.",
+                isError: true);
+            return;
+        }
+
+        // The count can exceed what was picked: a texture takes its MIP chain with it, and saying so is the
+        // only way the extra tile that appears on paste is not a surprise.
+        int extra = _clipboard.Count - picked.Count;
+        Report(extra > 0
+            ? $"Copied {picked.Count} — and {extra} MIP chain{(extra == 1 ? "" : "s")} that belong{(extra == 1 ? "s" : "")} with them."
+            : $"Copied {_clipboard.Count}.");
+    }
+
+    private void PastePicked()
+    {
+        if (_archive is not { } archive || _archiveEntry is not { } entry || _clipboard.Count == 0) return;
+        Commit(entry, ArchiveEditing.Paste(archive, _clipboard), "Pasted");
+    }
+
+    private void DeletePicked()
+    {
+        if (_archive is not { } archive || _archiveEntry is not { } entry) return;
+        List<SdsResource> picked = PickedResources();
+        if (picked.Count == 0) return;
+
+        if (!ConfirmDelete(picked, entry.Name)) return;
+
+        ArchiveEditing.DeleteResult result = ArchiveEditing.Delete(archive, picked);
+        string message = result.Removed.Count > 0
+            ? $"Deleted {result.Removed.Count} from {entry.Name} — Build to write it into the archive."
+            : "Nothing was deleted.";
+        Announce(entry, message, result.Removed.Count == 0,
+            result.Removed.Count == 0 ? null : ArchiveContentEdit.ForDelete(archive.Folder, result, RefreshArchive),
+            result.Refused);
+    }
+
+    // Deleting a resource nothing else names is an ordinary edit; deleting one the rest of the game reaches
+    // for by name or by index is how an archive stops loading. The dialog names the risk instead of forbidding
+    // the act — the toolkit does not know which textures are still referenced, and refusing outright would
+    // block the legitimate case of clearing out a resource the user just replaced.
+    private bool ConfirmDelete(List<SdsResource> picked, string archiveName)
+    {
+        var risky = picked.FindAll(r => Entangled(r.Kind));
+        string what = picked.Count == 1 ? $"“{picked[0].Name}”" : $"{picked.Count} resources";
+
+        string body = $"They stop being part of {archiveName} the next time it is built. The payloads stay in "
+            + "the working copy, so this is undoable until the folder is re-extracted.";
+        if (risky.Count > 0)
+        {
+            body += "\n\n" + string.Join("\n", risky.ConvertAll(RiskOf).Distinct());
+        }
+
+        return AppDialog.Show(Window.GetWindow(this), new DialogOptions
+        {
+            Title = "Delete resources",
+            Heading = $"Delete {what}?",
+            Text = body,
+            Icon = risky.Count > 0 ? DialogIcon.Warning : DialogIcon.Question,
+            Buttons = DialogButtons.YesCancel,
+            ConfirmText = "Delete",
+        }).Confirmed;
+    }
+
+    // Which kinds the rest of the game reaches into rather than merely carries.
+    private static bool Entangled(SdsResourceKind kind) => kind is
+        SdsResourceKind.Mesh or SdsResourceKind.NameTable or SdsResourceKind.Buffer or SdsResourceKind.Texture
+        or SdsResourceKind.Mipmap or SdsResourceKind.Actor or SdsResourceKind.Prefab
+        or SdsResourceKind.EntityData or SdsResourceKind.Instances or SdsResourceKind.Collision;
+
+    private static string RiskOf(SdsResource resource) => resource.Kind switch
+    {
+        SdsResourceKind.Mesh => "• The frame resource IS the scene graph — without it the archive draws nothing.",
+        SdsResourceKind.NameTable => "• The name table is what makes objects visible in game; it is tied to the frame resource by position, not by name.",
+        SdsResourceKind.Buffer => "• A buffer pool holds the geometry every mesh LOD points into by hash. Meshes that lose theirs go silently invisible.",
+        SdsResourceKind.Texture => "• Materials name textures by file name, from libraries outside every archive — and the game finds them anywhere in the unpacked tree, so this only breaks if no other archive ships the same name.",
+        SdsResourceKind.Mipmap => "• A MIP chain belongs to a texture whose entry says it has one. Delete the chain and the texture streams a tail that is not there.",
+        SdsResourceKind.Actor => "• An actor names its frame by hash, often one in ANOTHER archive.",
+        SdsResourceKind.Prefab => "• A prefab is keyed by its actor's name hash and names the model's own bones.",
+        SdsResourceKind.EntityData => "• Entity-data tables are found by hash by the actors that use them.",
+        SdsResourceKind.Instances => "• Translokator names its prototypes by frame hash.",
+        SdsResourceKind.Collision => "• Collision instances resolve to shapes by hash inside this very file.",
+        _ => "",
+    };
+
+    private void Import_Click(object sender, RoutedEventArgs e)
+    {
+        if (_archiveEntry is not { } entry) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import into " + entry.Name,
+            Filter = SdsImportTypes.FileDialogFilter,
+            Multiselect = true,
+        };
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true) ImportFiles(dialog.FileNames);
+    }
+
+    private void ImportFiles(IReadOnlyList<string> paths)
+    {
+        if (_archive is not { } archive || _archiveEntry is not { } entry || paths.Count == 0) return;
+        Commit(entry, ArchiveEditing.Import(archive, paths), "Imported");
+    }
+
+    // The one place an import or a paste turns into a message, an undo entry and a pending build.
+    private void Commit(LibraryEntry entry, ArchiveEditing.WriteResult result, string verb)
+    {
+        if (_archive is not { } archive) return;
+
+        int landed = result.Added.Count + result.Replaced.Count;
+        string message = landed == 0
+            ? $"Nothing was {verb.ToLowerInvariant()}."
+            : result.Replaced.Count == 0 ? $"{verb} {landed} into {entry.Name} — Build to write it into the archive."
+            : result.Added.Count == 0 ? $"Replaced {result.Replaced.Count} in {entry.Name} — Build to write it into the archive."
+            : $"{verb} {result.Added.Count} and replaced {result.Replaced.Count} in {entry.Name} — Build to write it into the archive.";
+
+        Announce(entry, message, landed == 0,
+            landed == 0 ? null : ArchiveContentEdit.ForWrite(archive.Folder, result, RefreshArchive),
+            result.Refused);
+    }
+
+    // Tells the host what happened, then puts the refusals in front of the user as a modal — a refusal is a
+    // decision the user has to make (fix the file, or do without it), and a toast that fades is not where a
+    // list of reasons belongs.
+    private void Announce(
+        LibraryEntry entry,
+        string message,
+        bool isError,
+        Domain.IEditAction? edit,
+        IReadOnlyList<ArchiveEditing.Refusal> refused)
+    {
+        ArchiveEdited?.Invoke(new ArchiveContentChange(entry.File, message, isError, edit));
+        RefreshArchive();
+
+        if (refused.Count == 0) return;
+        AppDialog.Show(Window.GetWindow(this), new DialogOptions
+        {
+            Title = "Not everything could be brought in",
+            Heading = refused.Count == 1 ? "One file was left out" : $"{refused.Count} files were left out",
+            Text = string.Join("\n\n", refused.Select(r => r.Name + " — " + r.Reason)),
+            Icon = DialogIcon.Warning,
+        });
+    }
+
+    // A message with no host listening still has to reach someone; the modal is the only surface the browser
+    // owns on its own.
+    private void Report(string message, bool isError = false)
+    {
+        if (_archiveEntry is { } entry)
+        {
+            ArchiveEdited?.Invoke(new ArchiveContentChange(entry.File, message, isError, null));
+        }
+    }
+
+    /// <summary>Re-reads the open archive's manifest after it changed underneath the pane. Unlike opening it,
+    /// this keeps the filter and the search — a delete must not also throw away what you were looking at.</summary>
+    private async void RefreshArchive()
+    {
+        if (_archiveEntry is not { } entry) return;
+
+        int token = ++_openToken;
+        ArchiveContents? contents = null;
+        string? failure = null;
+        try { contents = await Task.Run(() => ArchiveContents.Read(entry.File)); }
+        catch (Exception ex) { failure = ex.Message; }
+
+        if (token != _openToken) return;
+        _archive = contents;
+        _openError = failure;
+        Refresh();
+    }
+
+    // ── Files dragged in from outside ──
+
+    private void Contents_DragOver(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        e.Effects = DragDropEffects.None;
+
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            ShowDropHint(null);
+            return;
+        }
+        if (_archive == null)
+        {
+            ShowDropHint("Open an archive first — files land inside one, not in a folder.");
+            return;
+        }
+
+        string[] paths = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+        int accepted = paths.Count(path => SdsImportTypes.Classify(path) != null);
+        if (accepted == 0)
+        {
+            ShowDropHint("None of these can go into an archive — textures, sound banks, speech, XML and plain data can.");
+            return;
+        }
+
+        e.Effects = DragDropEffects.Copy;
+        string name = _archiveEntry?.Name ?? "this archive";
+        ShowDropHint(accepted == paths.Length
+            ? $"Drop {accepted} into {name}"
+            : $"Drop {accepted} of {paths.Length} into {name} — the rest are not archive resources");
+    }
+
+    private void Contents_DragLeave(object sender, DragEventArgs e) => ShowDropHint(null);
+
+    private void Contents_Drop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        ShowDropHint(null);
+        if (_archive == null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        ImportFiles((string[])e.Data.GetData(DataFormats.FileDrop)!);
+    }
+
+    private void ShowDropHint(string? text)
+    {
+        DropHint.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+        DropHintText.Text = text ?? "";
+    }
 }
+
+/// <summary>What one content edit did: which archive, what to tell the user, and how to take it back.</summary>
+/// <param name="Archive">The .sds whose working copy changed — the host puts it on the build list.</param>
+/// <param name="Message">One line for the notice banner.</param>
+/// <param name="IsError">Whether that line is a refusal rather than a result.</param>
+/// <param name="Edit">The undo entry, or null when nothing changed on disk.</param>
+public sealed record ArchiveContentChange(
+    FileInfo Archive, string Message, bool IsError, Illusion.Domain.IEditAction? Edit);
 
 /// <summary>How the contents pane orders its tiles.</summary>
 internal enum BrowserSort

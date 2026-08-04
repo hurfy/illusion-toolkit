@@ -72,7 +72,7 @@
                     <RowDefinition x:Name="BrowserRow" Height="300" MinHeight="0" />
                 </Grid.RowDefinitions>
 
-                <v:ToolbarRowPanel x:Name="ToolbarRow" Grid.Row="0" Background="#2D2D2D">
+                <v:ToolbarRowPanel x:Name="ToolbarRow" Grid.Row="0" Background="{StaticResource SurfaceBand}">
                     <!-- Left group: the Layers button, then what is on the stage right now. The browser below
                          is what CHANGES the stage, so the text says rather than asks.
                          ToolbarRowPanel lays out exactly THREE groups (left · centre · right), so everything
@@ -95,10 +95,10 @@
                                Placement="Bottom" PlacementTarget="{Binding ElementName=LayersBtn}"
                                AllowsTransparency="True" PopupAnimation="Fade" Closed="LayersPopup_Closed">
                             <Border Background="{StaticResource PopupSurface}"
-                                    BorderBrush="{StaticResource PopupEdge}" BorderThickness="1"
+                                    BorderBrush="{StaticResource EdgeNeutral}" BorderThickness="1"
                                     CornerRadius="6" Padding="10,8" Margin="0,3,8,8" Width="264">
                                 <Border.Effect>
-                                    <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2"
+                                    <DropShadowEffect Color="{StaticResource ShadowColor}" BlurRadius="12" ShadowDepth="2"
                                                       Opacity="0.5" />
                                 </Border.Effect>
                                 <StackPanel x:Name="LayerRows">
@@ -111,7 +111,7 @@
                                         </Grid.ColumnDefinitions>
                                         <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform"
                                               VerticalAlignment="Center" Margin="0,0,9,0" Fill="Transparent"
-                                              Stroke="#FF7340" StrokeThickness="1.2" StrokeLineJoin="Round"
+                                              Stroke="{x:Static v:PaletteInk.Vermilion}" StrokeThickness="1.2" StrokeLineJoin="Round"
                                               Data="{StaticResource IconCollision}" />
                                         <TextBlock Grid.Column="1" Text="Part collision" Foreground="White"
                                                    FontSize="12" VerticalAlignment="Center" />
@@ -124,7 +124,7 @@
                         </Popup>
                     </Grid>
 
-                        <TextBlock Text="Stage" Foreground="#80FFFFFF" FontSize="11" FontWeight="SemiBold"
+                        <TextBlock Text="Stage" Foreground="{StaticResource TextDim}" FontSize="11" FontWeight="SemiBold"
                                    VerticalAlignment="Center" Margin="0,0,8,0" />
                         <TextBlock x:Name="StagedText" Text="nothing loaded" Foreground="White" FontSize="12.5"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="320" />
@@ -153,8 +153,8 @@
                                          ToolTip="Render — full textures, normal &amp; specular maps"
                                          Checked="RenderMode_Changed">
                                 <Canvas Width="16" Height="16">
-                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
-                                    <Path Fill="#9A9A9A">
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="{StaticResource GlyphInk}" />
+                                    <Path Fill="{StaticResource GlyphInkDim}">
                                         <Path.Data>
                                             <CombinedGeometry GeometryCombineMode="Exclude">
                                                 <CombinedGeometry.Geometry1>
@@ -174,8 +174,8 @@
                                          Checked="RenderMode_Changed">
                                 <Canvas Width="16" Height="16">
                                     <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
-                                             Stroke="#ECECEC" StrokeThickness="1.3" Fill="Transparent" />
-                                    <Path Fill="#ECECEC"
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.3" Fill="Transparent" />
+                                    <Path Fill="{StaticResource GlyphInk}"
                                           Data="M8,1.5 L14.5,1.5 L14.5,8 L8,8 Z  M1.5,8 L8,8 L8,14.5 L1.5,14.5 Z">
                                         <Path.Clip>
                                             <EllipseGeometry Center="8,8" RadiusX="6.7" RadiusY="6.7" />
@@ -187,9 +187,9 @@
                                          Style="{StaticResource RenderModeButton}" Margin="4,0,0,0"
                                          ToolTip="Solid — flat geometry, no textures" Checked="RenderMode_Changed">
                                 <Canvas Width="16" Height="16">
-                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="#ECECEC" />
+                                    <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5" Fill="{StaticResource GlyphInk}" />
                                     <Ellipse Canvas.Left="3.6" Canvas.Top="3.2" Width="4.8" Height="4.8"
-                                             Fill="#FFFFFF" Opacity="0.5" />
+                                             Fill="White" Opacity="0.5" />
                                 </Canvas>
                             </RadioButton>
                             <RadioButton Tag="Wireframe" GroupName="StageRenderMode"
@@ -197,11 +197,11 @@
                                          ToolTip="Wireframe — mesh edges" Checked="RenderMode_Changed">
                                 <Canvas Width="16" Height="16">
                                     <Ellipse Canvas.Left="0.75" Canvas.Top="0.75" Width="14.5" Height="14.5"
-                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.15" Fill="Transparent" />
                                     <Ellipse Canvas.Left="5.3" Canvas.Top="0.75" Width="5.4" Height="14.5"
-                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.15" Fill="Transparent" />
                                     <Ellipse Canvas.Left="0.75" Canvas.Top="5.3" Width="14.5" Height="5.4"
-                                             Stroke="#ECECEC" StrokeThickness="1.15" Fill="Transparent" />
+                                             Stroke="{StaticResource GlyphInk}" StrokeThickness="1.15" Fill="Transparent" />
                                 </Canvas>
                             </RadioButton>
                         </v:CompactStrip.Items>
@@ -216,22 +216,16 @@
 
                     <!-- What the window IS until then: the render surface is not running, so this is not an
                          overlay over a viewport, it is the whole of what the stage column shows. -->
-                    <Border x:Name="EmptyStage">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
-                                <GradientStop Color="#212227" Offset="0" />
-                                <GradientStop Color="#17181B" Offset="1" />
-                            </LinearGradientBrush>
-                        </Border.Background>
+                    <Border x:Name="EmptyStage" Background="{StaticResource StageBackdrop}">
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Path Width="76" Height="76" Stretch="Uniform" Fill="Transparent"
-                                  Stroke="#33383F" StrokeThickness="1.3" StrokeLineJoin="Round"
+                                  Stroke="{StaticResource StageGlyph}" StrokeThickness="1.3" StrokeLineJoin="Round"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Data="{StaticResource IconMesh}" HorizontalAlignment="Center" />
-                            <TextBlock Text="Nothing on the stage" Foreground="#B0FFFFFF" FontSize="15"
+                            <TextBlock Text="Nothing on the stage" Foreground="{StaticResource TextSecondary}" FontSize="15"
                                        FontWeight="SemiBold" HorizontalAlignment="Center"
                                        Margin="0,24,0,0" />
-                            <TextBlock Text="Double-click an archive below to open it" Foreground="#59FFFFFF"
+                            <TextBlock Text="Double-click an archive below to open it" Foreground="{StaticResource TextGhost}"
                                        FontSize="12" HorizontalAlignment="Center" Margin="0,7,0,0" />
                         </StackPanel>
                     </Border>
@@ -240,38 +234,22 @@
                          page as the empty one so opening a texture reads as the stage changing rather than
                          as a different window; checkerboard behind it, because a texture with an alpha hole
                          and a texture that is simply dark look identical on a flat background. -->
-                    <Border x:Name="TextureStage" Visibility="Collapsed" Background="#17181B">
+                    <Border x:Name="TextureStage" Visibility="Collapsed" Background="{StaticResource StageFlat}">
                         <Grid Margin="24">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                    BorderBrush="#26FFFFFF" BorderThickness="1" SnapsToDevicePixels="True">
+                                    BorderBrush="{StaticResource EdgeRaised}" BorderThickness="1" SnapsToDevicePixels="True">
                                 <Grid>
-                                    <Rectangle>
-                                        <Rectangle.Fill>
-                                            <DrawingBrush TileMode="Tile" Viewport="0,0,16,16"
-                                                          ViewportUnits="Absolute" Stretch="None">
-                                                <DrawingBrush.Drawing>
-                                                    <GeometryDrawing Brush="#232427">
-                                                        <GeometryDrawing.Geometry>
-                                                            <GeometryGroup>
-                                                                <RectangleGeometry Rect="0,0,8,8" />
-                                                                <RectangleGeometry Rect="8,8,8,8" />
-                                                            </GeometryGroup>
-                                                        </GeometryDrawing.Geometry>
-                                                    </GeometryDrawing>
-                                                </DrawingBrush.Drawing>
-                                            </DrawingBrush>
-                                        </Rectangle.Fill>
-                                    </Rectangle>
+                                    <Rectangle Fill="{StaticResource StageChecker}" />
                                     <Image x:Name="TextureImage" Stretch="Uniform"
                                            StretchDirection="DownOnly"
                                            RenderOptions.BitmapScalingMode="HighQuality" />
                                 </Grid>
                             </Border>
-                            <TextBlock x:Name="TextureCaption" Grid.Row="1" Foreground="#8AFFFFFF"
+                            <TextBlock x:Name="TextureCaption" Grid.Row="1" Foreground="{StaticResource TextDim}"
                                        FontSize="11.5" HorizontalAlignment="Center" Margin="0,16,0,0"
                                        TextTrimming="CharacterEllipsis" />
                         </Grid>
@@ -285,10 +263,10 @@
 
                     <!-- Blender edit-mode frame: an orange glow over the stage while a bridge session is
                          active. Purely visual (hit-test transparent). -->
-                    <Border x:Name="BridgeFrame" BorderBrush="#E87D0D" BorderThickness="2.5"
+                    <Border x:Name="BridgeFrame" BorderBrush="{StaticResource Blender}" BorderThickness="2.5"
                             IsHitTestVisible="False" Visibility="Collapsed">
                         <Border.Effect>
-                            <DropShadowEffect Color="#E87D0D" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
+                            <DropShadowEffect Color="{StaticResource BlenderColor}" BlurRadius="16" ShadowDepth="0" Opacity="0.6" />
                         </Border.Effect>
                     </Border>
 
@@ -297,12 +275,12 @@
 
                 <GridSplitter x:Name="BrowserSplitter" Grid.Row="2" Height="4" HorizontalAlignment="Stretch"
                               VerticalAlignment="Center" ResizeBehavior="PreviousAndNext"
-                              Background="#22808080" />
+                              Background="{StaticResource Splitter}" />
 
                 <v:ContentBrowser x:Name="Browser" Grid.Row="3" />
             </Grid>
 
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="#22000000" />
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="{StaticResource Splitter}" />
 
             <v:ScenePanel x:Name="Scene" Grid.Column="2"
                           HeaderHeight="{Binding ActualHeight, ElementName=ToolbarRow}" />

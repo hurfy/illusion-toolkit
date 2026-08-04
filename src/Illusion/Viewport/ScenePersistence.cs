@@ -54,6 +54,19 @@ internal sealed class ScenePersistence
     private void Enlist(FileInfo sds) => _editedArchives[sds.FullName] = sds;
 
     /// <summary>
+    /// Puts an archive on the build list without a scene node to hang it on. The content browser edits an
+    /// archive's MANIFEST — a resource dropped, imported or pasted — which lands in the extracted folder the
+    /// moment it happens and has no frame, no document and no tree row of its own. Nothing else would ever
+    /// tell Build that the folder is ahead of the .sds.
+    /// </summary>
+    public void MarkArchiveModified(FileInfo sds)
+    {
+        ArgumentNullException.ThrowIfNull(sds);
+        Enlist(sds);
+        _host.RaiseDirtyChanged();
+    }
+
+    /// <summary>
     /// Forgets an archive's pending build — its extracted folder no longer holds anything worth packing.
     /// The restore-from-backup path calls this: it deletes the working copy and puts an older .sds in place,
     /// so whatever was queued for building has just ceased to exist.
