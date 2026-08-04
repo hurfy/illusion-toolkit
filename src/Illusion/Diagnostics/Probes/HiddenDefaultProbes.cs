@@ -22,9 +22,9 @@ internal static class HiddenDefaultProbes
 {
     /// <summary>Districts read for the accidental-match survey. A district is a slow archive and this is a
     /// sanity sweep, not a census — the report says so rather than reading as full coverage.</summary>
-    private const int DistrictSample = 10;
+    private const int DefaultDistrictSample = 10;
 
-    internal static void RunHiddenDefaultsProbe(string car)
+    internal static void RunHiddenDefaultsProbe(string car, int districtSample = DefaultDistrictSample)
     {
         string outFile = Path.Combine(Path.GetTempPath(), "illusion_hidden_defaults.txt");
         var sb = new StringBuilder();
@@ -132,17 +132,75 @@ internal static class HiddenDefaultProbes
             Check("nearly every car carries one, so this is the normal case not a special one",
                 scanned > 0 && withShell > scanned / 2, $"{withShell} of {scanned}");
 
+            // ---- 2b. What the extra frames are actually CALLED ----------------------------------------
+            // The mesh-name rule leaves shells on screen in a quarter of the cars, so the question is what
+            // the top-level frames themselves look like: which root holds the body, and what the others are
+            // named. Every car with more than one root carrying geometry, printed in full.
+            sb.AppendLine("── every car with more than one top-level frame carrying geometry ──");
+            int multiRoot = 0, bodyRootNamedAfterArchive = 0;
+            var extrasShown = new List<string>();
+            var bodiesHidden = new List<string>();
+            var catalogueHidden = new List<string>();
+            foreach (string file in Directory.Exists(carsFolder)
+                         ? Directory.GetFiles(carsFolder, "*.sds")
+                         : [])
+            {
+                try
+                {
+                    (IReadOnlyList<SdsFrameNode> rs, _, _) = SdsMeshLoader.LoadHierarchy(new FileInfo(file));
+                    var tops = new List<SceneNode>();
+                    foreach (SdsFrameNode r in rs) tops.Add(SceneTree.BuildSceneTree(r, []));
+                    List<SceneNode> withGeometry = tops.Where(t => Meshes(t).Any()).ToList();
+                    if (withGeometry.Count < 2) continue;
+                    multiRoot++;
+
+                    string archive = Path.GetFileNameWithoutExtension(file);
+                    sb.AppendLine($"  {archive}");
+                    foreach (SceneNode root in withGeometry)
+                    {
+                        bool carries = Meshes(root).Any(IsSkinnedBody);
+                        if (carries && Same(root.Name, archive)) bodyRootNamedAfterArchive++;
+                        sb.AppendLine($"      {(root.IsVisible ? "shown " : "HIDDEN")} "
+                                      + $"{(carries ? "BODY" : "    ")}  {root.Name}"
+                                      + $"   [{string.Join(", ", Meshes(root).Select(Describe))}]");
+
+                        // The catalogue archives are not cars: cars_universal is the prototype shelf, and a
+                        // default that switched its wheels off would empty the one place they can be looked at.
+                        if (archive.StartsWith("cars_universal", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!root.IsVisible) catalogueHidden.Add($"{archive}/{root.Name}");
+                            continue;
+                        }
+                        if (carries && !root.IsVisible) bodiesHidden.Add($"{archive}/{root.Name}");
+                        if (!carries && root.IsVisible) extrasShown.Add($"{archive}/{root.Name}");
+                    }
+                }
+                catch { /* reported by the pass above */ }
+            }
+            sb.AppendLine($"  {multiRoot} cars with more than one root carrying geometry; "
+                          + $"in {bodyRootNamedAfterArchive} of them the body's root is named after the archive");
+            sb.AppendLine();
+
+            // The three ways this default can be wrong, each one named rather than counted: a shell still on
+            // screen (what the mesh-name rule left behind), a body switched off, a catalogue emptied.
+            Check("no extra frame is left showing on any car", extrasShown.Count == 0,
+                string.Join(", ", extrasShown));
+            Check("no car's body is hidden", bodiesHidden.Count == 0, string.Join(", ", bodiesHidden));
+            Check("the prototype catalogue is left alone", catalogueHidden.Count == 0,
+                string.Join(", ", catalogueHidden));
+
             // ---- 3. And the districts, because the rule is not car-only ------------------------------
             // BuildSceneTree is the whole editor's tree, so this default reaches a city archive as well. The
             // question there is not what it hides but what it MIGHT hide by accident: a district name that
             // merely reads like an emitter would switch off a building.
-            sb.AppendLine($"── districts (first {DistrictSample} of them): names near the rule ──");
+            sb.AppendLine($"── districts (first {districtSample} of them): names near the rule ──");
             var districtNames = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             string[] districts = Directory.Exists(MafiaEnvironment.CityFolder)
                 ? Directory.GetFiles(MafiaEnvironment.CityFolder, "*.sds")
                 : [];
-            int districtsScanned = 0;
-            foreach (string file in districts.Take(DistrictSample))
+            int districtsScanned = 0, districtRoots = 0;
+            var districtHolders = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (string file in districts.Take(districtSample))
             {
                 try
                 {
@@ -157,6 +215,18 @@ internal static class HiddenDefaultProbes
                         districtNames.TryGetValue(l.Name, out int n);
                         districtNames[l.Name] = n + 1;
                     }
+
+                    // And the two SHAPES the car rule keys on, at the level it keys on them: a district's
+                    // own top-level frames. A shape that is common here is a shape that cannot be a default.
+                    foreach (SdsFrameNode r in rs)
+                    {
+                        districtRoots++;
+                        if (DefaultHidden.IsSceneryHolder(r.Name))
+                        {
+                            districtHolders.TryGetValue(r.Name, out int n);
+                            districtHolders[r.Name] = n + 1;
+                        }
+                    }
                 }
                 catch (Exception ex) { sb.AppendLine($"  (skipped {Path.GetFileName(file)}: {ex.Message})"); }
             }
@@ -164,9 +234,21 @@ internal static class HiddenDefaultProbes
             {
                 sb.AppendLine($"  {(DefaultHidden.IsEmitterShell(name) ? "hidden" : "shown ")}  {name}  ×{count}");
             }
+            sb.AppendLine($"  top-level frames a district carries: {districtRoots}, of which "
+                          + $"{districtHolders.Count} match the car rule"
+                          + (districtHolders.Count == 0 ? "" : ": " + string.Join(", ", districtHolders.Keys)));
             sb.AppendLine($"  {districtsScanned} of {districts.Length} district archives read "
                           + $"(a sample, not the lot — the rest are not covered by this run)");
             sb.AppendLine();
+
+            // The districts do have a handful of their own emitter volumes — a fountain's, a fire's, the
+            // puddle outside the Sea Gift — and they are the same kind of thing, so the same default reaches
+            // them. Pinned by count and by shape: this is a short tail, not a city quietly going dark. Every
+            // one of them is an "emit" name; NOT ONE district frame matches the _rain or the NNN_NN_ shape.
+            Check("the districts' own emitter volumes are the only thing the rule finds there",
+                districtHolders.Count < 32
+                && districtHolders.Keys.All(n => n.StartsWith("emit", StringComparison.OrdinalIgnoreCase)),
+                $"{districtHolders.Count} of {districtRoots} top-level frames");
 
             Check("nothing in a district is hidden by accident",
                 districtNames.Keys.All(n => !DefaultHidden.IsEmitterShell(n)
@@ -186,6 +268,33 @@ internal static class HiddenDefaultProbes
             File.WriteAllText(outFile, sb.ToString());
         }
     }
+
+    /// <summary>
+    /// A mesh and how big it is. Size is the question a name cannot answer: an emitter shell is a box the
+    /// size of the whole car, while a real part is a part.
+    /// </summary>
+    private static string Describe(SceneNode node)
+    {
+        if (node.Pending is not { Positions: { Length: > 0 } p }) return node.Name;
+        var min = new System.Numerics.Vector3(float.MaxValue);
+        var max = new System.Numerics.Vector3(float.MinValue);
+        foreach (System.Numerics.Vector3 v in p)
+        {
+            min = System.Numerics.Vector3.Min(min, v);
+            max = System.Numerics.Vector3.Max(max, v);
+        }
+        System.Numerics.Vector3 size = max - min;
+        return $"{node.Name} {size.X:F1}x{size.Y:F1}x{size.Z:F1}";
+    }
+
+    /// <summary>Whether this mesh is the car itself — the one skinned model an archive carries.</summary>
+    private static bool IsSkinnedBody(SceneNode node) =>
+        node.Source is Assets.Adapters.FrameNodeAdapter { Frame: Formats.Frames.ObjectTypes.FrameObjectModel };
+
+    /// <summary>Frame names and file names differ in case and in separators, and in nothing else that matters.</summary>
+    private static bool Same(string frame, string archive) =>
+        string.Equals(frame.Replace(" ", "").Replace("_", ""),
+            archive.Replace(" ", "").Replace("_", ""), StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<SceneNode> Meshes(SceneNode node)
     {

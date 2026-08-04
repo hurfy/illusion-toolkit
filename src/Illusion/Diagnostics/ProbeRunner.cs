@@ -74,7 +74,9 @@ internal static class ProbeRunner
             // shells surveyed across every shipped car. Optional arg = the car.
             // Output: %TEMP%\illusion_hidden_defaults.txt
             case "--probe-hidden-defaults":
-                HiddenDefaultProbes.RunHiddenDefaultsProbe(args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                HiddenDefaultProbes.RunHiddenDefaultsProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
+                    args.Length >= 3 && int.TryParse(args[2], out int sample) ? sample : 10);
                 return true;
             // GPU smoke: context + renderer (compiling both shaders) + instanced draw.
             case "--probe-gpu":

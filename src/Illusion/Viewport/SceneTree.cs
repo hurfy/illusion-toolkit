@@ -75,7 +75,16 @@ internal sealed class SceneTree
         if (folder.Children.Count == 0) { Roots.Remove(folder); _folders.Remove(folder.Name); }
     }
 
-    public static SceneNode BuildSceneTree(Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves)
+    public static SceneNode BuildSceneTree(Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves) =>
+        BuildSceneTree(fn, meshLeaves, top: true);
+
+    /// <param name="top">
+    /// Whether this is one of the archive's own top-level frames. The scenery shells a car carries — its rain
+    /// volume, its numbered upper-emitter holder — are recognised THERE and nowhere else: the same name
+    /// deeper in a hierarchy means nothing, and a default that hides things is worth keeping on a short leash.
+    /// </param>
+    private static SceneNode BuildSceneTree(
+        Assets.Sds.SdsFrameNode fn, List<SceneNode> meshLeaves, bool top)
     {
         bool hasChildren = fn.Children.Count > 0 || fn.Skeleton != null;
         var node = new SceneNode(fn.Name, fn.Kind, hasChildren) { Category = fn.Category, Source = fn.Source };
@@ -89,7 +98,11 @@ internal sealed class SceneTree
             if (Scene.DefaultHidden.IsEmitterShell(fn.Name)) node.IsVisible = false;
         }
         if (fn.Skeleton is { } skeleton) node.AddChild(BuildSkeletonTree(skeleton));
-        foreach (Assets.Sds.SdsFrameNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves));
+        foreach (Assets.Sds.SdsFrameNode c in fn.Children) node.AddChild(BuildSceneTree(c, meshLeaves, false));
+
+        // Hidden once the subtree exists, so the cascade reaches all of it: a shell is a holder frame with
+        // its geometry underneath, and hiding the holder before its children arrive would hide nothing.
+        if (top && Scene.DefaultHidden.IsSceneryHolder(fn.Name)) node.IsVisible = false;
         return node;
     }
 
