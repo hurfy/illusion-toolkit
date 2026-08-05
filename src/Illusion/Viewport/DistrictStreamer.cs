@@ -1541,6 +1541,7 @@ internal sealed class DistrictStreamer
         // restore-from-backup and went on drawing collision the archive no longer had.
         _host.Rnd?.ClearPartShapes();
         _host.CarCollisionEditing.Forget();
+        _host.HitBoxes.Forget();
         _collisionSources.Clear();
         _crashSources.Clear();
         _host.Tree.Clear();

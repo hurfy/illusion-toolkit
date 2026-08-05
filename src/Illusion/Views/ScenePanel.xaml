@@ -442,6 +442,31 @@
                                       Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
                     </Grid>
 
+                    <!-- (g) hit boxes — a ringed sphere, sky PaletteInk.Sky. Drawn as spheres and not as
+                         boxes on purpose: the box on disk is turned and the turn is not decoded, so a sphere
+                         about its centre is the only shape that can be shown without inventing one. -->
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center"
+                              Margin="0,0,9,0" Fill="Transparent" Stroke="{x:Static v:PaletteInk.Sky}" StrokeThickness="1.2"
+                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Data="M6,0.8 A5.2,5.2 0 1 1 5.99,0.8 Z M6,0.8 A2.2,5.2 0 1 1 5.99,0.8 Z M0.8,6 A5.2,2.2 0 1 1 11.2,6" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="Render hit boxes" Foreground="White" FontSize="12" />
+                            <TextBlock x:Name="HitBoxSubtitle" Text="What a bullet has to be inside to count"
+                                       Foreground="{StaticResource TextDim}"
+                                       FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <ToggleButton Grid.Column="2" x:Name="HitBoxToggle"
+                                      Style="{StaticResource ToggleSwitch}" Margin="8,0,0,0"
+                                      ToolTip="One box per piece of a skinned mesh. A shot is only tested against a piece's triangles if it passes that piece's box first — proven in game: zero them and the whole car stops registering bullets. Drawn as spheres because the box on disk is turned and the turn is not decoded; the sphere is the region the box certainly covers. Geometry outside every sphere cannot be shot."
+                                      Checked="SceneFilter_Changed" Unchecked="SceneFilter_Changed" />
+                    </Grid>
+
                     <!-- (d) actor markers — diamond glyph, orange PaletteInk.Orange -->
                     <Grid Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>

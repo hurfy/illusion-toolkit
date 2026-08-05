@@ -4,6 +4,7 @@ using Illusion.Assets.Sds;
 using Illusion.Bridge.Geometry;
 using Illusion.Bridge.Payload;
 using Illusion.Domain;
+using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Frames.Resources;
 using Illusion.Formats.Geometry;
@@ -135,6 +136,13 @@ public static class BridgeMeshApplier
             {
                 try { Frames.BoneBoundsBuilder.Rebuild(model, Frames.BoneBoundsBuilder.Rule.AnyInfluence); }
                 catch (Exception) { /* a model whose skin cannot be read keeps the boxes it had */ }
+
+                // …and the per-PIECE boxes, which are what decides whether a bullet is tested against a
+                // triangle at all. Proven in game: zero them and the whole car stops registering hits; open
+                // them and geometry that never took a hit starts taking them. Same reason they belong here
+                // rather than in TryApply — they are read off the geometry that has only just landed.
+                try { Frames.HitBoxBuilder.Rebuild(model); }
+                catch (Exception) { /* a model whose geometry will not decode keeps the boxes it had */ }
             }
         }
 
@@ -1145,6 +1153,60 @@ public static class BridgeMeshApplier
         for (int k = 0; k < 4; k++) into[(target * 4) + k] = globalIds[(source * 4) + k];
     }
 
+    /// <summary>Where a face sits, for choosing the piece nearest to it.</summary>
+    private static Vector3 Centroid(Vertex[] vertices, uint[] indices, int face)
+    {
+        Vector3 sum = Vector3.Zero;
+        int counted = 0;
+        for (int corner = 0; corner < 3; corner++)
+        {
+            int at = (face * 3) + corner;
+            if (at >= indices.Length) continue;
+            int vertex = (int)indices[at];
+            if (vertex < 0 || vertex >= vertices.Length) continue;
+            sum += vertices[vertex].Position;
+            counted++;
+        }
+        return counted == 0 ? Vector3.Zero : sum / counted;
+    }
+
+    /// <summary>
+    /// The piece of a split whose hit box is nearest a point — the piece a new face should join so that box
+    /// grows as little as possible. Falls back to the first piece when the model has no boxes to judge by,
+    /// which is the behaviour this replaced.
+    /// </summary>
+    private static int NearestPiece(
+        FrameObjectModel.WeightedByMeshSplit split, FrameObjectModel model, Vector3 at)
+    {
+        FrameObjectModel.BlendMeshSplitInfo[] pieces = split.Data ?? [];
+        FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
+        if (pieces.Length <= 1 || boxes.Length == 0) return 0;
+
+        // The boxes are one flat array over the model in split-then-piece order, so this split's own boxes
+        // start after every piece of every split before it.
+        int first = 0;
+        foreach (FrameObjectModel.WeightedByMeshSplit other in model.BlendMeshSplits ?? [])
+        {
+            if (ReferenceEquals(other, split)) break;
+            first += other.Data?.Length ?? 0;
+        }
+
+        int best = 0;
+        float bestDistance = float.MaxValue;
+        for (int p = 0; p < pieces.Length; p++)
+        {
+            int ordinal = first + p;
+            if (ordinal >= boxes.Length) break;
+            Short3 raw = boxes[ordinal].Position;
+            var centre = new Vector3(Signed(raw.S1), Signed(raw.S2), Signed(raw.S3)) * (10f / 32768f);
+            float distance = (centre - at).LengthSquared();
+            if (distance < bestDistance) { bestDistance = distance; best = p; }
+        }
+        return best;
+
+        static float Signed(ushort raw) => raw >= 32768 ? raw - 65536 : raw;
+    }
+
     /// <summary>
     /// Rewrites a re-topologised skinned model's BlendMeshSplits — per bone, per material, the ranges of
     /// faces the game deforms as one piece. Stale ranges are what smear a repacked car across the horizon:
@@ -1245,7 +1307,17 @@ public static class BridgeMeshApplier
                         if (splitOfBone.TryGetValue(bone, out split)) break;
                         split = -1;
                     }
-                    piece = 0;
+
+                    // WHICH piece of that bone — the nearest one, not the first.
+                    //
+                    // A piece is the unit the game pre-filters a bullet against: it carries a box, and a
+                    // shot is only tested against its triangles if it passes that box. Dropping every new
+                    // face into piece 0 therefore stretched THAT box over whatever was welded on, however
+                    // far away — one piece then passes the filter almost everywhere and its triangles are
+                    // walked on nearly every shot. Choosing by distance keeps each box about the size of
+                    // the thing it guards, which is the entire reason a car carries a hundred and eighty of
+                    // them instead of one.
+                    piece = split >= 0 ? NearestPiece(splits[split], model, Centroid(vertices, indices, f)) : 0;
                 }
 
                 // A face whose bones all lack a split still has to land somewhere: the shipped shubert_38

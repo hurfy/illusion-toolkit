@@ -517,7 +517,23 @@ public partial class ScenePanel : UserControl
         _viewport.ShowActors = ActorsToggle.IsChecked == true;
         _viewport.ShowSkeleton = SkeletonToggle.IsChecked == true;
         _viewport.ShowHelpers = HelpersToggle.IsChecked == true;
+        _viewport.ShowHitBoxes = HitBoxToggle.IsChecked == true;
         UpdateHelpersSubtitle();
+        UpdateHitBoxSubtitle();
+    }
+
+    // Says how many pieces the layer found provably unshootable. The colour alone cannot say it: a red sphere
+    // inside a cloud of a hundred and eighty blue ones is not something anyone spots by looking, and zero is
+    // exactly as worth stating as three.
+    private void UpdateHitBoxSubtitle()
+    {
+        if (_viewport == null) return;
+        int escaped = _viewport.UnshootablePieceCount;
+        HitBoxSubtitle.Text = HitBoxToggle.IsChecked != true
+            ? "What a bullet has to be inside to count"
+            : escaped == 0
+                ? "What a bullet has to be inside — nothing found outside"
+                : $"{escaped} piece{(escaped == 1 ? "" : "s")} outside its own box — cannot be shot";
     }
 
     // Says how many helper nodes were left out as placeholders, so "seventeen points I cannot see" is

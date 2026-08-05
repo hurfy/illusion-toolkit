@@ -30,6 +30,7 @@ public sealed unsafe class SceneRenderer : IDisposable
     private readonly HelperGlyphRenderer _helperRenderer;
     private readonly HelperGlyphRenderer _helperHighlightRenderer;
     private readonly LineOverlayRenderer _partShapeRenderer;
+    private readonly LineOverlayRenderer _hitBoxRenderer;
     private readonly ActorMarkerRenderer _actorRenderer;
     private readonly ActorMarkerRenderer _actorSelectionRenderer;
     private readonly SelectionOutlineRenderer _selectionOutline;
@@ -146,6 +147,26 @@ public sealed unsafe class SceneRenderer : IDisposable
     public void ClearPartShapes() => _partShapeRenderer.Clear();
 
     private static readonly object PartShapeKey = new();
+
+    /// <summary>
+    /// Whether to draw the per-piece hit boxes of skinned models — the volumes that decide whether a bullet
+    /// is tested against a piece's triangles at all. A whole-model layer rather than a per-selection one:
+    /// the question it answers is "is my new geometry inside one of these", and that is asked of the car,
+    /// not of a part.
+    /// </summary>
+    public bool ShowHitBoxes { get; set; }
+
+    /// <summary>
+    /// Replaces the hit-box wireframe. Drawn separately from the physics shapes and not through the same
+    /// buffer, because the two answer different questions and a car being worked on wants both at once.
+    /// </summary>
+    public void SetHitBoxLines(IReadOnlyList<Vector3> lineVertices, IReadOnlyList<Vector4> colors) =>
+        _hitBoxRenderer.SetDistrict(HitBoxKey, lineVertices, colors);
+
+    /// <summary>Drops the hit-box wireframe — what a scene reset owes this layer.</summary>
+    public void ClearHitBoxes() => _hitBoxRenderer.Clear();
+
+    private static readonly object HitBoxKey = new();
 
     /// <summary>Removes one archive's rig (district unload).</summary>
     public void RemoveSkeletonDistrict(object key) => _rigRenderer.RemoveDistrict(key);
@@ -277,6 +298,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _helperRenderer = new HelperGlyphRenderer(_linePass);
         _helperHighlightRenderer = new HelperGlyphRenderer(_linePass);
         _partShapeRenderer = new LineOverlayRenderer(_linePass);
+        _hitBoxRenderer = new LineOverlayRenderer(_linePass);
         _actorRenderer = new ActorMarkerRenderer(_linePass);
         _actorSelectionRenderer = new ActorMarkerRenderer(_linePass);
         _selectionOutline = new SelectionOutlineRenderer(gpu);
@@ -551,6 +573,14 @@ public sealed unsafe class SceneRenderer : IDisposable
             _partShapeRenderer.Render(ctx, overlayFrame, RigStyle(new Vector4(1f, 1f, 1f, 0.95f), 2f));
         }
 
+        // The per-piece hit boxes. Thinner and fainter than the physics shapes: there are a hundred and
+        // eighty of them on a car and they overlap, so they have to read as a haze the geometry sits inside
+        // rather than as a second car made of lines.
+        if (ShowHitBoxes)
+        {
+            _hitBoxRenderer.Render(ctx, overlayFrame, RigStyle(new Vector4(1f, 1f, 1f, 0.55f), 1.2f));
+        }
+
         // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per segment
         // (per category), so the tint stays neutral.
         if (ShowActors) _actorRenderer.Render(ctx, overlayFrame, OverlayLineStyle.Default(Vector4.One));
@@ -806,6 +836,7 @@ public sealed unsafe class SceneRenderer : IDisposable
         _helperRenderer.Dispose();
         _helperHighlightRenderer.Dispose();
         _partShapeRenderer.Dispose();
+        _hitBoxRenderer.Dispose();
         _navMeshRenderer.Dispose();
         _navRenderer.Dispose();
         _linePass.Dispose();

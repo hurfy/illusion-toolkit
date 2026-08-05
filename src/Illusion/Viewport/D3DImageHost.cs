@@ -40,6 +40,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly TransformEditController Editing;
     internal readonly CollisionEditController CollisionEditing;
     internal readonly CarCollisionController CarCollisionEditing;
+    internal readonly HitBoxController HitBoxes;
     internal readonly CarPartController CarPartEditing;
     internal readonly TranslokatorEditController CrashEditing;
     internal readonly ActorEditController ActorEditing;
@@ -59,6 +60,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         Editing = new TransformEditController(this);
         CollisionEditing = new CollisionEditController(this);
         CarCollisionEditing = new CarCollisionController(this);
+        HitBoxes = new HitBoxController(this);
         CarPartEditing = new CarPartController(this);
         CrashEditing = new TranslokatorEditController(this);
         ActorEditing = new ActorEditController(this);
@@ -281,6 +283,20 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         get => CarCollisionEditing.ShowShapes;
         set => CarCollisionEditing.ShowShapes = value;
     }
+
+    /// <summary>Whether to draw the per-piece hit boxes — the volumes a shot has to pass before it is tested
+    /// against a piece's triangles at all. A whole-scene layer, unlike the physics shapes above: the question
+    /// it answers is whether new geometry is inside one, and that is asked of the car, not of a selection.
+    /// </summary>
+    public bool ShowHitBoxes
+    {
+        get => HitBoxes.Show;
+        set => HitBoxes.Show = value;
+    }
+
+    /// <summary>Pieces whose own geometry provably escapes their own hit box — geometry that cannot be shot.
+    /// Zero on a stock car; anything else is the layer having found something.</summary>
+    public int UnshootablePieceCount => HitBoxes.Escapes;
 
     /// <summary>
     /// Re-reads the car's physics off disk and redraws it.
@@ -956,7 +972,13 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         _orbitDistance = MathF.Max(radius * 1.5f, 5f); // pivot ≈ scene center for gizmo snap / orbit
     }
 
-    internal void RaiseSceneChanged() => SceneChanged?.Invoke();
+    // The hit-box layer is read straight off the models, so it goes stale whenever the stage does: a car
+    // arriving, a scene reset, geometry pushed. Rebuilding it is one walk and one buffer upload.
+    internal void RaiseSceneChanged()
+    {
+        HitBoxes.Redraw();
+        SceneChanged?.Invoke();
+    }
     internal void RaiseCatalogReady() => CatalogReady?.Invoke();
     // The part-shape overlay follows the selection and the gizmo: it draws one part's shapes, so it is stale
     // the moment either changes. Cheap — a handful of stubs and a dozen small files.

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Numerics;
 using System.Text;
 using Illusion.Assets;
 using Illusion.Assets.Bridge;
@@ -658,6 +659,64 @@ internal static class BridgeSkinProbes
             sb.AppendLine($"bones the body is actually weighted to ({used.Count}): " +
                           string.Join(", ", used.Take(24)) + (used.Count > 24 ? ", …" : ""));
 
+            // ── WHERE A NEW FACE LANDS, and what that costs the hit boxes ──
+            //
+            // A piece is what the game pre-filters a bullet against: it carries a box, and a shot only
+            // reaches its triangles through that box. A new face therefore has to join the piece it is
+            // NEAREST to — dropping it into "the first piece of its bone" stretched that one box over
+            // whatever was welded on, however far away, and one piece then passes the filter almost
+            // everywhere. This welds a triangle onto the far end of the body and checks both halves of the
+            // answer: it is claimed by somebody, and by the nearest somebody.
+            {
+                int loops = mesh.LoopVertexIndices.Length;
+                int verts = mesh.Positions.Length;
+                // Three corners of an existing face, moved bodily to the back of the car — a face made of
+                // NEW vertices, so it has no donor and must go down the fallback path being tested.
+                Vector3 far = mesh.Positions[mesh.LoopVertexIndices[0]] + new Vector3(0f, -1.4f, 0.35f);
+                var welded = new MeshObjectPayload
+                {
+                    Id = mesh.Id,
+                    Name = mesh.Name,
+                    World = mesh.World,
+                    Local = mesh.Local,
+                    Positions = [.. mesh.Positions, far, far + new Vector3(0.12f, 0, 0), far + new Vector3(0, 0, 0.12f)],
+                    LoopVertexIndices = [.. mesh.LoopVertexIndices, (uint)verts, (uint)(verts + 1), (uint)(verts + 2)],
+                    LoopNormals = [.. mesh.LoopNormals, mesh.LoopNormals[0], mesh.LoopNormals[1], mesh.LoopNormals[2]],
+                    LoopUvs = [.. mesh.LoopUvs, mesh.LoopUvs[0], mesh.LoopUvs[1], mesh.LoopUvs[2]],
+                    LoopOrigIndex = [.. mesh.LoopOrigIndex, -1, -1, -1],
+                    FaceMaterials = [.. mesh.FaceMaterials, mesh.FaceMaterials[0]],
+                    Materials = mesh.Materials,
+                    VertexDeclaration = mesh.VertexDeclaration,
+                    DecompressionOffset = mesh.DecompressionOffset,
+                    DecompressionFactor = mesh.DecompressionFactor,
+                };
+
+                BridgeMeshApplier.ApplyResult? grew =
+                    BridgeMeshApplier.TryApply(model, welded, out string? grewWhy);
+                FrameObjectModel fresh = model2;
+                Check("a triangle can be welded onto a skinned body", grew != null, grewWhy ?? "");
+                if (grew != null)
+                {
+                    grew.ApplyNew();
+
+                    // Which piece took the new face, and where the nearest one was. Both read off the model
+                    // itself, so this cannot pass by agreeing with the code that wrote it.
+                    (int piece, float ownDistance, float nearestDistance, int claimed) =
+                        WeldedFaceOwner(fresh, far);
+                    Check("a welded face is claimed by a piece rather than left out of every range",
+                        claimed == 1, $"claimed by {claimed} pieces");
+                    Check("…and by the piece NEAREST to it, so its box grows as little as it can",
+                        piece >= 0 && ownDistance <= nearestDistance + 1e-3f,
+                        $"landed {ownDistance:F2} m from its piece, nearest was {nearestDistance:F2} m");
+
+                    // The point of all of it: after the push, every piece still holds its own geometry.
+                    int outside = PiecesEscaping(fresh);
+                    Check("every piece's hit box still contains its own geometry after the weld",
+                        outside == 0, $"{outside} pieces have geometry outside their own box");
+                }
+            }
+
+
             sb.Insert(0, $"BRIDGE SKIN PROBE ({focus}): {pass} passed, {fail} failed\n\n");
         }
         catch (Exception ex)
@@ -925,4 +984,119 @@ internal static class BridgeSkinProbes
 
     private static bool IsModel(IFrameNode node) =>
         node is Illusion.Assets.Adapters.FrameNodeAdapter { Frame: FrameObjectModel };
+
+    /// <summary>Metres per raw hit-box unit — the quantum the builder writes with.</summary>
+    private const float HitBoxQuantum = 10f / 32768f;
+
+    private static System.Numerics.Vector3 BoxCentre(FrameObjectModel.HitBoxInfo box) =>
+        new System.Numerics.Vector3(Signed(box.Position.S1), Signed(box.Position.S2), Signed(box.Position.S3))
+        * HitBoxQuantum;
+
+    private static float Signed(ushort raw) => raw >= 32768 ? raw - 65536 : raw;
+
+    // The pieces of a model in the flat order its boxes are stored in.
+    private static IEnumerable<(int Split, FrameObjectModel.BlendMeshSplitInfo Piece)> PiecesOf(
+        FrameObjectModel model)
+    {
+        FrameObjectModel.WeightedByMeshSplit[] splits = model.BlendMeshSplits ?? [];
+        for (int s = 0; s < splits.Length; s++)
+        {
+            foreach (FrameObjectModel.BlendMeshSplitInfo piece in splits[s].Data ?? []) yield return (s, piece);
+        }
+    }
+
+    /// <summary>
+    /// Which piece claimed the face welded at <paramref name="at"/>, how far that piece's box centre is from
+    /// it, and how far the nearest piece OF THE SAME SPLIT was. Read off the model rather than from the code
+    /// that assigned it, so the check cannot pass by agreeing with itself.
+    /// </summary>
+    private static (int Piece, float Own, float Nearest, int Claimed) WeldedFaceOwner(
+        FrameObjectModel model, System.Numerics.Vector3 at)
+    {
+        DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
+        if (mesh?.Indices is not { Length: > 0 } indices) return (-1, 0, 0, 0);
+
+        // The welded triangle is the one whose corners sit at the position it was welded at.
+        int face = -1;
+        for (int f = 0; f < indices.Length / 3 && face < 0; f++)
+        {
+            uint v = indices[f * 3];
+            if (v < mesh.Positions.Length && (mesh.Positions[v] - at).Length() < 0.02f) face = f;
+        }
+        if (face < 0) return (-1, 0, 0, 0);
+
+        int ordinal = 0, owner = -1, ownerSplit = -1, claimed = 0;
+        foreach ((int split, FrameObjectModel.BlendMeshSplitInfo piece) in PiecesOf(model))
+        {
+            foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+            {
+                foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                {
+                    int from = range.StartIndex / 3;
+                    if (face >= from && face < from + range.NumFaces)
+                    {
+                        claimed++;
+                        owner = ordinal;
+                        ownerSplit = split;
+                    }
+                }
+            }
+            ordinal++;
+        }
+        if (owner < 0) return (-1, 0, 0, claimed);
+
+        FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
+        float own = owner < boxes.Length ? (BoxCentre(boxes[owner]) - at).Length() : 0f;
+
+        // The nearest of the split's own pieces, measured on the boxes as they stood BEFORE this face grew
+        // one of them — which is why the owner's own distance is left out of the comparison.
+        float nearest = float.MaxValue;
+        int seen = 0;
+        foreach ((int split, FrameObjectModel.BlendMeshSplitInfo _) in PiecesOf(model))
+        {
+            if (split == ownerSplit && seen != owner && seen < boxes.Length)
+            {
+                nearest = Math.Min(nearest, (BoxCentre(boxes[seen]) - at).Length());
+            }
+            seen++;
+        }
+        return (owner, own, nearest == float.MaxValue ? own : nearest, claimed);
+    }
+
+    /// <summary>How many pieces hold geometry outside their own box — the invariant the rebuild exists for.</summary>
+    private static int PiecesEscaping(FrameObjectModel model)
+    {
+        DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
+        if (mesh?.Indices is not { Length: > 0 } indices) return 0;
+        FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
+
+        int ordinal = 0, escaping = 0;
+        foreach ((int _, FrameObjectModel.BlendMeshSplitInfo piece) in PiecesOf(model))
+        {
+            if (ordinal >= boxes.Length) break;
+            System.Numerics.Vector3 centre = BoxCentre(boxes[ordinal]);
+            // The builder writes the radius on every axis, so any one of them is the radius it promised.
+            float radius = (boxes[ordinal].Size.S1 * HitBoxQuantum) + 1e-3f;
+            ordinal++;
+
+            bool outside = false;
+            foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+            {
+                foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                {
+                    int to = Math.Min(range.StartIndex + (range.NumFaces * 3), indices.Length);
+                    for (int i = range.StartIndex; i < to && !outside; i++)
+                    {
+                        uint v = indices[i];
+                        if (v < mesh.Positions.Length && (mesh.Positions[v] - centre).Length() > radius)
+                        {
+                            outside = true;
+                        }
+                    }
+                }
+            }
+            if (outside) escaping++;
+        }
+        return escaping;
+    }
 }

@@ -698,6 +698,15 @@ internal static class ProbeRunner
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
                     args.Length >= 3 ? args[2] : null);
                 return true;
+            // DESTRUCTIVE, and on purpose: grows every per-piece hit box of a car in its extracted working
+            // copy so the next pack can be shot at. Undone by re-extracting. See HitBoxProbes.
+            case "--probe-hitbox-blowup":
+                HitBoxProbes.RunHitBoxBlowupProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
+                    args.Length >= 3 && Enum.TryParse(args[2], true, out HitBoxProbes.Sabotage how)
+                        ? how
+                        : HitBoxProbes.Sabotage.GrowHitBoxes);
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt
