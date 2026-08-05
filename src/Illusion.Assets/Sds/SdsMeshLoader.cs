@@ -268,7 +268,7 @@ public static class SdsMeshLoader
         IReadOnlyDictionary<FrameObjectSingleMesh, CrashPlacements.Cloud>? instanceMap,
         HashSet<FrameObjectBase> claimed, int lod)
     {
-        var node = new SdsFrameNode { Name = obj.Name?.ToString() ?? "?", Kind = KindOf(obj), Source = document.Node(obj) };
+        var node = new SdsFrameNode { Name = TreeName(obj), Kind = KindOf(obj), Source = document.Node(obj) };
 
         if (obj is FrameObjectSingleMesh sm && sm.Geometry != null)
         {
@@ -459,6 +459,20 @@ public static class SdsMeshLoader
 
     // Object type = class name without the FrameObject prefix (SingleMesh→Mesh). No switch-by-type —
     // that has a trap of unreachable patterns due to inheritance (Area:Joint, Frame:Joint, etc.).
+    /// <summary>
+    /// What the scene tree calls a frame — its name, or what it IS when it has none.
+    ///
+    /// <para>
+    /// A car's grouping holders carry no name at all, and asking the vendor <c>HashName</c> for a string
+    /// gives one anyway: with an empty name it casts the 64-bit hash to <c>SkeletonBoneIDs</c>, a BONE-id
+    /// enum, and stringifies that. For an unnamed holder the hash is 0 and the enum prints "0", so a car's
+    /// hierarchy came out as a column of rows called "0" — a number that is neither a name nor an id of
+    /// anything, and that reads as data rather than as the absence of it.
+    /// </para>
+    /// </summary>
+    private static string TreeName(FrameObjectBase o) =>
+        o.Name?.String is { Length: > 0 } named ? named : $"({KindOf(o).ToLowerInvariant()}, unnamed)";
+
     private static string KindOf(FrameObjectBase o)
     {
         string t = o.GetType().Name;

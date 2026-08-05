@@ -415,9 +415,58 @@ internal sealed class TransformEditController
             var meshes = new List<GpuMesh>();
             foreach (SceneNode leaf in n.DescendantMeshLeaves())
                 if (leaf.Mesh != null) meshes.Add(leaf.Mesh);
-            items.Add(new DeletedItem(n, parent, parent.Children.IndexOf(n), meshes.ToArray(), BuildDetachment(n)));
+            items.Add(new DeletedItem(
+                n, parent, parent.Children.IndexOf(n), meshes.ToArray(), BuildDetachment(n), MirrorsOf(n)));
         }
         return items.Count == 0 ? null : new DeleteEdit(this, items.ToArray());
+    }
+
+    /// <summary>
+    /// Every OTHER row in the tree that stands for something inside this subtree.
+    ///
+    /// <para>
+    /// A frame attached to a bone is listed twice: under the bone, which says which part it belongs to, and
+    /// in the hierarchy, which says where it sits in the graph. The document knows one frame; the tree shows
+    /// two rows. Deleting one of them used to leave the other behind pointing at a frame that no longer
+    /// exists — "I delete the collision on Scale Bone and it stays in the unnamed holders".
+    /// </para>
+    /// </summary>
+    private (SceneNode Node, SceneNode Parent, int Index)[] MirrorsOf(SceneNode root)
+    {
+        var sources = new HashSet<object>();
+        CollectSubtreeSources(root, sources);
+        if (sources.Count == 0) return [];
+
+        var found = new List<(SceneNode, SceneNode, int)>();
+        foreach (SceneNode top in _host.Tree.Roots) Walk(top);
+        return [.. found];
+
+        void Walk(SceneNode node)
+        {
+            foreach (SceneNode child in node.Children.ToList())
+            {
+                if (child.Source != null && sources.Contains(child.Source) && !IsUnder(child, root))
+                {
+                    found.Add((child, node, node.Children.IndexOf(child)));
+                }
+                Walk(child);
+            }
+        }
+    }
+
+    private static void CollectSubtreeSources(SceneNode node, HashSet<object> into)
+    {
+        if (node.Source != null) into.Add(node.Source);
+        foreach (SceneNode c in node.Children) CollectSubtreeSources(c, into);
+    }
+
+    private static bool IsUnder(SceneNode node, SceneNode root)
+    {
+        for (SceneNode? at = node; at != null; at = at.Parent)
+        {
+            if (ReferenceEquals(at, root)) return true;
+        }
+        return false;
     }
 
     // The document-level half of a delete: every vendor frame under the subtree, handed to DetachedFrames so
@@ -484,6 +533,9 @@ internal sealed class TransformEditController
             _host.Rnd?.DetachMeshes(it.Meshes);
             _host.Tree.MeshCount -= it.Meshes.Length;
             it.Parent.Children.Remove(it.Node);
+            // …and every other row showing the same object, or the frame is gone from the document while a
+            // second row still lists it.
+            foreach ((SceneNode row, SceneNode holder, int _) in it.Mirrors) holder.Children.Remove(row);
         }
         _host.RaiseSceneChanged();
     }
@@ -505,14 +557,23 @@ internal sealed class TransformEditController
             }
             foreach (GpuMesh m in it.Meshes) _host.Rnd?.AttachMesh(m);
             _host.Tree.MeshCount += it.Meshes.Length;
+            foreach ((SceneNode row, SceneNode holder, int at) in it.Mirrors)
+            {
+                if (!holder.Children.Contains(row)) holder.Children.Insert(Math.Min(at, holder.Children.Count), row);
+            }
             restored.Add(it.Node);
         }
         if (restored.Count > 0) _host.Selection.SetSelection(restored, restored[^1]);
         _host.RaiseSceneChanged();
     }
 
+    /// <param name="Mirrors">The OTHER rows that show the same objects. A frame hung off a bone appears
+    /// twice — once under that bone and once in its own place in the hierarchy — so deleting the row that was
+    /// clicked left the frame gone from the document and still listed under the other one, which reads as
+    /// "it deleted here and stayed there".</param>
     private sealed record DeletedItem(
-        SceneNode Node, SceneNode Parent, int Index, GpuMesh[] Meshes, DetachedFrames? Detached);
+        SceneNode Node, SceneNode Parent, int Index, GpuMesh[] Meshes, DetachedFrames? Detached,
+        (SceneNode Node, SceneNode Parent, int Index)[] Mirrors);
 
     private sealed class DeleteEdit : INodeEdit
     {

@@ -150,6 +150,10 @@ internal static class BulletProbes
             new("mesh quantization, size also offset", b => QuantizedBoth(b, offset, factor)),
             new("SIGNED centre, size is half", b => SignedCentre(b, half: true)),
             new("SIGNED centre, size is full", b => SignedCentre(b, half: false)),
+            new("SIGNED min + extent, fixed scale", b => MinFirst(b, offset, factor, false, false)),
+            new("SIGNED min + far corner, fixed scale", b => MinFirst(b, offset, factor, true, false)),
+            new("SIGNED min + extent, quantized", b => MinFirst(b, offset, factor, false, true)),
+            new("SIGNED min + far corner, quantized", b => MinFirst(b, offset, factor, true, true)),
         ];
 
         Matrix4x4[] rest = model.RestTransform ?? [];
@@ -208,6 +212,12 @@ internal static class BulletProbes
         // Recorded as knowledge, not as a hope: no reading of the six u16 puts a piece inside its own box, so
         // whatever the block is, it is not a box over this mesh. The assertion is phrased so that it fails if
         // someone ever finds the reading that works — which would be the discovery, not a regression.
+        // ELEVEN readings now, in two spaces, with the piece's bone resolved correctly through the remap
+        // table — the mistake that invalidated the first attempt. The best still covers a fortieth of the
+        // geometry it is supposed to bound, the size-to-extent ratio has an IQR of twice its own median, and
+        // the accompanying uint is a dictionary shared across cars (2899 of 5175 values appear in more than
+        // one, and the commonest covers 6384 boxes on all 88). Whatever these sixteen bytes are, they are
+        // not this piece's box, and this is where guessing at them stops.
         check("the hit boxes are NOT geometry over the mesh — no reading contains the pieces",
             best * 2 <= total, $"best reading covers {best * 100.0 / total:F1}% of the vertices");
     }
@@ -230,6 +240,31 @@ internal static class BulletProbes
     /// triple "Short3" and reads all six as unsigned, which is where this started.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The two triples read as a CORNER and something measured from it, rather than as a centre and a size.
+    ///
+    /// <para>
+    /// Worth trying because nothing says a box has to be stated centre-first, and the shipped values are
+    /// consistent with it: the first triple carries negatives and the second never does, which is exactly
+    /// how a min corner and an extent behave and not at all how a centre and a size do — a centre is as
+    /// often positive as negative on a symmetric car, and these are not.
+    /// </para>
+    /// </summary>
+    /// <param name="asCorner">Whether the second triple is the far CORNER rather than an extent.</param>
+    /// <param name="quantized">Whether to read them through the mesh's own vertex lattice instead of the
+    /// fixed scale — the same six u16 a packed position uses.</param>
+    private static (Vector3 Lo, Vector3 Hi) MinFirst(
+        FrameObjectModel.HitBoxInfo box, Vector3 offset, float factor, bool asCorner, bool quantized)
+    {
+        float scale = quantized ? factor : Scale;
+        Vector3 shift = quantized ? offset : Vector3.Zero;
+        var lo = (new Vector3(
+            (short)box.Position.S1, (short)box.Position.S2, (short)box.Position.S3) * scale) + shift;
+        var second = new Vector3((ushort)box.Size.S1, (ushort)box.Size.S2, (ushort)box.Size.S3) * scale;
+        Vector3 hi = asCorner ? second + shift : lo + second;
+        return (Vector3.Min(lo, hi), Vector3.Max(lo, hi));
+    }
+
     private static (Vector3 Lo, Vector3 Hi) SignedCentre(FrameObjectModel.HitBoxInfo box, bool half)
     {
         var centre = new Vector3(

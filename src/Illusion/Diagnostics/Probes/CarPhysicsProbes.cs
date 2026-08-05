@@ -1165,6 +1165,44 @@ internal static class CarPhysicsProbes
                 }
             }
 
+            // DELETING SEVERAL STUBS AT ONCE. Reported: "the prefab says 19 collisions, I delete TWO, and it
+            // says 18". Each stub is supposed to take its own volume with it, so two should leave 17. This
+            // walks every stub the car has and reports which volume each one claims — a stub that claims the
+            // same volume as another, or none, is the arithmetic.
+            var claims = new Dictionary<int, List<string>>();
+            var orphans = new List<string>();
+            foreach (PlacedPhysicsVolume any in CarPhysicsVolumes.Load(scratch, fr))
+            {
+                if (any.Stub == null) continue;
+                if (!claims.TryGetValue(any.Volume.Index + (any.Part * 1000), out List<string>? who))
+                {
+                    claims[any.Volume.Index + (any.Part * 1000)] = who = [];
+                }
+                who.Add(any.Stub.Name.ToString() ?? "?");
+            }
+            foreach (FrameObjectCollision stub in fr.FrameObjects!.Values.OfType<FrameObjectCollision>())
+            {
+                bool named = CarPhysicsVolumes.Load(scratch, fr).Any(v => ReferenceEquals(v.Stub, stub));
+                if (!named) orphans.Add(stub.Name.ToString() ?? "?");
+            }
+            int shared = claims.Count(p => p.Value.Count > 1);
+            sb.AppendLine($"    {fr.FrameObjects!.Values.OfType<FrameObjectCollision>().Count()} collision "
+                + $"stubs, {claims.Count} volumes claimed, {shared} claimed by more than one stub, "
+                + $"{orphans.Count} stubs claiming no volume at all"
+                + (orphans.Count > 0 ? " — " + string.Join(", ", orphans.Take(6)) : ""));
+            foreach ((int at, List<string> who) in claims.Where(p => p.Value.Count > 1).Take(6))
+            {
+                sb.AppendLine($"      part {at / 1000} volume {at % 1000} is claimed by "
+                    + string.Join(" and ", who));
+            }
+
+            // A stub that shares its volume with another means deleting both takes ONE volume away, and a
+            // stub that claims none means deleting it takes nothing. Either way the count the panel shows
+            // stops matching what was removed, which is exactly the report.
+            check("every collision stub claims a volume of its own",
+                shared == 0 && orphans.Count == 0,
+                $"{shared} volumes shared, {orphans.Count} stubs with none");
+
             // What the reported bug actually was: moving the stub used to change only the frame graph.
             var moved = Matrix4x4.CreateTranslation(-0.4f, 0.7f, 1.25f);
             added.Frame.LocalTransform = moved;

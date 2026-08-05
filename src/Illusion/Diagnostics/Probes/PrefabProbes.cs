@@ -420,6 +420,18 @@ internal static class PrefabProbes
                 == bands.First(b => b.Title == "Doors").Rows.Count(r => r.CanRemove)
                     .ToString(System.Globalization.CultureInfo.InvariantCulture),
             $"Doors badge {bands.First(b => b.Title == "Doors").Badge}");
+        // …EXCEPT where the thing and the row are not the same. Collision lists volumes under the part each
+        // hangs off, so counting top-level rows counted PARTS: a car with 22 volumes said "19", and deleting
+        // the two that shared a part said "18" — off by one for two deletions, and it read as a miscount.
+        PrefabGroupRowsViewModel? collision = bands.FirstOrDefault(b => b.Title == "Collision");
+        int volumeRows = collision?.Rows.Count(r => r.Label == "What it is") ?? 0;
+        int partRows = collision?.Rows.Count(r => !r.IsField) ?? 0;
+        check("the collision band counts volumes, not the parts they hang off",
+            collision != null && collision.Badge
+                == volumeRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            $"badge {collision?.Badge ?? "(no band)"}, {volumeRows} volumes on {partRows} parts");
+        check("…which on this car is a different number from the part count",
+            volumeRows != partRows, $"{volumeRows} vs {partRows}");
         check("every band is drawn in its own colour",
             bands.Select(b => b.Accent).Distinct().Count() >= bands.Count - 1,
             $"{bands.Select(b => b.Accent).Distinct().Count()} of {bands.Count}");

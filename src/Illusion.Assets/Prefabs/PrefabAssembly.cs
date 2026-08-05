@@ -408,9 +408,11 @@ public sealed class PrefabAssembly
         // the frame graph's collision stubs are a second copy of these placements that the game never reads,
         // so a shape only exists in game because a volume here names it.
         var volumes = new List<PrefabRefView>();
+        int volumeCount = 0;
         foreach (CarDeformPart part in file.CarDeformParts)
         {
             if (part.Volumes.Count == 0) continue;
+            volumeCount += part.Volumes.Count;
             string bone = names.TryGetValue(part.Frame, out string? found) ? found : "?";
             volumes.Add(new PrefabRefView($"{bone} ({part.Kind})",
                 part.Volumes.Count == 1 ? "1 volume" : $"{part.Volumes.Count} volumes",
@@ -481,7 +483,9 @@ public sealed class PrefabAssembly
                 }
             }
         }
-        if (volumes.Count > 0) groups.Add(new PrefabGroupView("Collision", volumes));
+        // Counted in VOLUMES, not in the part rows they hang under — deleting the two that shared a part used
+        // to take the header from 19 to 18, because what it was counting was parts that still had a volume left.
+        if (volumes.Count > 0) groups.Add(new PrefabGroupView("Collision", volumes, volumeCount));
 
         return groups;
 
@@ -643,11 +647,15 @@ public sealed record PrefabRefView(
 /// <summary>One band of rows — the doors, the seats, the axles.</summary>
 public sealed class PrefabGroupView
 {
-    public PrefabGroupView(string title, IReadOnlyList<PrefabRefView> rows)
+    public PrefabGroupView(string title, IReadOnlyList<PrefabRefView> rows, int? count = null)
     {
         Title = title;
         Rows = rows;
+        _count = count;
     }
+
+    /// <summary>What the badge counts when the band's own rows would answer wrongly — see <see cref="PartCount"/>.</summary>
+    private readonly int? _count;
 
     public string Title { get; }
 
@@ -655,9 +663,17 @@ public sealed class PrefabGroupView
 
     public int DanglingCount => Rows.Count(r => r.Kind == PrefabRefKind.Dangling);
 
-    /// <summary>How many THINGS the band holds — four doors, not the twelve rows it takes to describe them.
-    /// A field row is part of the thing above it, never a thing of its own.</summary>
-    public int PartCount => Rows.Count(r => !r.Sub);
+    /// <summary>
+    /// How many THINGS the band holds — four doors, not the twelve rows it takes to describe them. A field
+    /// row is part of the thing above it, never a thing of its own.
+    /// <para>
+    /// A band may say so itself. Collision counts VOLUMES: its top-level rows are the parts the volumes hang
+    /// off, so counting rows made the header read "19" for a car with 22 volumes, and deleting the two that
+    /// shared a part dropped it to 18 — a number that moved by one for two deletions and looked like a
+    /// miscount.
+    /// </para>
+    /// </summary>
+    public int PartCount => _count ?? Rows.Count(r => !r.Sub);
 
     /// <summary>What the group's header says beside its name: how many, and how many are broken.</summary>
     public string Badge => DanglingCount == 0

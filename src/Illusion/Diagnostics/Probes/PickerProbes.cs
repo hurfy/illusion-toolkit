@@ -157,6 +157,33 @@ internal static class PickerProbes
                     $"the frame is now under \"{objectNode.Parent?.Name ?? "null"}\"");
             }
 
+            // 8) DELETING an object that the tree lists twice. A frame hung off a bone has a row under that
+            // bone and a row in the hierarchy; the document knows one frame. Deleting the row that was
+            // clicked used to leave the other one behind, pointing at a frame that no longer exists —
+            // reported as "I delete the collision on Scale Bone and it stays in the unnamed holders".
+            var secondRow = new SceneNode($"{objectNode.Name}  (Attachment)", "Attachment", false)
+            {
+                Source = objectNode.Source,
+            };
+            boneRow.AddChild(secondRow);
+
+            // Asked of the PARENT's child list, not of the node's Parent back-pointer: removing a node from a
+            // parent leaves that back-pointer standing (a district unload relies on it), so a node can be out
+            // of the tree and still name where it used to hang.
+            SceneNode clickedHolder = objectNode.Parent!;
+            host.Selection.SetSelection([objectNode], objectNode);
+            host.DeleteSelected();
+            Check("deleting an object drops EVERY row that showed it, not just the clicked one",
+                !clickedHolder.Children.Contains(objectNode) && !boneRow.Children.Contains(secondRow),
+                $"clicked row {(clickedHolder.Children.Contains(objectNode) ? "still there" : "gone")}, "
+                    + $"second row {(boneRow.Children.Contains(secondRow) ? "still there" : "gone")}");
+
+            host.Undo();
+            Check("…and undoing the delete brings both rows back",
+                clickedHolder.Children.Contains(objectNode) && boneRow.Children.Contains(secondRow),
+                $"clicked row {(clickedHolder.Children.Contains(objectNode) ? "back" : "missing")}, "
+                    + $"second row {(boneRow.Children.Contains(secondRow) ? "back" : "missing")}");
+
             sb.Insert(0, $"REPARENT PICKER PROBE ({district}): {pass} passed, {fail} failed\n\n");
         }
         catch (Exception ex)
