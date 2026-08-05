@@ -39,6 +39,64 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     /// object factory); the UI never touches it.</summary>
     internal FrameResource Frame => _frame;
 
+    /// <summary>
+    /// Every name this document's graph currently answers to, keyed by FNV64 — frame objects and the bones of
+    /// every skinned model, which is exactly the set a PREFAB can point at.
+    ///
+    /// <para>
+    /// This is the LIVE graph, not the file: a frame minted this session is here and is not on disk until
+    /// Save. Anything resolving prefab hashes for the panel has to fold these in, or a part made a moment ago
+    /// shows as a bare hash and cannot be picked in another slot.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<ulong, string> FrameNames()
+    {
+        var names = new Dictionary<ulong, string>();
+        foreach (object o in _frame.FrameObjects?.Values ?? Enumerable.Empty<object>())
+        {
+            if (o is FrameObjectBase f && f.Name.String is { Length: > 0 } n) names[f.Name.Hash] = n;
+        }
+        foreach (FrameObjectModel model in
+                 (_frame.FrameObjects?.Values ?? Enumerable.Empty<object>()).OfType<FrameObjectModel>())
+        {
+            Formats.Hashing.HashName[] bones;
+            try { bones = model.GetSkeletonObject().BoneNames ?? []; }
+            catch (Exception) { continue; }
+            foreach (Formats.Hashing.HashName bone in bones)
+            {
+                if (bone.String is { Length: > 0 } bn) names[bone.Hash] = bn;
+            }
+        }
+        return names;
+    }
+
+    /// <summary>
+    /// Where each of the car's bones stands, keyed by the hash the prefab names it with.
+    ///
+    /// <para>
+    /// What the property panel needs to show a collision volume's position in the CAR's axes. A volume is
+    /// written in the space of a bone — its own part's, or that of the part it hangs off — and most car bones
+    /// are turned relative to the car, so the stored numbers do not mean what a person reading X/Y/Z assumes:
+    /// on a door-mounted window, typing into Z moves the box along the car.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<ulong, System.Numerics.Matrix4x4> BoneWorlds()
+    {
+        var worlds = new Dictionary<ulong, System.Numerics.Matrix4x4>();
+        foreach (FrameObjectModel model in
+                 (_frame.FrameObjects?.Values ?? Enumerable.Empty<object>()).OfType<FrameObjectModel>())
+        {
+            Formats.Hashing.HashName[] bones;
+            try { bones = model.GetSkeletonObject().BoneNames ?? []; }
+            catch (Exception) { continue; }
+            for (int i = 0; i < bones.Length; i++)
+            {
+                worlds.TryAdd(bones[i].Hash, model.GetJointWorldTransform(i));
+            }
+        }
+        return worlds;
+    }
+
     private readonly Dictionary<Formats.Actors.ActorEntry, ActorNodeAdapter> _actorNodes = new();
 
     /// <summary>Wraps one of the scene's actors as a property source, canonically — the tree and the property
@@ -91,6 +149,28 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     public IReadOnlyList<Collisions.PlacedPhysicsVolume> PhysicsVolumes() =>
         Collisions.CarPhysicsVolumes.Load(MafiaEnvironment.ExtractedDir(SourceArchive), _frame);
 
+    /// <summary>
+    /// Moves every collision stub onto the placement its prefab volume gives it — for after an edit made to
+    /// the FILE rather than to the scene, so the handle stops disagreeing with what it holds. In memory only;
+    /// returns how many had to move.
+    /// </summary>
+    /// <remarks>
+    /// A stub the user has DRAGGED is left alone. Its new placement lives only in the frame until a save
+    /// writes it through, so snapping it to the prefab here would silently throw the drag away — and this
+    /// runs on every number typed into the Prefab tab, which is a thing people do in the middle of placing
+    /// a box by eye.
+    /// </remarks>
+    /// <summary>Changes what one of this car's collision volumes IS — see
+    /// <see cref="Collisions.CarPhysicsVolumes.ChangeType"/>, which also re-spaces its placement.</summary>
+    public Collisions.CarPhysicsVolumes.TypeChange? ChangeVolumeType(
+        int part, int volume, uint newType, out string? refusal) =>
+        Collisions.CarPhysicsVolumes.ChangeType(
+            MafiaEnvironment.ExtractedDir(SourceArchive), _frame, part, volume, newType, out refusal);
+
+    public int AdoptPrefabPlacements() =>
+        Collisions.CarPhysicsVolumes.AlignStubsToPrefab(
+            MafiaEnvironment.ExtractedDir(SourceArchive), _frame, _movedCollisionStubs);
+
     public string SaveWorkingCopy()
     {
         string written = SdsWriter.SaveFrameResource(_frame, SourceArchive);
@@ -100,6 +180,11 @@ public sealed class SceneDocumentAdapter : ISceneDocument
                 MafiaEnvironment.ExtractedDir(SourceArchive), _movedCollisionStubs);
             _movedCollisionStubs.Clear();
         }
+        // A climb box is stated in the prefab row and only there; the Dummy is where it is EDITED. Without
+        // this, moving or scaling one changed what the editor draws and nothing the game climbs — which is
+        // exactly how a newly added climb box turned out to be unclimbable. Costs one prefab read per save
+        // and writes only when a box actually moved.
+        Prefabs.CarClimbBoxes.SyncFromFrames(MafiaEnvironment.ExtractedDir(SourceArchive), _frame);
         if (_nameTableDirty)
         {
             // Must run AFTER SaveFrameResource: WriteToStream ran UpdateFrameData, so FrameObjects order and the

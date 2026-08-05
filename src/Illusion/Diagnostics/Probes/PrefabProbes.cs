@@ -371,6 +371,20 @@ internal static class PrefabProbes
             pickers.Count > 0 ? $"{pickers[0].Value} / {pickers[0].SelectedFrame?.Name}" : "(none)");
         check("a fact row is not a picker", rows.Exists(r => !r.CanEdit), "");
 
+        // A restore swaps the .sds and re-extracts it under the SAME path, so a scene change has to RE-READ
+        // rather than trust that "same archive means same answer". It did trust it, and a rolled-back car went
+        // on showing the parts and collision volumes it no longer had — the rollback looked like it had not
+        // worked. Observable without touching the install: a real re-read hands back fresh row objects.
+        object? firstRow = untouched.PrefabEntries.SelectMany(e => e.Groups)
+            .SelectMany(g => g.Rows).FirstOrDefault();
+        untouched.RefreshPrefab();
+        Pump(() => untouched.HasPrefab);
+        object? afterRefresh = untouched.PrefabEntries.SelectMany(e => e.Groups)
+            .SelectMany(g => g.Rows).FirstOrDefault();
+        check("a scene change re-reads the prefab instead of serving the cached one",
+            firstRow != null && afterRefresh != null && !ReferenceEquals(firstRow, afterRefresh),
+            firstRow == null ? "no rows to compare" : "fresh rows after refresh");
+
         // What the bands offer. A car has one headlight, so Lights takes no "+"; a seat IS a part, so its
         // row takes an "×", while the brake drum that belongs to an axle does not.
         List<PrefabGroupRowsViewModel> bands = [.. untouched.PrefabEntries.SelectMany(e => e.Groups)];
@@ -467,6 +481,30 @@ internal static class PrefabProbes
         untouched.PrefabSearch = "zzzz-no-such-thing";
         check("a search that matches nothing says so rather than showing an empty tab",
             untouched.PrefabNothingFound && bands.All(b => !b.IsVisible), "");
+
+        // What made typing in that box freeze the app. Every keystroke re-split every band and handed WPF a
+        // fresh set of element view models — new instances, so no container could be reused, so the whole
+        // panel was rebuilt from scratch per character over a car's ~500 rows of heavy templates. The
+        // arithmetic barely registers; the layout pass is what stops the frame.
+        untouched.PrefabSearch = "";
+        PrefabGroupRowsViewModel widest = bands.OrderByDescending(b => b.Elements.Count).First();
+        object[] before = [.. widest.Elements];
+        untouched.PrefabSearch = "";                    // the same query again
+        check("re-running the same search rebuilds nothing at all",
+            widest.Elements.Count == before.Length
+            && widest.Elements.Select((e, i) => ReferenceEquals(e, before[i])).All(same => same),
+            $"{widest.Title}, {before.Length} elements");
+
+        untouched.PrefabSearch = "a";
+        untouched.PrefabSearch = "";
+        check("…and clearing it hands back the very same elements, so the panel is reused not rebuilt",
+            widest.Elements.Count == before.Length
+            && widest.Elements.Select((e, i) => ReferenceEquals(e, before[i])).All(same => same),
+            $"{widest.Elements.Count} vs {before.Length}");
+
+        check("the tab's size is on the record — this is what one keystroke used to rebuild", true,
+            $"{bands.Sum(b => b.Rows.Count)} rows in {bands.Count} bands, widest \"{widest.Title}\" "
+                + $"at {widest.Rows.Count}");
 
         // An edit rewrites the file and rebuilds these rows; a band the user had opened has to still be open
         // afterwards, or the panel folds shut under their hands the moment they change something.

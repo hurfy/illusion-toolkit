@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Numerics;
 using System.Text;
@@ -6,6 +7,7 @@ using Illusion.Assets.Bridge;
 using Illusion.Assets.Collisions;
 using Illusion.Bridge.Payload;
 using Illusion.Assets.Sds;
+using Illusion.Domain;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -47,12 +49,18 @@ internal static class CarPhysicsProbes
             string folder = Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars");
 
             DumpOneCar(sb, folder, focus, Check);
+            Floaters(sb, folder, focus, Check);
             Delivery(sb, folder, focus, Check);
             if (reference != null) CompareWithStock(sb, folder, focus, reference);
             RoundTrip(sb, folder, focus, Check);
             SecondInfluence(sb, folder, focus, Check);
             CapsuleAxis(sb, folder, Check);
             Census(sb, folder, Check);
+            Handles(sb, folder, Check);
+            Stubless(sb, folder, Check);
+            Facing(sb, folder, Check);
+            Extents(sb, folder, Check);
+            Purpose(sb, folder, Check);
             sb.Insert(0, $"CAR PHYSICS PROBE ({focus}): {pass} passed, {fail} failed\n\n");
         }
         catch (Exception ex)
@@ -933,6 +941,230 @@ internal static class CarPhysicsProbes
                 (mine.Volume.Transform.Translation - place.Translation).Length() < 1e-4f,
                 $"{mine.Volume.Transform.Translation} vs {place.Translation}");
 
+            // Where a shape LANDS when the thing that was selected is not the part it is given to. The dialog
+            // answers "which part" with the body whenever the selection is not itself a deformable part — and
+            // no Dummy ever is — so asking for a shape while pointing at a climb box used to put it at the
+            // body bone, which on a car is its centre. Reported as "the transform is strange in places".
+            FrameObjectDummy? pointed = fr.FrameObjects.Values.OfType<FrameObjectDummy>()
+                .FirstOrDefault(d => d.WorldTransform.Translation.Length() > 0.2f);
+            if (pointed != null)
+            {
+                Matrix4x4 landing = TransformMath.ComputeLocalTransform(
+                    pointed.WorldTransform, model.GetJointWorldTransform(bone));
+                TransformMath.TryDecompose(landing, out _, out Quaternion rotation, out Vector3 position);
+                AddedCollisionBox? atDummy = CarCollisionBuilder.AddShape(
+                    model, bone, "illusion_landing_probe_Collision", RigidBodyShape.Box, size,
+                    TransformMath.Compose(rotation, Vector3.One, position), scratch, out string? landRefusal);
+                check($"a shape asked for while pointing at \"{pointed.Name}\" lands THERE, not at the "
+                    + $"\"{target}\" bone it belongs to", atDummy != null, landRefusal ?? "");
+                if (atDummy != null)
+                {
+                    PlacedPhysicsVolume? landed = CarPhysicsVolumes.Load(scratch, fr)
+                        .FirstOrDefault(v => ReferenceEquals(v.Stub, atDummy.Frame));
+                    float off = landed == null
+                        ? float.NaN
+                        : (landed.World.Translation - pointed.WorldTransform.Translation).Length();
+                    check("…and the prefab agrees, so the game puts it where the editor drew it",
+                        landed != null && off < 1e-3f,
+                        landed == null ? "no volume" : $"{off:F4} m away from the dummy");
+                    CarCollisionBuilder.Remove(model, atDummy);
+                }
+            }
+
+            // The SELF-DESCRIBING volume — what the second report was about: "I change the Z of windowFR2 and
+            // it moves along Y, and undo does not put it back". Two separate questions, so two checks.
+            PlacedPhysicsVolume? loose = CarPhysicsVolumes.Load(scratch, fr)
+                .FirstOrDefault(v => v.Stub == null && v.Bone >= 0
+                    && v.BoneName.Contains("window", StringComparison.OrdinalIgnoreCase))
+                ?? CarPhysicsVolumes.Load(scratch, fr).FirstOrDefault(v => v.Stub == null && v.Bone >= 0);
+            if (loose != null && FlatIndexOf(scratch, loose) is var slot && slot >= 0)
+            {
+                float was = loose.Volume.Transform.Translation.Z;
+                Vector3 before = loose.World.Translation;
+                Illusion.Assets.Prefabs.PrefabEditing.ValueChange? edit =
+                    Illusion.Assets.Prefabs.PrefabEditing.SetValueIn(
+                        scratch, CarValueSlot.CollisionVolumePosition, slot, 2, was + 0.25f, "probe");
+
+                PlacedPhysicsVolume? after = CarPhysicsVolumes.Load(scratch, fr)
+                    .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
+                Vector3 shifted = after == null ? Vector3.Zero : after.World.Translation - before;
+                sb.AppendLine($"    \"{loose.BoneName}\" is written in \"{ParentBoneName(scratch, fr, loose)}\" "
+                    + $"space: +0.25 on the field's Z moves it {shifted:F3} in the world — its local axes point "
+                    + $"X{Row(after?.World ?? Matrix4x4.Identity, 0):F2} Y{Row(after?.World ?? Matrix4x4.Identity, 1):F2} "
+                    + $"Z{Row(after?.World ?? Matrix4x4.Identity, 2):F2}");
+                check("a self-describing volume's position field writes the axis it says it does",
+                    edit != null && after != null
+                    && MathF.Abs(after.Volume.Transform.Translation.Z - (was + 0.25f)) < 1e-4f
+                    && MathF.Abs(after.Volume.Transform.Translation.X - loose.Volume.Transform.Translation.X) < 1e-5f
+                    && MathF.Abs(after.Volume.Transform.Translation.Y - loose.Volume.Transform.Translation.Y) < 1e-5f,
+                    after == null ? "the volume is gone" : $"{after.Volume.Transform.Translation:F4}");
+
+                // …and the undo of it, which is what Ctrl+Z runs. A negative starting number is the case the
+                // report singled out, so the assertion is on exact equality rather than on a tolerance.
+                if (edit != null)
+                {
+                    Illusion.Assets.Prefabs.PrefabEditing.RestoreValue(edit, edit.Before);
+                    PlacedPhysicsVolume? back = CarPhysicsVolumes.Load(scratch, fr)
+                        .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
+                    check($"…and undoing it puts back exactly what was there (was {was:F4})",
+                        back != null && back.Volume.Transform.Translation == loose.Volume.Transform.Translation,
+                        back == null ? "the volume is gone" : $"{back.Volume.Transform.Translation:F4} vs "
+                            + $"{loose.Volume.Transform.Translation:F4}");
+                }
+            }
+
+            // The PANEL's own arithmetic: the position rows are shown in the car's axes, not the bone's, so
+            // "+0.25 on Y" has to move the box a quarter of a metre along the car and nowhere else. This is
+            // the fix for "Y moves it along Z and Z along Y" — the field was reading the raw bone-space
+            // numbers, and most car bones are turned.
+            if (loose != null)
+            {
+                var worlds = new Dictionary<ulong, Matrix4x4>();
+                string[] rig = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
+                for (int i = 0; i < rig.Length; i++) worlds.TryAdd(Fnv64.Hash(rig[i]), model.GetJointWorldTransform(i));
+
+                Illusion.Assets.Prefabs.PrefabAssembly? shown =
+                    Illusion.Assets.Prefabs.PrefabAssembly.ReadFrom(scratch, null, worlds);
+                Illusion.Assets.Prefabs.PrefabRefView? posRow = shown?.Entries
+                    .SelectMany(e => e.Groups).Where(g => g.Title == "Collision").SelectMany(g => g.Rows)
+                    .FirstOrDefault(r => r.ValueSlot == CarValueSlot.CollisionVolumePosition
+                        && r.Index == FlatIndexOf(scratch, loose));
+
+                PlacedPhysicsVolume? nowAt = CarPhysicsVolumes.Load(scratch, fr)
+                    .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
+                check("the panel shows a volume's position in the CAR's axes, where the viewport draws it",
+                    posRow is { Space: not null } && nowAt != null
+                    && (new Vector3(posRow.X, posRow.Y, posRow.Z) - nowAt.World.Translation).Length() < 1e-3f,
+                    posRow == null ? "no position row"
+                        : $"panel {new Vector3(posRow.X, posRow.Y, posRow.Z):F3} vs world {nowAt?.World.Translation:F3}");
+
+                // …and writing one of those axes back moves it along THAT axis of the car, which is the whole
+                // point: the conversion has to run in both directions or the field is worse than raw.
+                if (posRow is { Space: { } space } && nowAt != null
+                    && Matrix4x4.Invert(space, out Matrix4x4 back))
+                {
+                    var wanted = new Vector3(posRow.X, posRow.Y + 0.25f, posRow.Z);
+                    Vector3 asStored = Vector3.Transform(wanted, back);
+                    for (int at = 0; at < 3; at++)
+                    {
+                        Illusion.Assets.Prefabs.PrefabEditing.SetValueIn(
+                            scratch, CarValueSlot.CollisionVolumePosition, posRow.Index, at,
+                            at == 0 ? asStored.X : at == 1 ? asStored.Y : asStored.Z, "probe");
+                    }
+                    PlacedPhysicsVolume? ended = CarPhysicsVolumes.Load(scratch, fr)
+                        .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
+                    Vector3 went = (ended?.World.Translation ?? Vector3.Zero) - nowAt.World.Translation;
+                    check("…and typing +0.25 into that Y moves it a quarter-metre along the car, nowhere else",
+                        ended != null && (went - new Vector3(0f, 0.25f, 0f)).Length() < 2e-3f,
+                        $"it went {went:F4}");
+                }
+            }
+
+            // A SELF-DESCRIBING volume, which the toolkit could not make at all until now. Every box it added
+            // was type 5 — a placed physics shape, i.e. body collision — so hanging one on a window part
+            // changed nothing, and that is why the in-game test came back empty twice. A window is type 0 on
+            // all 527 shipped ones; this is the path that can finally write one.
+            IReadOnlyList<string> zoneBones = CarPhysicsVolumes.PartBones(scratch, fr);
+            string zoneOn = zoneBones.FirstOrDefault(b => b.Contains("window", StringComparison.OrdinalIgnoreCase))
+                ?? target;
+            int zonesBefore = CarPhysicsVolumes.Load(scratch, fr).Count;
+            var zoneSize = new Vector3(0.60f, 0.02f, 0.40f);
+            CarPhysicsVolumes.VolumeChange? zone = CarPhysicsVolumes.AddZone(
+                scratch, zoneOn, Matrix4x4.CreateTranslation(0.1f, 0.2f, 0.3f), zoneSize, 0);
+            check($"a plain GLASS volume can be added to \"{zoneOn}\"", zone != null, "");
+            if (zone != null)
+            {
+                PlacedPhysicsVolume? made = CarPhysicsVolumes.Load(scratch, fr)
+                    .FirstOrDefault(v => v.Volume.VolumeType == 0 && !v.Volume.NamesShape
+                        && (v.Volume.Size - zoneSize).Length() < 1e-4f);
+                check("…and it is type 0, names no shape, and states the size that was asked for",
+                    made != null && made.Volume.ShapeHash == 0,
+                    made == null ? "not found" : $"type {made.Volume.VolumeType}, size {made.Volume.Size:F3}");
+                check("…and it added exactly one volume",
+                    CarPhysicsVolumes.Load(scratch, fr).Count == zonesBefore + 1,
+                    $"{zonesBefore} -> {CarPhysicsVolumes.Load(scratch, fr).Count}");
+
+                CarPhysicsVolumes.Remove(zone);
+                check("…and undoing it takes that one volume away again",
+                    CarPhysicsVolumes.Load(scratch, fr).Count == zonesBefore, "");
+                CarPhysicsVolumes.Restore(zone);
+                check("…and redo puts it back, not a second one",
+                    CarPhysicsVolumes.Load(scratch, fr).Count == zonesBefore + 1, "");
+                CarPhysicsVolumes.Remove(zone);
+            }
+
+            // CHANGING what an existing volume is. The catch is that the kinds live in different spaces — a
+            // type-5 volume in its own part's bone, a self-describing one in the bone of the part it hangs
+            // off — so rewriting the type alone would leave the placement meaning something else and the box
+            // would jump. What must survive a conversion is where it IS.
+            // A shipped HULL, not one of this probe's own boxes: a hull is the case that broke — its size
+            // lives in the cooked blob, and reading a token 0.2 m instead turned a car body into a speck.
+            List<PlacedPhysicsVolume> convertible = [.. CarPhysicsVolumes.Load(scratch, fr)
+                .Where(v => v.Volume.NamesShape && v.Bone >= 0 && v.Shape != null)];
+            PlacedPhysicsVolume? toConvert =
+                convertible.FirstOrDefault(v => (v.Shape!.Element as RigidBodyElement)?.Shape
+                    == RigidBodyShape.ConvexPolyhedron)
+                ?? convertible.FirstOrDefault();
+            if (toConvert != null)
+            {
+                // Where the SPACE it covers is centred, which is what has to survive — not the placement's
+                // origin. A cooked hull sits wherever its geometry sits around that origin, while a plain box
+                // is centred on it, so the two are only the same thing for a primitive.
+                RigidBodyElement? rb = toConvert.Shape?.Element as RigidBodyElement;
+                Vector3 middle = Vector3.Zero;
+                if (rb?.Shape is RigidBodyShape.ConvexPolyhedron or RigidBodyShape.TriangleMesh
+                    && Illusion.Assets.Collisions.CarCollisionShapes.TryReadCookedBounds(
+                        rb.CookedMesh, out Vector3 hLo, out Vector3 hHi))
+                {
+                    middle = (hLo + hHi) * 0.5f;
+                }
+                Vector3 wasAt = Vector3.Transform(middle, toConvert.World);
+                sb.AppendLine($"    converting {rb?.Shape.ToString() ?? "?"} on \"{toConvert.BoneName}\" "
+                    + $"({toConvert.PartKind}), covering a space centred on {wasAt:F3}");
+                CarPhysicsVolumes.TypeChange? turned = CarPhysicsVolumes.ChangeType(
+                    scratch, fr, toConvert.Part, toConvert.Volume.Index, 0, out string? noTurn);
+                check("a placed shape can be turned into glass", turned != null, noTurn ?? "");
+                if (turned != null)
+                {
+                    PlacedPhysicsVolume? asGlass = CarPhysicsVolumes.Load(scratch, fr)
+                        .FirstOrDefault(v => v.Part == toConvert.Part && v.Volume.Index == toConvert.Volume.Index);
+                    check("…and it stays exactly where it was, though the space it is written in changed",
+                        asGlass != null && (asGlass.World.Translation - wasAt).Length() < 1e-3f,
+                        asGlass == null ? "gone" : $"{asGlass.World.Translation:F3} vs {wasAt:F3}");
+                    check("…and it now names no shape and states its own size",
+                        asGlass is { Volume.VolumeType: 0, Volume.ShapeHash: 0 } && asGlass.Volume.Size.Length() > 0.01f,
+                        asGlass == null ? "gone" : $"type {asGlass.Volume.VolumeType}, size {asGlass.Volume.Size:F3}");
+                    // A hull turned into a box has to keep its SIZE too, or it survives the conversion as a
+                    // speck: the body hull of a five-metre car came back a fifth of a metre across and read
+                    // as having vanished from the viewport.
+                    check("…and it is the size of the shape it replaced, not a token box",
+                        asGlass != null && asGlass.Volume.Size.Length() > 0.4f,
+                        asGlass == null ? "gone" : $"{asGlass.Volume.Size:F3}");
+
+                    // …and back again, which has to mint a shape because that kind is required to have one.
+                    CarPhysicsVolumes.TypeChange? back = CarPhysicsVolumes.ChangeType(
+                        scratch, fr, toConvert.Part, toConvert.Volume.Index,
+                        Illusion.Formats.Prefab.CarPhysicsVolume.ShapeVolumeType, out string? noBack);
+                    PlacedPhysicsVolume? again = back == null ? null : CarPhysicsVolumes.Load(scratch, fr)
+                        .FirstOrDefault(v => v.Part == toConvert.Part && v.Volume.Index == toConvert.Volume.Index);
+                    check("glass can be turned back into a placed shape, and a shape is minted for it",
+                        back != null && again is { Volume.NamesShape: true } && again.Shape != null,
+                        noBack ?? (again == null ? "gone" : $"shape {again.Volume.ShapeHash:X16}"));
+                    check("…and it is still in the same place after the round trip",
+                        again != null && (again.World.Translation - wasAt).Length() < 1e-3f,
+                        again == null ? "gone" : $"{again.World.Translation:F3} vs {wasAt:F3}");
+
+                    if (back != null) CarPhysicsVolumes.RestoreType(back, toBefore: true);
+                    CarPhysicsVolumes.RestoreType(turned, toBefore: true);
+                    PlacedPhysicsVolume? undone = CarPhysicsVolumes.Load(scratch, fr)
+                        .FirstOrDefault(v => v.Part == toConvert.Part && v.Volume.Index == toConvert.Volume.Index);
+                    check("…and undoing both conversions puts the original volume back",
+                        undone is { Volume.NamesShape: true }
+                        && undone.Volume.ShapeHash == toConvert.Volume.ShapeHash,
+                        undone == null ? "gone" : $"type {undone.Volume.VolumeType}");
+                }
+            }
+
             // What the reported bug actually was: moving the stub used to change only the frame graph.
             var moved = Matrix4x4.CreateTranslation(-0.4f, 0.7f, 1.25f);
             added.Frame.LocalTransform = moved;
@@ -986,6 +1218,26 @@ internal static class CarPhysicsProbes
                 $"{aligned} stubs moved; the probe's own is at {added.Frame.LocalTransform.Translation}");
             check("…and a car whose copies already agree needs no repair at all",
                 CarPhysicsVolumes.AlignStubsToPrefab(scratch, fr) == 0, "");
+
+            // The route the PREFAB TAB takes: a number typed into a field, straight into the file, with the
+            // scene never touched. Reported as "I change the position and nothing happens in the scene" —
+            // the prefab moved and the overlay went on drawing the stub, which had not. What makes it visible
+            // is the repair above, run after the edit rather than only at load.
+            PlacedPhysicsVolume? typed = CarPhysicsVolumes.Load(scratch, fr)
+                .FirstOrDefault(v => ReferenceEquals(v.Stub, added.Frame));
+            if (typed != null)
+            {
+                const float wanted = 1.75f;
+                bool written = Illusion.Assets.Prefabs.PrefabEditing.SetValueIn(
+                    scratch, CarValueSlot.CollisionVolumePosition,
+                    typed.Part >= 0 ? FlatIndexOf(scratch, typed) : -1, 1, wanted, "probe") != null;
+                CarPhysicsVolumes.AlignStubsToPrefab(scratch, fr);
+                check("a position typed into the Prefab tab moves the stub the overlay draws by",
+                    written && MathF.Abs(added.Frame.LocalTransform.Translation.Y - wanted) < 1e-3f,
+                    written
+                        ? $"stub is at Y={added.Frame.LocalTransform.Translation.Y:F3}, wanted {wanted:F3}"
+                        : "the prefab would not take the value");
+            }
 
             // The route the property panel takes: every volume addressed by ONE flat number, read, written,
             // and put back. A slot that reads and does not write is a field that looks editable and is not.
@@ -1700,6 +1952,876 @@ internal static class CarPhysicsProbes
         {
             sb.AppendLine($"    {partType,2} (unnamed) type {volumeType}×{typeByPart[(partType, volumeType)]}");
         }
+    }
+
+    /// <summary>
+    /// EVERY volume of the focus car as the overlay draws it, next to how big the car actually is.
+    ///
+    /// <para>
+    /// The overlay draws a wireframe per volume and nothing else — no name, no tree row for a volume that has
+    /// no stub — so a box standing off in the sky reads as "something is in the scene, it is not in the
+    /// hierarchy, and it is not clear what it even is". This says what each one is and how far outside the
+    /// car's own mesh bounds it reaches, which is the difference between a drawing bug and a volume the game
+    /// really does put there.
+    /// </para>
+    /// </summary>
+    private static void Floaters(
+        StringBuilder sb, string folder, string focus, Action<string, bool, string> check)
+    {
+        var sds = new FileInfo(Path.Combine(folder, focus + ".sds"));
+        string extracted = MafiaEnvironment.ExtractedDir(sds);
+        if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) return;
+
+        FrameResource? fr;
+        try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+        catch (Exception) { return; }
+        if (fr?.FrameObjects == null) return;
+
+        if (!CarBounds(fr, out Vector3 lo, out Vector3 hi)) return;
+        Vector3 centre = (lo + hi) * 0.5f;
+        Vector3 half = (hi - lo) * 0.5f;
+
+        IReadOnlyList<PlacedPhysicsVolume> volumes;
+        try { volumes = CarPhysicsVolumes.Load(extracted, fr); }
+        catch (Exception) { return; }
+
+        sb.AppendLine($"\n\n════ every volume the overlay draws ({focus}) ════");
+        sb.AppendLine($"  car mesh bounds {lo:F2} … {hi:F2}  (centre {centre:F2}, half {half:F2})");
+        sb.AppendLine($"    {"part",-4} {"kind",-8} {"bone",-16} {"ty",-3} {"stub",-5} "
+            + $"{"size (file)",-21} {"bone world",-23} {"local (read)",-23} {"PartTransform T",-23} "
+            + $"{"parent part",-16} {"world",-23} outside");
+
+        FrameObjectModel? car = fr.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
+        IReadOnlyList<CarDeformPart> deformParts = CarPhysicsVolumes.Parts(extracted);
+        var partNames = new Dictionary<ulong, string>();
+        foreach (CarDeformPart p in deformParts)
+        {
+            PlacedPhysicsVolume? sample = volumes.FirstOrDefault(v => v.Part == p.Index);
+            if (sample != null && sample.BoneName != "") partNames.TryAdd(p.Frame, sample.BoneName);
+        }
+        int outside = 0, stubless = 0;
+        foreach (PlacedPhysicsVolume v in volumes.OrderByDescending(v => Outside(v, centre, half)))
+        {
+            float over = Outside(v, centre, half);
+            if (over > 0.25f) outside++;
+            if (v.Stub == null) stubless++;
+            string shape = v.Shape?.Element is RigidBodyElement rigid ? rigid.Shape.ToString() : "—";
+            string boneWorld = car != null && v.Bone >= 0
+                ? car.GetJointWorldTransform(v.Bone).Translation.ToString("F3")
+                : "—";
+            CarDeformPart? own = v.Part >= 0 && v.Part < deformParts.Count ? deformParts[v.Part] : null;
+            string partT = own != null ? own.PartTransform.Translation.ToString("F3") : "—";
+            string parent = own == null || own.ParentFrame == 0
+                ? "(none)"
+                : partNames.TryGetValue(own.ParentFrame, out string? found) ? found : "0x…";
+            sb.AppendLine($"    {v.Part,-4} {v.PartKind,-8} {(v.BoneName == "" ? "(none)" : v.BoneName),-16} "
+                + $"{v.Volume.VolumeType,-3} {(v.Stub != null ? "yes" : "no"),-5} "
+                + $"{v.Volume.Size,-21:F3} {boneWorld,-23} {v.Volume.Transform.Translation,-23:F3} "
+                + $"{partT,-23} {parent,-16} {v.World.Translation,-23:F3} {over,6:F2} m  {shape}");
+        }
+
+        sb.AppendLine($"  {volumes.Count} volumes: {stubless} with no stub (and so no tree row at all), "
+            + $"{outside} reaching more than 0.25 m outside the car's own mesh bounds");
+
+        check("every volume the overlay draws sits within a car-length of the car",
+            volumes.Count == 0 || volumes.All(v => Outside(v, centre, half) < half.Length()),
+            $"{outside} of {volumes.Count} reach outside the mesh bounds");
+    }
+
+    /// <summary>How far the volume's own centre reaches outside the car's mesh bounds, in metres.</summary>
+    private static float Outside(PlacedPhysicsVolume v, Vector3 centre, Vector3 half) =>
+        Outside(v.World.Translation, centre, half);
+
+    private static float Outside(Vector3 point, Vector3 centre, Vector3 half)
+    {
+        Vector3 d = Vector3.Abs(point - centre) - half;
+        return MathF.Max(0f, MathF.Max(d.X, MathF.Max(d.Y, d.Z)));
+    }
+
+    /// <summary>
+    /// The car's own extent in model space, from all eight corners of every mesh's box.
+    /// <para>
+    /// Eight corners and not just min/max: a mesh box is stated in the mesh's own space, and a rotated mesh's
+    /// min and max corners do not map to the min and max of the result. Transforming only those two read a
+    /// symmetric car as spanning -0.98 … 1.92 across, which would have made every symmetry test meaningless.
+    /// </para>
+    /// </summary>
+    private static bool CarBounds(FrameResource fr, out Vector3 lo, out Vector3 hi)
+    {
+        lo = new Vector3(float.MaxValue);
+        hi = new Vector3(float.MinValue);
+        bool any = false;
+        foreach (FrameObjectSingleMesh mesh in fr.FrameObjects.Values.OfType<FrameObjectSingleMesh>())
+        {
+            Matrix4x4 world = mesh.WorldTransform;
+            Vector3 min = mesh.Boundings.Min, max = mesh.Boundings.Max;
+            for (int corner = 0; corner < 8; corner++)
+            {
+                var point = new Vector3(
+                    (corner & 1) != 0 ? max.X : min.X,
+                    (corner & 2) != 0 ? max.Y : min.Y,
+                    (corner & 4) != 0 ? max.Z : min.Z);
+                Vector3 at = Vector3.Transform(point, world);
+                lo = Vector3.Min(lo, at);
+                hi = Vector3.Max(hi, at);
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    /// <summary>
+    /// WHERE a volume that has no stub actually goes — the one placement in this file nothing has ever
+    /// checked.
+    ///
+    /// <para>
+    /// The axis conversion between the prefab and the frame graph was measured against 1097 stub/volume
+    /// pairs, and every one of those is a type-5 volume. A volume with no stub — every window, the engine
+    /// bay, the roof — has no second copy to be checked against, so its reading was inherited on faith. A
+    /// car is symmetric, and that is the check the data can still answer: the left window volume and the
+    /// right one have to be mirror images. Whichever reading makes them mirror is the right one.
+    /// </para>
+    /// </summary>
+    private static void Stubless(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ volumes with no stub: which reading makes the car symmetric? ════");
+
+        // Six readings of the same bytes, scored two ways. Whether the prefab's axis reversal applies to a
+        // self-describing volume, whether its transform is relative to the part's bone or to the model, and
+        // whether the bone contributes its rotation or only its position, are three independent questions —
+        // so the combinations are enumerated rather than argued about.
+        string[] names = Readings;
+        int count = names.Length;
+        float[] error = new float[count];
+        int[] scored = new int[count];
+        int[] inside = new int[count];
+        int placed = 0;
+        // The same scores for the volumes that DO have a stub. Those were already believed to be in their own
+        // bone's space, and the belief has to be re-tested against the same yardstick or the two halves of
+        // this answer are not comparable.
+        float[] stubError = new float[count];
+        int[] stubScored = new int[count];
+        int[] stubInside = new int[count];
+        int stubPlaced = 0, stubPairs = 0;
+        var examples = new List<string>();
+        int cars = 0, pairs = 0;
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            if (fr?.FrameObjects == null) continue;
+            FrameObjectModel? model = fr.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            if (model == null) continue;
+
+            IReadOnlyList<PlacedPhysicsVolume> volumes;
+            try { volumes = CarPhysicsVolumes.Load(extracted, fr); }
+            catch (Exception) { continue; }
+            List<PlacedPhysicsVolume> loose = [.. volumes.Where(v => v.Stub == null && v.Bone >= 0)];
+            List<PlacedPhysicsVolume> held = [.. volumes.Where(v => v.Stub != null && v.Bone >= 0)];
+            if (loose.Count == 0 && held.Count == 0) continue;
+            IReadOnlyList<CarDeformPart> parts = CarPhysicsVolumes.Parts(extracted);
+            cars++;
+
+            // Second score, and the one that needs no pairing: a shipped volume describes a part of the car,
+            // so it has to BE on the car. A reading that puts a window box three metres off the side is
+            // wrong however symmetric it manages to look.
+            if (CarBounds(fr, out Vector3 lo, out Vector3 hi))
+            {
+                Vector3 mid = (lo + hi) * 0.5f, ext = (hi - lo) * 0.5f;
+                foreach (PlacedPhysicsVolume v in loose)
+                {
+                    placed++;
+                    for (int reading = 0; reading < count; reading++)
+                    {
+                        if (Outside(Read(v, model, parts, reading), mid, ext) < 0.05f) inside[reading]++;
+                    }
+                }
+                foreach (PlacedPhysicsVolume v in held)
+                {
+                    stubPlaced++;
+                    for (int reading = 0; reading < count; reading++)
+                    {
+                        if (Outside(Read(v, model, parts, reading), mid, ext) < 0.05f) stubInside[reading]++;
+                    }
+                }
+            }
+
+            // The same mirror score for the volumes that have a stub, so the two populations are judged by
+            // one yardstick rather than one being taken on trust.
+            foreach (PlacedPhysicsVolume left in held)
+            {
+                if (Partner(left, held) is not { } right) continue;
+                stubPairs++;
+                for (int reading = 0; reading < count; reading++)
+                {
+                    Vector3 l = Read(left, model, parts, reading);
+                    Vector3 r = Read(right, model, parts, reading);
+                    stubError[reading] += MathF.Abs(l.X + r.X) + MathF.Abs(l.Y - r.Y) + MathF.Abs(l.Z - r.Z);
+                    stubScored[reading]++;
+                }
+            }
+
+            foreach (PlacedPhysicsVolume left in loose)
+            {
+                if (Partner(left, loose) is not { } right) continue;
+                pairs++;
+
+                for (int reading = 0; reading < count; reading++)
+                {
+                    Vector3 l = Read(left, model, parts, reading);
+                    Vector3 r = Read(right, model, parts, reading);
+                    // Mirror across the car's own X: the left one's X is the right one's negated, and the
+                    // other two axes agree. Nothing here assumes where the car's centre is.
+                    float miss = MathF.Abs(l.X + r.X) + MathF.Abs(l.Y - r.Y) + MathF.Abs(l.Z - r.Z);
+                    error[reading] += miss;
+                    scored[reading]++;
+                }
+
+                if (examples.Count < 8)
+                {
+                    examples.Add($"{sds.Name}  {left.BoneName} / {right.BoneName} (type "
+                        + $"{left.Volume.VolumeType}): today {Read(left, model, parts, 0):F2} vs {Read(right, model, parts, 0):F2}"
+                        + $"  |  as-written {Read(left, model, parts, 2):F2} vs {Read(right, model, parts, 2):F2}");
+                }
+            }
+        }
+
+        sb.AppendLine($"  {cars} cars — {placed} volumes with NO stub ({pairs} left/right pairs), "
+            + $"{stubPlaced} WITH a stub ({stubPairs} pairs)");
+        sb.AppendLine($"    {"reading",-44} {"self-describing: mirror  on the car",-34} places a shape: mirror  on the car");
+        for (int reading = 0; reading < count; reading++)
+        {
+            float mean = scored[reading] > 0 ? error[reading] / scored[reading] : float.NaN;
+            float stubMean = stubScored[reading] > 0 ? stubError[reading] / stubScored[reading] : float.NaN;
+            sb.AppendLine($"    {names[reading],-44} {mean,7:F3} m   {inside[reading],4}/{placed} "
+                + $"({(placed > 0 ? inside[reading] * 100.0 / placed : 0),5:F1}%)      "
+                + $"{stubMean,7:F3} m   {stubInside[reading],4}/{stubPlaced} "
+                + $"({(stubPlaced > 0 ? stubInside[reading] * 100.0 / stubPlaced : 0),5:F1}%)");
+        }
+        foreach (string example in examples) sb.AppendLine("      " + example);
+
+        int best = Best(error, scored, inside, placed);
+        int stubBest = Best(stubError, stubScored, stubInside, stubPlaced);
+        sb.AppendLine($"  best for a volume with NO stub: {names[best]}");
+        sb.AppendLine($"  best for a volume WITH a stub:  {names[stubBest]}");
+
+        // A shipped volume describes a part of a symmetric car, so its left and right twins belong at
+        // mirrored places and both belong ON the car. The two populations turn out to answer differently,
+        // and that difference is the finding: a volume that places a shape is written in its own part's bone
+        // space, while a volume that describes itself is written in the space of the part it HANGS OFF.
+        check("a volume that places a shape is written in its own part's bone space",
+            stubPlaced > 0 && stubBest == 0, $"best is \"{names[stubBest]}\"");
+        check("a volume with no stub is written in the space of the part it hangs off, not its own",
+            placed > 0 && best == 10, $"best is \"{names[best]}\"");
+    }
+
+    /// <summary>The candidate readings of a stubless volume's placement, in the order <see cref="Read"/>
+    /// numbers them.</summary>
+    private static readonly string[] Readings =
+    [
+        "its OWN part's bone, axes reversed",
+        "model space, axes reversed",
+        "bone space, axes as written",
+        "model space, axes as written",
+        "bone POSITION only, axes reversed",
+        "bone POSITION only, axes as written",
+        "the part's own PartTransform",
+        "the chain of PartTransforms up ParentFrame",
+        "the PARENT part's chain, axes reversed",
+        "the PARENT part's chain, axes as written",
+        "the part it HANGS OFF, axes reversed",
+        "the part it HANGS OFF, axes as written",
+    ];
+
+    /// <summary>One of the candidate readings of a volume's placement, as a world position.</summary>
+    private static Vector3 Read(
+        PlacedPhysicsVolume v, FrameObjectModel model, IReadOnlyList<CarDeformPart> parts, int reading)
+    {
+        Matrix4x4 written = reading is 2 or 3 or 5 or 9 or 11
+            ? SwapPrefabAxes(v.Volume.Transform)
+            : v.Volume.Transform;
+        switch (reading)
+        {
+            case 1 or 3:
+                return written.Translation;                  // model space: the matrix stands on its own
+            // The bone carries the volume but does not turn it — the reading that would explain a local
+            // translation which already looks like a world position.
+            case 4 or 5:
+                return model.GetJointWorldTransform(v.Bone).Translation + written.Translation;
+            // The part's OWN transform, which the reference toolkit reads (S_InitDeformPart.PartTransform)
+            // and this toolkit has never used. A part also names a parent part, so the chain is worth a
+            // separate reading from the single hop.
+            case 6 or 7:
+            {
+                Matrix4x4 at = written;
+                CarDeformPart? part = v.Part >= 0 && v.Part < parts.Count ? parts[v.Part] : null;
+                for (int hop = 0; part != null && hop < 16; hop++)
+                {
+                    at *= part.PartTransform;
+                    if (reading == 6 || part.ParentFrame == 0) break;
+                    part = parts.FirstOrDefault(p => p.Frame == part.ParentFrame);
+                }
+                return at.Translation;
+            }
+            // The volume written in the PARENT part's space — which is what a part's own PartTransform
+            // turns out to be measured in, and the volume tracks it almost exactly.
+            case 8 or 9:
+            {
+                Matrix4x4 at = written;
+                CarDeformPart? own = v.Part >= 0 && v.Part < parts.Count ? parts[v.Part] : null;
+                CarDeformPart? up = own == null || own.ParentFrame == 0
+                    ? null
+                    : parts.FirstOrDefault(p => p.Frame == own.ParentFrame);
+                for (int hop = 0; up != null && hop < 16; hop++)
+                {
+                    at *= up.PartTransform;
+                    if (up.ParentFrame == 0) break;
+                    up = parts.FirstOrDefault(p => p.Frame == up.ParentFrame);
+                }
+                return at.Translation;
+            }
+            // The space of the part this part HANGS OFF. A door's window is written relative to the door;
+            // a window in the body is written relative to the body, whose bone is the identity — which is
+            // why plain model space already explains most of them.
+            case 10 or 11:
+            {
+                CarDeformPart? own = v.Part >= 0 && v.Part < parts.Count ? parts[v.Part] : null;
+                CarDeformPart? up = own == null || own.ParentFrame == 0
+                    ? null
+                    : parts.FirstOrDefault(p => p.Frame == own.ParentFrame);
+                int bone = up == null ? -1 : BoneOf(model, up.Frame);
+                return bone < 0 ? written.Translation : model.PlaceOnJoint(written, bone).Translation;
+            }
+            default:
+                return model.PlaceOnJoint(written, v.Bone).Translation;
+        }
+    }
+
+    /// <summary>
+    /// Which way a self-describing volume FACES — the half of its placement that nothing had checked.
+    ///
+    /// <para>
+    /// The space question was settled by where the boxes land, and "where" is a translation: every score
+    /// there read <c>.Translation</c> and none of them touched the 3×3. A reading can put a window pane on
+    /// the right door and still stand it on edge, which is exactly what was reported.
+    /// </para>
+    /// <para>
+    /// The oracle is the pane itself. A window volume is thin on exactly one axis, and that thin axis IS the
+    /// pane's normal — so a window in a door must face ACROSS the car, and a windscreen or a rear window must
+    /// not. The names say which is which (<c>windowBL</c> is a side, <c>windowF</c> is not), and that is
+    /// independent of any matrix, so it can judge them.
+    /// </para>
+    /// </summary>
+    private static void Facing(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ which way a self-describing volume faces ════");
+
+        string[] names = FacingReadings;
+        int count = names.Length;
+        int[] right = new int[count];
+        int panes = 0, cars = 0;
+        var examples = new List<string>();
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            FrameObjectModel? model = fr?.FrameObjects?.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            if (model == null) continue;
+
+            IReadOnlyList<PlacedPhysicsVolume> volumes;
+            try { volumes = CarPhysicsVolumes.Load(extracted, fr!); }
+            catch (Exception) { continue; }
+            IReadOnlyList<CarDeformPart> parts = CarPhysicsVolumes.Parts(extracted);
+            bool counted = false;
+
+            foreach (PlacedPhysicsVolume v in volumes)
+            {
+                if (v.Stub != null || v.Bone < 0) continue;
+                if (ThinAxis(v.Volume.Size) is not int thin) continue;
+                // Only a volume whose name says which way it OUGHT to face can judge a reading.
+                bool side = MirrorName(v.BoneName) != null;
+                bool front = v.BoneName.EndsWith('F') || v.BoneName.EndsWith('B');
+                if (!side && !front) continue;
+                panes++;
+                if (!counted) { cars++; counted = true; }
+
+                for (int reading = 0; reading < count; reading++)
+                {
+                    Matrix4x4 world = Faces(v, model, parts, reading);
+                    Vector3 normal = Vector3.Normalize(Row(world, thin));
+                    float across = MathF.Abs(normal.X);
+                    if (side ? across > 0.7f : across < 0.5f) right[reading]++;
+                }
+
+                if (examples.Count < 8)
+                {
+                    Vector3 now = Vector3.Normalize(Row(Faces(v, model, parts, 0), thin));
+                    examples.Add($"{sds.Name}  {v.BoneName} ({(side ? "side" : "front/back")}), thin axis "
+                        + $"{"XYZ"[thin]}: today it faces {now:F2}");
+                }
+            }
+        }
+
+        sb.AppendLine($"  {cars} cars, {panes} panes whose name says which way they should face");
+        for (int reading = 0; reading < count; reading++)
+        {
+            sb.AppendLine($"    {names[reading],-46} facing right {right[reading],4}/{panes} "
+                + $"({(panes > 0 ? right[reading] * 100.0 / panes : 0),5:F1}%)");
+        }
+        foreach (string example in examples) sb.AppendLine("      " + example);
+
+        int best = 0;
+        for (int reading = 1; reading < count; reading++)
+        {
+            if (right[reading] > right[best]) best = reading;
+        }
+        sb.AppendLine($"  best: {names[best]}");
+
+        check("a window pane faces the way its own name says it must",
+            panes > 0 && best == 0, $"best is \"{names[best]}\" with {right[best]} of {panes}, "
+                + $"today {right[0]}");
+    }
+
+    /// <summary>
+    /// WHAT a self-describing volume is for, as far as the shipped data can say.
+    ///
+    /// <para>
+    /// The honest answer today is "a zone, and which zone follows from the part it hangs off" — but that is
+    /// an inference from names, and names are the weakest evidence there is. Three things in the file are
+    /// stronger: the part's KIND (the engine's own enum), the volume's TYPE, and the part's FLAGS, which the
+    /// reference toolkit annotates (2 always-dynamic, 16 kill-part, 0x400 snow, 0x2000 AI box, 0x40000 fade
+    /// off). If a volume type lines up with one part kind and one flag across 85 cars, that is what it is.
+    /// </para>
+    /// </summary>
+    private static void Purpose(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ what a self-describing volume belongs to ════");
+
+        var byType = new Dictionary<(uint Volume, string Kind), int>();
+        var flagsByType = new Dictionary<uint, Dictionary<uint, int>>();
+        var namesByType = new Dictionary<uint, Dictionary<string, int>>();
+        int total = 0;
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            if (fr?.FrameObjects == null) continue;
+
+            IReadOnlyList<PlacedPhysicsVolume> volumes;
+            try { volumes = CarPhysicsVolumes.Load(extracted, fr); }
+            catch (Exception) { continue; }
+            IReadOnlyList<CarDeformPart> parts = CarPhysicsVolumes.Parts(extracted);
+
+            foreach (PlacedPhysicsVolume v in volumes)
+            {
+                if (v.Volume.NamesShape) continue;
+                total++;
+                uint type = v.Volume.VolumeType;
+                byType[(type, v.PartKind)] = byType.GetValueOrDefault((type, v.PartKind)) + 1;
+
+                CarDeformPart? own = v.Part >= 0 && v.Part < parts.Count ? parts[v.Part] : null;
+                if (own != null)
+                {
+                    Dictionary<uint, int> flags = flagsByType.TryGetValue(type, out Dictionary<uint, int>? f)
+                        ? f : flagsByType[type] = [];
+                    flags[own.Flags] = flags.GetValueOrDefault(own.Flags) + 1;
+                }
+
+                Dictionary<string, int> stems = namesByType.TryGetValue(type, out Dictionary<string, int>? n)
+                    ? n : namesByType[type] = [];
+                string stem = Stem(v.BoneName);
+                stems[stem] = stems.GetValueOrDefault(stem) + 1;
+            }
+        }
+
+        sb.AppendLine($"  {total} self-describing volumes across every extracted car");
+        foreach (uint type in byType.Keys.Select(k => k.Volume).Distinct().OrderBy(t => t))
+        {
+            int count = byType.Where(p => p.Key.Volume == type).Sum(p => p.Value);
+            sb.AppendLine($"\n  ── volume type {type} — {count} of them ──");
+            sb.AppendLine("    the part it hangs off is a: " + string.Join(", ",
+                byType.Where(p => p.Key.Volume == type).OrderByDescending(p => p.Value)
+                    .Select(p => $"{p.Key.Kind} x{p.Value}")));
+            if (flagsByType.TryGetValue(type, out Dictionary<uint, int>? flags))
+            {
+                sb.AppendLine("    that part's flags: " + string.Join(", ",
+                    flags.OrderByDescending(p => p.Value).Take(6)
+                        .Select(p => $"{FlagNames(p.Key)} x{p.Value}")));
+            }
+            if (namesByType.TryGetValue(type, out Dictionary<string, int>? stems))
+            {
+                sb.AppendLine("    what it is called: " + string.Join(", ",
+                    stems.OrderByDescending(p => p.Value).Take(8).Select(p => $"{p.Key} x{p.Value}")));
+            }
+        }
+
+        // The two kinds never trade places, and THAT is the finding — not the majority. Type 0 is glass: it
+        // is on a part the engine types as a window 527 times out of 636, and the rest are doors and covers
+        // that carry glass (one is literally "Dvere shrnovaci", Czech for a folding door). Type 6 is a zone
+        // on the body: snow, the engine bay, patches and boards. Neither ever appears where the other lives.
+        int glassOnBodyZone = byType.Where(p => p.Key.Volume == 0 && p.Key.Kind is "snow" or "motor")
+            .Sum(p => p.Value);
+        int zoneOnGlass = byType.Where(p => p.Key is { Volume: 6, Kind: "window" }).Sum(p => p.Value);
+        check("type 0 is glass and type 6 is a body zone — neither ever turns up as the other",
+            total > 0 && glassOnBodyZone == 0 && zoneOnGlass == 0,
+            $"{glassOnBodyZone} type-0 on snow/motor, {zoneOnGlass} type-6 on a window");
+    }
+
+    /// <summary>A frame name with its side and its digits taken off — so windowBL and windowFR2 count as one
+    /// thing when asking what a kind of volume is called.</summary>
+    private static string Stem(string bone)
+    {
+        string stem = bone.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+        foreach (string side in new[] { "FL", "FR", "BL", "BR" })
+        {
+            int at = stem.IndexOf(side, StringComparison.Ordinal);
+            if (at >= 0) stem = stem.Remove(at, 2);
+        }
+        if (stem.Length > 1 && (stem.EndsWith('L') || stem.EndsWith('R'))) stem = stem[..^1];
+        return stem.Length == 0 ? "(unnamed)" : stem;
+    }
+
+    /// <summary>A deform part's flag word in the reference toolkit's own words (S_InitDeformPart.Unk1).</summary>
+    private static string FlagNames(uint flags)
+    {
+        if (flags == 0) return "none";
+        var named = new List<string>();
+        if ((flags & 0x2) != 0) named.Add("always-dynamic");
+        if ((flags & 0x10) != 0) named.Add("kill-part");
+        if ((flags & 0x400) != 0) named.Add("snow");
+        if ((flags & 0x2000) != 0) named.Add("AI-box");
+        if ((flags & 0x40000) != 0) named.Add("fade-off");
+        uint rest = flags & ~0x42412u;
+        if (rest != 0) named.Add("0x" + rest.ToString("X", CultureInfo.InvariantCulture));
+        return string.Join("+", named);
+    }
+
+    /// <summary>
+    /// Whether a pane's two IN-PLANE extents are the right way round — the last unchecked corner of this
+    /// placement.
+    ///
+    /// <para>
+    /// The axis reversal was measured on the shipped stub/volume pairs, and every one of those is a type-5
+    /// volume whose extents are the placeholder 0.01 on all three axes. So the reversal was verified for the
+    /// matrix and never once for the numbers, and only a self-describing volume has numbers worth reversing.
+    /// </para>
+    /// <para>
+    /// The oracle is that a car window is WIDER THAN IT IS TALL — every side window, every windscreen, every
+    /// rear window on every car ever made. So of a pane's two in-plane axes, the more horizontal one has to
+    /// carry the bigger number. Reported as "the rotation axis of the blue boxes looks wrong, you can see it
+    /// on the windows": the panes stood on edge, tall and narrow, where the glass is long and low.
+    /// </para>
+    /// </summary>
+    private static void Extents(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ are a pane's in-plane extents the right way round? ════");
+
+        string[] names = ["as the reader gives them  (today)", "with the axes reversed too"];
+        int[] right = new int[2];
+        int panes = 0, cars = 0;
+        var examples = new List<string>();
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            FrameObjectModel? model = fr?.FrameObjects?.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            if (model == null) continue;
+
+            IReadOnlyList<PlacedPhysicsVolume> volumes;
+            try { volumes = CarPhysicsVolumes.Load(extracted, fr!); }
+            catch (Exception) { continue; }
+            IReadOnlyList<CarDeformPart> parts = CarPhysicsVolumes.Parts(extracted);
+            bool counted = false;
+
+            foreach (PlacedPhysicsVolume v in volumes)
+            {
+                if (v.Stub != null || v.Bone < 0) continue;
+                if (!v.BoneName.Contains("window", StringComparison.OrdinalIgnoreCase)) continue;
+                if (ThinAxis(v.Volume.Size) is not int thin) continue;
+                panes++;
+                if (!counted) { cars++; counted = true; }
+
+                Matrix4x4 world = Faces(v, model, parts, 0);
+                int a = (thin + 1) % 3, b = (thin + 2) % 3;
+                // Which of the two in-plane axes lies more nearly flat — that is the one along the glass.
+                float upA = MathF.Abs(Vector3.Normalize(Row(world, a)).Z);
+                float upB = MathF.Abs(Vector3.Normalize(Row(world, b)).Z);
+                int flat = upA < upB ? a : b, upright = upA < upB ? b : a;
+
+                Vector3[] readings = [v.Volume.Size, new Vector3(v.Volume.Size.Z, v.Volume.Size.Y, v.Volume.Size.X)];
+                for (int reading = 0; reading < 2; reading++)
+                {
+                    if (Axis(readings[reading], flat) > Axis(readings[reading], upright)) right[reading]++;
+                }
+
+                if (examples.Count < 8)
+                {
+                    examples.Add($"{sds.Name}  {v.BoneName}: today {Axis(v.Volume.Size, flat):F2} m along the "
+                        + $"glass x {Axis(v.Volume.Size, upright):F2} m tall  |  reversed "
+                        + $"{Axis(readings[1], flat):F2} x {Axis(readings[1], upright):F2}");
+                }
+            }
+        }
+
+        sb.AppendLine($"  {cars} cars, {panes} window panes");
+        for (int reading = 0; reading < 2; reading++)
+        {
+            sb.AppendLine($"    {names[reading],-36} wider than tall {right[reading],4}/{panes} "
+                + $"({(panes > 0 ? right[reading] * 100.0 / panes : 0),5:F1}%)");
+        }
+        foreach (string example in examples) sb.AppendLine("      " + example);
+
+        check("a window pane comes out wider than it is tall, the way glass is",
+            panes > 0 && right[0] >= right[1],
+            $"as read {right[0]}/{panes}, as written {right[1]}/{panes}");
+    }
+
+    private static float Axis(Vector3 v, int index) => index switch { 0 => v.X, 1 => v.Y, _ => v.Z };
+
+    /// <summary>The candidate ways of composing a self-describing volume's ROTATION.</summary>
+    private static readonly string[] FacingReadings =
+    [
+        "parentRot x volumeRot, axes reversed  (today)",
+        "plain multiply: volume x parent",
+        "plain multiply: parent x volume",
+        "the volume's own rotation, unturned",
+        "parentRot x volumeRot, axes as written",
+        "its OWN part's bone instead of the parent's",
+    ];
+
+    private static Matrix4x4 Faces(
+        PlacedPhysicsVolume v, FrameObjectModel model, IReadOnlyList<CarDeformPart> parts, int reading)
+    {
+        Matrix4x4 written = reading == 4 ? SwapPrefabAxes(v.Volume.Transform) : v.Volume.Transform;
+        CarDeformPart? own = v.Part >= 0 && v.Part < parts.Count ? parts[v.Part] : null;
+        CarDeformPart? up = own == null || own.ParentFrame == 0
+            ? null
+            : parts.FirstOrDefault(p => p.Frame == own.ParentFrame);
+        int bone = up == null ? -1 : BoneOf(model, up.Frame);
+        Matrix4x4 parent = bone < 0 ? Matrix4x4.Identity : model.GetJointWorldTransform(bone);
+
+        return reading switch
+        {
+            1 => written * parent,
+            2 => parent * written,
+            3 => written,
+            5 => v.Bone >= 0 ? model.PlaceOnJoint(written, v.Bone) : written,
+            _ => bone < 0 ? written : model.PlaceOnJoint(written, bone),
+        };
+    }
+
+    /// <summary>The axis a box is CLEARLY thinnest on — a pane's normal — or null when it is not a pane.</summary>
+    private static int? ThinAxis(Vector3 size)
+    {
+        float[] axes = [MathF.Abs(size.X), MathF.Abs(size.Y), MathF.Abs(size.Z)];
+        int thin = 0;
+        for (int i = 1; i < 3; i++)
+        {
+            if (axes[i] < axes[thin]) thin = i;
+        }
+        float next = float.MaxValue;
+        for (int i = 0; i < 3; i++)
+        {
+            if (i != thin) next = MathF.Min(next, axes[i]);
+        }
+        // Three times thinner than anything else, or it is a block and has no normal worth speaking of.
+        return axes[thin] > 1e-5f && next > axes[thin] * 3f ? thin : null;
+    }
+
+    private static Vector3 Row(Matrix4x4 m, int index) => index switch
+    {
+        0 => new Vector3(m.M11, m.M12, m.M13),
+        1 => new Vector3(m.M21, m.M22, m.M23),
+        _ => new Vector3(m.M31, m.M32, m.M33),
+    };
+
+    /// <summary>The one flat number the Prefab tab addresses a volume by — part and volume folded together,
+    /// which is how the panel's rows are keyed.</summary>
+    private static int FlatIndexOf(string extracted, PlacedPhysicsVolume volume)
+    {
+        Illusion.Formats.Prefab.PrefabFile? prefab =
+            Illusion.Assets.Prefabs.PrefabEditing.OpenFirst(extracted);
+        return prefab?.CarVolumeIndex(volume.Part, volume.Volume.Index) ?? -1;
+    }
+
+    /// <summary>The bone whose space a self-describing volume is written in — the part it hangs off.</summary>
+    private static string ParentBoneName(string extracted, FrameResource fr, PlacedPhysicsVolume volume)
+    {
+        FrameObjectModel? model = fr.FrameObjects?.Values.OfType<FrameObjectModel>().FirstOrDefault();
+        IReadOnlyList<CarDeformPart> parts = CarPhysicsVolumes.Parts(extracted);
+        CarDeformPart? own = volume.Part >= 0 && volume.Part < parts.Count ? parts[volume.Part] : null;
+        if (model == null || own == null || own.ParentFrame == 0) return volume.BoneName;
+        int bone = BoneOf(model, own.ParentFrame);
+        string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
+        return bone >= 0 && bone < bones.Length ? bones[bone] : volume.BoneName;
+    }
+
+    /// <summary>The joint index a frame hash names on this model, or -1.</summary>
+    private static int BoneOf(FrameObjectModel model, ulong frame)
+    {
+        string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
+        for (int i = 0; i < bones.Length; i++)
+        {
+            if (Fnv64.Hash(bones[i]) == frame) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>The prefab's own axis reversal, which is its own inverse — applying it undoes the reader's.</summary>
+    private static Matrix4x4 SwapPrefabAxes(Matrix4x4 m) => new(
+        m.M33, m.M32, m.M31, 0f,
+        m.M23, m.M22, m.M21, 0f,
+        m.M13, m.M12, m.M11, 0f,
+        m.M43, m.M42, m.M41, 1f);
+
+    /// <summary>
+    /// The reading that wins: fewest mirror misses, with "is it on the car at all" as the tie-break. Symmetry
+    /// is the sharper instrument — it separates the answers by a factor of forty, while "on the car" is
+    /// generous enough that several readings pass it.
+    /// </summary>
+    private static int Best(float[] error, int[] scored, int[] inside, int placed)
+    {
+        int best = 0;
+        for (int reading = 1; reading < error.Length; reading++)
+        {
+            float mine = scored[reading] > 0 ? error[reading] / scored[reading] : float.MaxValue;
+            float his = scored[best] > 0 ? error[best] / scored[best] : float.MaxValue;
+            if (mine < his - 1e-4f || (MathF.Abs(mine - his) <= 1e-4f && inside[reading] > inside[best]))
+            {
+                best = reading;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>The same volume on the other side of the car, or null when there is no such twin. Only the
+    /// left-hand direction answers, so a pair is never counted twice.</summary>
+    private static PlacedPhysicsVolume? Partner(
+        PlacedPhysicsVolume left, IReadOnlyList<PlacedPhysicsVolume> among)
+    {
+        string? mirrored = MirrorName(left.BoneName);
+        if (mirrored == null) return null;
+        PlacedPhysicsVolume? right = among.FirstOrDefault(
+            v => string.Equals(v.BoneName, mirrored, StringComparison.Ordinal)
+                && v.Volume.VolumeType == left.Volume.VolumeType
+                && (v.Volume.Size - left.Volume.Size).Length() < 1e-3f);
+        return right != null && string.CompareOrdinal(left.BoneName, right.BoneName) < 0 ? right : null;
+    }
+
+    /// <summary>The name of the same thing on the other side of the car, or null when it names no side.</summary>
+    private static string? MirrorName(string bone)
+    {
+        (string From, string To)[] sides =
+        [
+            ("FL", "FR"), ("FR", "FL"), ("BL", "BR"), ("BR", "BL"),
+        ];
+        foreach ((string from, string to) in sides)
+        {
+            int at = bone.IndexOf(from, StringComparison.Ordinal);
+            if (at >= 0) return string.Concat(bone.AsSpan(0, at), to, bone.AsSpan(at + 2));
+        }
+        if (bone.EndsWith('L')) return string.Concat(bone.AsSpan(0, bone.Length - 1), "R");
+        if (bone.EndsWith('R')) return string.Concat(bone.AsSpan(0, bone.Length - 1), "L");
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a stub is a HANDLE for the volume it mirrors — measured, because the whole editing path assumes
+    /// it is.
+    ///
+    /// <para>
+    /// The prefab writes a volume's placement in the space of the part's BONE. The editor drags the stub frame
+    /// and writes the frame's LOCAL matrix straight into that slot, which is only the same space when the stub
+    /// hangs off that very joint: a frame attached to joint J is placed by J and by nothing else, while an
+    /// unattached one is placed by its ParentIndex1 chain. A stub on the wrong joint — or on none — is a handle
+    /// that moves the box somewhere other than where the game will put it, and that is exactly the "the
+    /// transform is strange in places" report this section exists to answer.
+    /// </para>
+    /// </summary>
+    private static void Handles(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ is a stub a handle? (stub joint vs the part's bone) ════");
+
+        int cars = 0, volumesWithStub = 0, onPartBone = 0, onOtherBone = 0, onNoBone = 0;
+        var strays = new List<string>();
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            if (fr?.FrameObjects == null) continue;
+            FrameObjectModel? model = fr.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            if (model == null) continue;
+
+            IReadOnlyList<PlacedPhysicsVolume> placed;
+            try { placed = CarPhysicsVolumes.Load(extracted, fr); }
+            catch (Exception) { continue; }
+            if (placed.Count == 0) continue;
+            cars++;
+
+            var jointOf = new Dictionary<FrameObjectBase, int>();
+            foreach (FrameObjectModel.AttachmentReference r in model.AttachmentReferences ?? [])
+            {
+                if (r.Attachment != null) jointOf[r.Attachment] = r.JointIndex;
+            }
+
+            foreach (PlacedPhysicsVolume volume in placed)
+            {
+                if (volume.Stub is not { } stub) continue;
+                volumesWithStub++;
+                if (!jointOf.TryGetValue(stub, out int joint))
+                {
+                    onNoBone++;
+                    if (strays.Count < 12) strays.Add($"{sds.Name}: {stub.Name} places {volume.PartKind} "
+                        + $"\"{volume.BoneName}\" but hangs off no joint at all");
+                }
+                else if (joint == volume.Bone) { onPartBone++; }
+                else
+                {
+                    onOtherBone++;
+                    if (strays.Count < 12) strays.Add($"{sds.Name}: {stub.Name} places {volume.PartKind} "
+                        + $"\"{volume.BoneName}\" (bone {volume.Bone}) but hangs off joint {joint}");
+                }
+            }
+        }
+
+        sb.AppendLine($"  {cars} cars, {volumesWithStub} volumes that have a stub: "
+            + $"{onPartBone} on the part's own bone, {onOtherBone} on a different bone, {onNoBone} on none");
+        foreach (string stray in strays) sb.AppendLine("    " + stray);
+
+        // The editor writes stub.LocalTransform into a slot the game reads in the part's bone space, so the two
+        // are only the same space when the stub hangs off that bone. Measured: 1096 of 1097 do, and the one
+        // that does not is the game's own left/right slip in shubert_armoured — not a second convention. If
+        // this ever starts failing wider, dragging a stub moves the box somewhere the game will not put it,
+        // and the fix is to re-space the write rather than to re-measure.
+        check("a stub is a handle — it hangs off the very bone of the part its volume belongs to, "
+            + "bar one shipped left/right slip",
+            volumesWithStub > 0 && onNoBone == 0 && onOtherBone <= 1,
+            $"{onOtherBone} on another bone, {onNoBone} on none, out of {volumesWithStub}");
     }
 
     /// <summary>The deformable-part kinds, as the reference toolkit names them (S_InitDeformPart.Unk0).</summary>

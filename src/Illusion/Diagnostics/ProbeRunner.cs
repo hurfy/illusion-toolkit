@@ -698,6 +698,19 @@ internal static class ProbeRunner
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
                     args.Length >= 3 ? args[2] : null);
                 return true;
+            // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
+            // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
+            // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt
+            case "--probe-car-items":
+                CarItemProbes.RunCarItemsProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
+            // What a SHOT reads: the per-piece hit boxes of a skinned model and the one unnamed field on
+            // them, correlated against the piece's material, its bone and the physics-surface table. The
+            // physics shapes are already ruled out (MaterialId 0 on all 1174 of them).
+            // Optional arg = the car. Output: %TEMP%\illusion_bullets.txt
+            case "--probe-bullets":
+                BulletProbes.RunBulletProbe(args.Length >= 2 ? args[1] : "shubert_38");
+                return true;
             // What makes a panel crumple: the deform bones, the per-vertex damage group and the BBCoeffs
             // beside it — which of them the shipped cars carry, and what a damage group lines up with.
             // Optional arg = the car. Output: %TEMP%\illusion_damage.txt

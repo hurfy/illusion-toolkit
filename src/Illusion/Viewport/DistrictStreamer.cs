@@ -1537,6 +1537,10 @@ internal sealed class DistrictStreamer
         _host.Rnd?.SetHelperHighlight(null);
         _host.Rnd?.ClearActors();
         Actors.Clear();
+        // The car-physics overlay, which used to be the one layer a reset forgot: its lines survived a
+        // restore-from-backup and went on drawing collision the archive no longer had.
+        _host.Rnd?.ClearPartShapes();
+        _host.CarCollisionEditing.Forget();
         _collisionSources.Clear();
         _crashSources.Clear();
         _host.Tree.Clear();

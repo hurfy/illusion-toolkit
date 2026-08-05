@@ -76,10 +76,21 @@ public static class CarPhysicsVolumes
             stubByFileHash.TryAdd(stub.Hash, stub);
         }
 
-        foreach (CarDeformPart part in opened.Value.Prefab.CarDeformParts)
+        IReadOnlyList<CarDeformPart> allParts = opened.Value.Prefab.CarDeformParts;
+        foreach (CarDeformPart part in allParts)
         {
             int bone = boneByHash.TryGetValue(part.Frame, out int index) ? index : -1;
             string boneName = bone >= 0 ? bones[bone] : "";
+
+            // The bone of the part this one HANGS OFF — the space a self-describing volume is written in.
+            // A part with no parent (the body) falls back to its own bone, which for a car body is the
+            // identity, so the two readings coincide there and nothing changes for it.
+            int parentBone = bone;
+            if (part.ParentFrame != 0 && boneByHash.TryGetValue(part.ParentFrame, out int above))
+            {
+                parentBone = above;
+            }
+
             foreach (CarPhysicsVolume volume in part.Volumes)
             {
                 ItemDescFile? shape = null;
@@ -93,8 +104,23 @@ public static class CarPhysicsVolumes
                     stubByFileHash.TryGetValue(hit.Shape.Hash, out stub);
                 }
 
-                Matrix4x4 world = bone >= 0
-                    ? model.PlaceOnJoint(volume.Transform, bone)
+                // TWO spaces, and which one applies is decided by the volume's own type.
+                //
+                // A type-5 volume PLACES a physics shape, and it is written in its own part's bone space —
+                // the same space its stub frame uses, which is why the two matrices are byte-identical. A
+                // volume that describes itself (a window pane, the engine bay, the roof) is written in the
+                // space of the part it HANGS OFF instead.
+                //
+                // Measured on all 85 extracted cars (`--probe-car-physics`, section "volumes with no stub"):
+                // a car is symmetric, so left and right twins have to mirror, and that is the yardstick.
+                // Reading the loose ones in their own bone's space misses the mirror by 1.196 m on average
+                // and leaves 47% of them off the car entirely; reading them in the parent part's bone space
+                // misses by 0.030 m — forty times closer — and puts 98.8% on the car. The shape-placing ones
+                // answer the opposite way (0.125 m in their own bone's space, 1.300 m in the parent's), so
+                // this is not one rule misapplied but two rules that were being served by one.
+                int space = volume.NamesShape ? bone : parentBone;
+                Matrix4x4 world = space >= 0
+                    ? model.PlaceOnJoint(volume.Transform, space)
                     : volume.Transform;
                 found.Add(new PlacedPhysicsVolume(
                     part.Index, part.Kind, bone, boneName, volume, shape, file, stub, world));
@@ -166,12 +192,17 @@ public static class CarPhysicsVolumes
     /// </para>
     /// </summary>
     /// <returns>How many stubs had to move.</returns>
-    public static int AlignStubsToPrefab(string extractedFolder, FrameResource resource)
+    /// <param name="keep">Stubs the user has moved and not yet saved. Their new placement exists only in the
+    /// frame, so snapping them to the prefab would throw a drag away — and this runs after edits made in the
+    /// property panel, which happen mid-placement.</param>
+    public static int AlignStubsToPrefab(
+        string extractedFolder, FrameResource resource, IReadOnlyCollection<FrameObjectCollision>? keep = null)
     {
         int moved = 0;
         foreach (PlacedPhysicsVolume volume in Load(extractedFolder, resource))
         {
             if (volume.Stub == null) continue;
+            if (keep != null && keep.Contains(volume.Stub)) continue;
             Matrix4x4 want = volume.Volume.Transform;
             Matrix4x4 have = volume.Stub.LocalTransform;
             if ((want.Translation - have.Translation).LengthSquared() < 1e-8f
@@ -290,6 +321,232 @@ public static class CarPhysicsVolumes
         prefab.PutCarVolume(part, volume, item);
         AtomicFile.WriteAllBytes(path, prefab.ToBytes());
         return new VolumeChange(path, part, volume, item);
+    }
+
+    /// <summary>
+    /// Hangs a SELF-DESCRIBING volume off a deformable part — a box that names no shape and says what it is
+    /// by its type alone.
+    ///
+    /// <para>
+    /// The other half of a car's collision, and the half the toolkit could not make. A volume of type 5
+    /// places an ItemDesc shape and is the body, the doors, the bumpers; a volume of type 0 IS the glass —
+    /// all 527 shipped window volumes are type 0 and none of them is anything else — and type 6 is a zone,
+    /// the engine bay and the snow. They carry no material field at all: the type is the identity. Until
+    /// this existed, every box the editor added was type 5, so it was body collision whichever part it was
+    /// hung on, and asking for one on a window changed nothing.
+    /// </para>
+    /// <para>
+    /// Written in the space of the part this part HANGS OFF, which is where a self-describing volume lives —
+    /// see <see cref="Load"/>. There is no stub frame and no gizmo handle, exactly as the shipped ones have
+    /// none; it is placed by the numbers in the Prefab tab.
+    /// </para>
+    /// </summary>
+    /// <param name="fullSize">The box's FULL size, not half — measured on 1049 shipped volumes.</param>
+    /// <returns>Null when this car has no deformable part for that bone; nothing is written then.</returns>
+    public static VolumeChange? AddZone(
+        string extractedFolder, string boneName, Matrix4x4 inParentSpace, Vector3 fullSize, uint volumeType)
+    {
+        (PrefabFile Prefab, string Path)? opened = OpenCarPrefab(extractedFolder);
+        if (opened == null) return null;
+        (PrefabFile prefab, string path) = opened.Value;
+
+        int part = prefab.FindCarPartByFrame(Fnv64.Hash(boneName ?? ""));
+        if (part < 0) return null;
+
+        int volume = prefab.AddCarVolume(part, WithoutScale(inParentSpace), fullSize, 0, volumeType);
+        if (volume < 0) return null;
+
+        byte[] item = prefab.TakeCarVolume(part, volume) ?? [];
+        prefab.PutCarVolume(part, volume, item);
+        AtomicFile.WriteAllBytes(path, prefab.ToBytes());
+        return new VolumeChange(path, part, volume, item);
+    }
+
+    /// <summary>What a type-5 volume states for its own size: nothing, because the shape states it. Every
+    /// shipped one carries this.</summary>
+    private static readonly Vector3 ShapePlaceholderExtents = new(0.01f, 0.01f, 0.01f);
+
+    /// <summary>What a type change did, so it can be taken back exactly.</summary>
+    /// <param name="Shape">An ItemDesc record minted for the conversion, or null when none was.</param>
+    public sealed record TypeChange(
+        string PrefabPath, int Part, int Volume, byte[] Before, byte[] After, string? Shape);
+
+    /// <summary>
+    /// Changes what an existing volume IS — a placed physics shape, glass, or a zone.
+    ///
+    /// <para>
+    /// Not a number to overwrite. The kinds live in different spaces: a type-5 volume is written in its own
+    /// part's bone, a self-describing one in the bone of the part it hangs off. Rewriting the type alone
+    /// would leave the placement meaning something else and the box would jump. So the world position is
+    /// worked out first and written back into whichever space the new kind uses.
+    /// </para>
+    /// <para>
+    /// Going away from type 5 leaves its ItemDesc record behind, inert, exactly as deleting a collision does
+    /// — another volume may still name it, and an unnamed record costs a few bytes. Going TO type 5 mints a
+    /// box from the volume's own extents, because a shape is what that kind is required to have.
+    /// </para>
+    /// </summary>
+    /// <returns>Null with a reason when it cannot be done; nothing is written then.</returns>
+    public static TypeChange? ChangeType(
+        string extractedFolder, FrameResource resource, int part, int volume, uint newType,
+        out string? refusal)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        refusal = null;
+
+        PlacedPhysicsVolume? found = Load(extractedFolder, resource)
+            .FirstOrDefault(v => v.Part == part && v.Volume.Index == volume);
+        if (found == null) { refusal = "that volume is no longer there"; return null; }
+        if (found.Volume.VolumeType == newType) { refusal = "it is already that"; return null; }
+
+        FrameObjectModel? model = resource.FrameObjects?.Values.OfType<FrameObjectModel>().FirstOrDefault();
+        if (model == null) { refusal = "this archive has no skinned model"; return null; }
+
+        (PrefabFile Prefab, string Path)? opened = OpenCarPrefab(extractedFolder);
+        if (opened == null) { refusal = "this archive has no car prefab"; return null; }
+        (PrefabFile prefab, string path) = opened.Value;
+
+        byte[] before = prefab.TakeCarVolume(part, volume) ?? [];
+        prefab.PutCarVolume(part, volume, before);
+        if (before.Length == 0) { refusal = "that volume could not be read"; return null; }
+
+        // Where it is NOW, in the world — the one thing that has to survive the change.
+        //
+        // A self-describing box is centred on its own placement, while a shape sits wherever its geometry
+        // happens to sit around the placement's origin. So the shape's own centre is folded into the
+        // placement on the way out, or a hull that leans forward would come back centred and cover the
+        // wrong half of the part.
+        Matrix4x4 world = found.World;
+        if (found.Volume.NamesShape)
+        {
+            world.Translation = Vector3.Transform(ShapeCentre(found), world);
+        }
+
+        // …and the space the new kind is written in.
+        int space = SpaceBoneFor(extractedFolder, model, part, newType == CarPhysicsVolume.ShapeVolumeType);
+        Matrix4x4 local = space >= 0
+            ? Domain.TransformMath.ComputeLocalTransform(world, model.GetJointWorldTransform(space))
+            : world;
+
+        // The size, kept as the box the user can see: a self-describing volume states a full size, while a
+        // shape states its own and the volume carries the 1 cm placeholder.
+        Vector3 size = found.Volume.NamesShape ? ShapeSize(found) : found.Volume.Size;
+
+        string? mintedShape = null;
+        ulong shapeHash = 0;
+        if (newType == CarPhysicsVolume.ShapeVolumeType)
+        {
+            // A type-5 volume must name a shape, so becoming one means minting a box the size of the box that
+            // was there. Reuses the builder's hash minting rather than repeating it: two records answering to
+            // one data hash is a bug this codebase has already had once.
+            if (!CarCollisionBuilder.MintBoxShape(
+                    extractedFolder, size * 0.5f, out string? file, out shapeHash, out string? why))
+            {
+                refusal = why ?? "the shape could not be written";
+                return null;
+            }
+            mintedShape = file;
+        }
+
+        if (!prefab.SetCarVolumeType(part, volume, newType, WithoutScale(local),
+                newType == CarPhysicsVolume.ShapeVolumeType ? ShapePlaceholderExtents : size, shapeHash))
+        {
+            refusal = "the prefab would not take the change";
+            if (mintedShape != null) CarCollisionBuilder.UnmintShape(extractedFolder, mintedShape);
+            return null;
+        }
+
+        byte[] after = prefab.TakeCarVolume(part, volume) ?? [];
+        prefab.PutCarVolume(part, volume, after);
+        AtomicFile.WriteAllBytes(path, prefab.ToBytes());
+        return new TypeChange(path, part, volume, before, after, mintedShape);
+    }
+
+    /// <summary>Puts a converted volume back the way it was — the undo of <see cref="ChangeType"/>.</summary>
+    public static bool RestoreType(TypeChange change, bool toBefore)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        if (Open(change.PrefabPath) is not { } prefab) return false;
+        if (prefab.TakeCarVolume(change.Part, change.Volume) == null) return false;
+        if (!prefab.PutCarVolume(change.Part, change.Volume, toBefore ? change.Before : change.After))
+        {
+            return false;
+        }
+        AtomicFile.WriteAllBytes(change.PrefabPath, prefab.ToBytes());
+        return true;
+    }
+
+    /// <summary>The bone index whose space a volume of this kind is written in on this part, or -1.</summary>
+    private static int SpaceBoneFor(string extracted, FrameObjectModel model, int part, bool namesShape)
+    {
+        IReadOnlyList<CarDeformPart> parts = Parts(extracted);
+        if (part < 0 || part >= parts.Count) return -1;
+        ulong wanted = namesShape || parts[part].ParentFrame == 0
+            ? parts[part].Frame
+            : parts[part].ParentFrame;
+
+        string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
+        for (int i = 0; i < bones.Length; i++)
+        {
+            if (Fnv64.Hash(bones[i]) == wanted) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>Where a placed shape's own geometry is centred, relative to the placement's origin. Zero for
+    /// a primitive, which is centred by construction; a cooked hull is not.</summary>
+    private static Vector3 ShapeCentre(PlacedPhysicsVolume volume)
+    {
+        if (volume.Shape?.Element is not RigidBodyElement rigid) return Vector3.Zero;
+        if (rigid.Shape is not (RigidBodyShape.ConvexPolyhedron or RigidBodyShape.TriangleMesh))
+        {
+            return Vector3.Zero;
+        }
+        return CarCollisionShapes.TryReadCookedBounds(rigid.CookedMesh, out Vector3 lo, out Vector3 hi)
+            ? (lo + hi) * 0.5f
+            : Vector3.Zero;
+    }
+
+    /// <summary>
+    /// The full size of the box a placed shape occupies — what a self-describing volume would have to say to
+    /// cover the same space.
+    ///
+    /// <para>
+    /// A cooked hull answers through its own stored bounds, the same ones the overlay draws it by. Falling
+    /// back to a token 20 cm here is what made a converted body hull vanish: the volume was still there,
+    /// still in the right place, and a fifth of a metre across on a car five metres long.
+    /// </para>
+    /// </summary>
+    private static Vector3 ShapeSize(PlacedPhysicsVolume volume)
+    {
+        if (volume.Shape?.Element is not RigidBodyElement rigid) return new Vector3(0.2f);
+        switch (rigid.Shape)
+        {
+            case RigidBodyShape.Box:
+                return rigid.BoxDimensions * 2f;
+            case RigidBodyShape.Sphere:
+                return new Vector3(rigid.Radius * 2f);
+            case RigidBodyShape.Capsule or RigidBodyShape.Cylinder:
+                return new Vector3(rigid.Radius * 2f, rigid.Radius * 2f, rigid.Height + (rigid.Radius * 2f));
+            default:
+                return CarCollisionShapes.TryReadCookedBounds(rigid.CookedMesh, out Vector3 lo, out Vector3 hi)
+                    ? Vector3.Abs(hi - lo)
+                    : new Vector3(0.2f);
+        }
+    }
+
+    /// <summary>
+    /// The frame whose space a self-describing volume on this part is written in — the frame of the part it
+    /// hangs off, or its own when it hangs off nothing. Returns a hash, which is how the prefab names frames.
+    /// </summary>
+    public static ulong SpaceFrameFor(string extractedFolder, string boneName)
+    {
+        ulong own = Fnv64.Hash(boneName ?? "");
+        foreach (CarDeformPart part in Parts(extractedFolder))
+        {
+            if (part.Frame == own) return part.ParentFrame != 0 ? part.ParentFrame : own;
+        }
+        return own;
     }
 
     /// <summary>

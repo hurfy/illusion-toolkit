@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using Illusion.Settings;
 
 namespace Illusion.Views;
@@ -69,5 +70,34 @@ internal static class EditorCommands
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Whether UNDO should stand aside for the field that has the focus.
+    ///
+    /// <para>
+    /// Not simply "a text box has the focus", which is the rule every other key uses. A numeric field commits
+    /// on Enter and KEEPS the caret, so after an edit the value is already in the file and the box is merely
+    /// still focused; refusing undo then refuses it at the exact moment the user wants the edit back, which
+    /// is what "Ctrl+Z does not work for the prefab" was. A field with nothing pending is not being typed
+    /// into, whatever the focus says.
+    /// </para>
+    /// <para>
+    /// UNDO ONLY, deliberately. Delete and Duplicate keep the plain focus rule: a caret sitting in a field
+    /// that shows its committed value is still a caret, and Delete there has to delete a character rather
+    /// than the selected object.
+    /// </para>
+    /// </summary>
+    public static bool IsTypingUncommitted()
+    {
+        if (Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase box) return false;
+
+        // A field inside a Vector3Box can say whether its text is still uncommitted; anything else — a name,
+        // a search, a free-text box — is taken at its word and keeps the key.
+        for (DependencyObject? at = box; at != null; at = VisualTreeHelper.GetParent(at))
+        {
+            if (at is Vector3Box vector) return vector.HasPendingEdit;
+        }
+        return true;
     }
 }

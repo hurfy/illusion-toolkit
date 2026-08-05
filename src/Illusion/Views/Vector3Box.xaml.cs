@@ -49,6 +49,39 @@ public partial class Vector3Box : UserControl
     /// <summary>Raised after the user commits a field edit or pastes — lets a non-binding host (camera) write back.</summary>
     public event EventHandler? ValueCommitted;
 
+    /// <summary>
+    /// Whether any field holds text that has not been written back yet — a half-typed number.
+    ///
+    /// <para>
+    /// What Ctrl+Z has to know. A field commits on Enter and KEEPS the focus (see
+    /// <see cref="CommitField"/>), so "a text box has the focus" does not mean "the user is mid-edit": after
+    /// Enter the value is already in the file and the caret is simply still sitting there. Windows that gate
+    /// undo on focus alone therefore refuse it exactly when the user has just made the edit they want to take
+    /// back — reported as "Ctrl+Z does not work for the prefab".
+    /// </para>
+    /// </summary>
+    public bool HasPendingEdit
+    {
+        get
+        {
+            int decimals = Math.Clamp(Decimals, 0, 8);
+            // Only the layout in use: the other three fields are the same numbers in a hidden copy, and they
+            // are not refreshed while hidden. Chosen by Compact rather than by IsVisible so the answer does
+            // not depend on the control having been rendered.
+            int from = Compact ? 0 : 3;
+            for (int i = from; i < from + 3; i++)
+            {
+                (TextBox box, DependencyProperty prop) = _fields[i];
+                if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                {
+                    return true;    // unparseable text is an edit in progress, not a committed value
+                }
+                if (Math.Round(v, decimals) != Math.Round((double)GetValue(prop), decimals)) return true;
+            }
+            return false;
+        }
+    }
+
     public static readonly DependencyProperty LabelProperty = DependencyProperty.Register(
         nameof(Label), typeof(string), typeof(Vector3Box),
         new PropertyMetadata("", (d, _) => ((Vector3Box)d).UpdateLabel()));

@@ -197,6 +197,18 @@ public static class PrefabEditing
         catch (Exception ex) when (ex is IOException or SdsFormatException) { return null; }
     }
 
+    /// <summary>The archive's first prefab that holds a car, for a caller that only wants to READ it —
+    /// what a new part consults to find a sibling of its own kind to copy from.</summary>
+    public static PrefabFile? OpenFirst(string extracted)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(extracted);
+        foreach (string path in Files(extracted))
+        {
+            if (Open(path) is { Car: not null } prefab) return prefab;
+        }
+        return null;
+    }
+
     private static IEnumerable<string> Files(string extracted)
     {
         IReadOnlyList<string> files;

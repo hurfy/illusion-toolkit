@@ -123,6 +123,23 @@ public static class BridgeMeshApplier
         /// <summary>Writes the new geometry into the live frame data (initial apply and redo).</summary>
         public void ApplyNew()
         {
+            ApplyBuffers();
+
+            // …and the per-BONE boxes, which are derived from the vertices that just moved. Measured on 88
+            // cars: a box bounds every vertex with any weight on its bone, in that bone's own space, and
+            // rebuilding from the geometry reproduces 5701 of 5799 shipped boxes to within a millimetre.
+            // Nothing recalculated them until now, so geometry pushed from Blender fell outside every box
+            // and the game stopped registering hits on it. Done HERE and not in TryApply because it has to
+            // read the new geometry, and TryApply has not committed it yet.
+            if (Frame is FrameObjectModel model)
+            {
+                try { Frames.BoneBoundsBuilder.Rebuild(model, Frames.BoneBoundsBuilder.Rule.AnyInfluence); }
+                catch (Exception) { /* a model whose skin cannot be read keeps the boxes it had */ }
+            }
+        }
+
+        private void ApplyBuffers()
+        {
             Buffer.Data = NewVertexData;
             Frame.Geometry.DecompressionOffset = NewDecompressionOffset;
             Frame.Geometry.DecompressionFactor = NewDecompressionFactor;
@@ -189,10 +206,40 @@ public static class BridgeMeshApplier
             return null;
         }
 
+        // Whether the model's skin resolves BEFORE anything is touched. A car that already carries a broken
+        // remap must not have every later push refused on account of it — the question below is whether THIS
+        // push breaks it, not whether it was whole to begin with.
+        FrameObjectModel? skinned = node is FrameNodeAdapter { Frame: FrameObjectModel m } ? m : null;
+        bool resolvedBefore = skinned != null && SdsMeshLoader.GlobalBoneIds(skinned) != null;
+
         ApplyResult? result = TryApplyCountPreserving(node, payload, out skipReason, lod);
-        if (result != null) return result;
-        if (skipReason == null || !NeedsRebuild(skipReason)) return null;
-        return TryApplyRebuild(node, payload, out skipReason, lod);
+        if (result == null && skipReason != null && NeedsRebuild(skipReason))
+        {
+            result = TryApplyRebuild(node, payload, out skipReason, lod);
+        }
+        // A push that changed nothing has nothing to break, and its result carries no buffers to apply —
+        // ApplyNew on one of those is a null reference, not a check.
+        if (result == null || skinned == null || !resolvedBefore || result.Unchanged) return result;
+
+        // THE GUARD. A push can leave a skin the game cannot read while the editor still draws it correctly,
+        // because the editor resolves a bone id against the whole model and the game resolves it against its
+        // face group's remap POOL. An id past the end of that pool is not an error anywhere in this toolkit
+        // — it simply names nothing, and the part it belongs to arrives in the game somewhere else entirely.
+        // Reported as "in the editor it is fine, in the game the position and the binding are wrong".
+        //
+        // Applied, checked and put back: the caller is the one that commits, and a push that would break the
+        // skin has to be refused while the modeller is still in Blender and can split the vertex groups.
+        result.ApplyNew();
+        bool resolvesAfter = SdsMeshLoader.GlobalBoneIds(skinned) != null;
+        string broke = resolvesAfter ? "" : SdsMeshLoader.DescribeBoneRemap(skinned);
+        result.RestoreOriginal();
+        if (resolvesAfter) return result;
+
+        skipReason = "this push would leave a skin the game cannot read, though the editor would still draw "
+            + "it: " + broke + ". A bone id has to fit the remap pool of the face group that draws it, and "
+            + "the pools are fixed at 64 entries in all. Give the affected faces one vertex group instead of "
+            + "two, or move them onto the material their bones already belong to, and push again.";
+        return null;
     }
 
     /// <summary>
@@ -1302,6 +1349,7 @@ public static class BridgeMeshApplier
         if (poolCount == 0) { reason = "the model carries no remap pools"; return false; }
 
         var localOf = new Dictionary<byte, byte>[poolCount];
+        sizes = (byte[])sizes.Clone();
         for (int p = 0; p < poolCount; p++)
         {
             var map = new Dictionary<byte, byte>(sizes[p]);
@@ -1354,13 +1402,33 @@ public static class BridgeMeshApplier
             if (set.All(b => localOf[groups[slot].AssignedPoolIndex].ContainsKey(b))) continue;
             int fit = -1;
             for (int p = 0; p < poolCount && fit < 0; p++) if (set.All(b => localOf[p].ContainsKey(b))) fit = p;
-            if (fit < 0)
-            {
-                reason = "the pushed mesh weights a material to bones no single remap pool of the model "
-                    + "covers — move those faces back onto the material they came from";
-                return false;
-            }
-            groups[slot].AssignedPoolIndex = (byte)fit;
+            if (fit >= 0) { groups[slot].AssignedPoolIndex = (byte)fit; continue; }
+
+            // No pool has them all — so GROW one. A pool is just "the bones this face group may name", and a
+            // vertex addresses it with a byte; the shipped data says the engine's real limit is per pool and
+            // not on the total, since cars run their totals to 108 entries while no single pool anywhere
+            // exceeds 60 (--probe-bullets). So the bones that are missing get appended to the pool that is
+            // missing fewest, and only a pool that would pass 60 is refused.
+            //
+            // This is what a cube weighted to a bonnet AND its deform bone needs: the two are not in one
+            // pool on any car, and until this existed the push either refused or — worse, before the guard —
+            // wrote an id past the end of the pool, which the editor drew correctly and the game placed
+            // somewhere else entirely.
+            // NOT YET. Growing a pool is more than lengthening the remap table: the SKELETON carries the same
+            // total — measured on 173 of 173 LODs, its blend-id count equals the sum of the pool sizes and
+            // its usage array is exactly that long — and what belongs in the new usage entries has not been
+            // measured. Writing the longer table alone leaves the two halves disagreeing, and that is worse
+            // than refusing: the editor reads the pools directly and shows the part in its right place while
+            // the game reads through the skeleton's mapping and puts it somewhere else. That was reported
+            // twice, and the second time it was this code that caused it.
+            reason = "the pushed mesh weights a material to bones no single remap pool of the model covers. "
+                + "A pool CAN be made longer — no shipped pool exceeds " + MaxBonesPerPool + " and the "
+                + "totals run past a hundred — but the rig stores that same total in its own blend-id count "
+                + "and usage array, and what goes in the new entries has not been measured yet. Growing one "
+                + "half alone gives a car that looks right in the editor and lands the part somewhere else "
+                + "in game, so it is refused instead. For now: give those faces ONE vertex group, or move "
+                + "them onto a material whose bones already sit in one pool.";
+            return false;
         }
 
         // A vertex carries one set of ids, so every group drawing it must read them against the same pool.
@@ -1428,7 +1496,7 @@ public static class BridgeMeshApplier
         }
 
         // The edited level only: the other levels keep their own vertex buffers and the pools that go with
-        // them. The pools and the remap table go back exactly as they came.
+        // them.
         lods[level] = new FrameBlendInfo.BoneIndexInfo
         {
             BonesPerRemapPool = sizes,
@@ -1438,6 +1506,14 @@ public static class BridgeMeshApplier
         blend.BoneIndexInfos = lods;
         return true;
     }
+
+    /// <summary>
+    /// The most bones one remap pool may name. Measured over 88 shipped cars (`--probe-bullets`): no single
+    /// pool anywhere exceeds 60, while the per-model TOTAL runs to 108 — so the ceiling is on the pool and
+    /// not on the sum, and a pool with room may be grown. A vertex addresses its pool with a byte, so the
+    /// format itself could hold 256; 60 is what the game's own data says a draw call reaches.
+    /// </summary>
+    private const int MaxBonesPerPool = 60;
 
     /// <summary>How many bones the model's rig has, or 0 when it cannot be read.</summary>
     private static int BoneCountOf(FrameObjectModel model)

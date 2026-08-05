@@ -153,7 +153,9 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
                 var rows = new List<PrefabRowViewModel>();
                 foreach (PrefabRefView row in group.Rows)
                 {
-                    var vm = new PrefabRowViewModel(row, _prefab.FrameChoices,
+                    // A row may bring its own list — the kinds a collision volume can be — instead of the
+                    // archive's frames. Same dropdown, different meaning; the commit tells them apart.
+                    var vm = new PrefabRowViewModel(row, row.Options ?? _prefab.FrameChoices,
                         (r, choice) => CommitPrefabPick(archive, r, choice))
                     {
                         Removable = RemovableFor(row),
@@ -188,6 +190,19 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     // own, the same as a collision box. The host turns it into an undo entry and a pending build.
     private bool CommitPrefabPick(FileInfo archive, PrefabRefView row, FrameChoice choice)
     {
+        // Changing a volume's KIND, which travels down the same dropdown and is nothing like pointing a slot
+        // at a frame: the kinds live in different spaces, so this has to move the placement too.
+        if (row.ChoosesVolumeType)
+        {
+            if (!_viewport.ChangeCollisionVolumeType(archive, row.Index, (uint)choice.Hash, out string? why))
+            {
+                _viewport.RaiseNotice("the volume was not changed: " + (why ?? "unknown reason"), true);
+                return false;
+            }
+            RefreshPrefabAfterUndo();
+            return true;
+        }
+
         if (row.Slot is not { } slot) return false;
 
         PrefabEditing.Change? change = PrefabEditing.SetFrame(
@@ -228,11 +243,25 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         _ => null,
     };
 
-    // A new part is a copy of the last one there, pointed at the first frame in the archive — the user then
-    // moves it where it belongs. Inventing where a seat sits would make a part that exists and does nothing.
+    // Adding a part is two things: the prefab row, and the FRAME the row names.
+    //
+    // When the toolkit can mint that frame — a climb box, a fuel tank, a seat, an exhaust: measured to be a
+    // Dummy or a Point on every shipped car — the whole part is made at once and lands on the selected bone,
+    // ready to be dragged. When it cannot (a door, a window, an axle and a wiper are a BONE every time, and
+    // growing a rig is a different job), the old behaviour stands: the row is written pointing at the first
+    // frame in the archive and the user re-points it, because a row that exists is at least visible and
+    // fixable, while no row at all is a dead button.
     private void CommitPrefabAdd(FileInfo archive, PrefabGroupRowsViewModel group)
     {
         if (group.Adds is not { } kind || _prefab is not { FrameChoices.Count: > 0 } prefab) return;
+
+        if (CarPartBuilder.CanAdd(kind))
+        {
+            // The viewport owns this one: it holds the frame graph the new helper goes into, the scene tree
+            // row for it and the undo stack that has to take BOTH halves back together.
+            if (_viewport.AddCarPart(kind)) RefreshPrefabAfterUndo();
+            return;
+        }
 
         PrefabEditing.ItemChange? change = PrefabEditing.AddItem(
             archive, kind, prefab.FrameChoices[0].Hash, group.Title);
@@ -264,11 +293,44 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     {
         if (row.ValueSlot is not { } slot) return false;
 
+        // A row shown in a converted space writes all THREE numbers, not one: the axis the user typed is an
+        // axis of the car, and turning it back into the bone's space mixes it into every stored component.
+        // The three go on the undo stack as one entry — the user made one edit.
+        if (row.Space is { } space)
+        {
+            var wanted = new System.Numerics.Vector3(row.X, row.Y, row.Z);
+            wanted = axis switch
+            {
+                0 => wanted with { X = value },
+                1 => wanted with { Y = value },
+                _ => wanted with { Z = value },
+            };
+            if (!System.Numerics.Matrix4x4.Invert(space, out System.Numerics.Matrix4x4 back)) return false;
+            System.Numerics.Vector3 stored = System.Numerics.Vector3.Transform(wanted, back);
+
+            var written = new List<IEditAction>();
+            foreach ((int at, float number) in new[] { (0, stored.X), (1, stored.Y), (2, stored.Z) })
+            {
+                if (PrefabEditing.SetValue(archive, slot, row.Index, at, number, row.Label) is { } one)
+                {
+                    written.Add(new PrefabValueEdit(one, RefreshPrefabAfterUndo));
+                }
+            }
+            if (written.Count == 0) return false;
+
+            PrefabEdited?.Invoke(archive, $"{row.Label} set.", new CompositeEdit([.. written]));
+            _viewport.RefreshCarCollisionOverlay();
+            return true;
+        }
+
         PrefabEditing.ValueChange? change = PrefabEditing.SetValue(
             archive, slot, row.Index, axis, value, row.Label);
         if (change == null) return false;
 
         PrefabEdited?.Invoke(archive, $"{row.Label} set.", new PrefabValueEdit(change, RefreshPrefabAfterUndo));
+        // The panel is deliberately left alone (see above) — but the VIEWPORT is not the panel, and a
+        // collision volume that moved has to move on screen or the number reads as having done nothing.
+        _viewport.RefreshCarCollisionOverlay();
         return true;
     }
 
@@ -277,6 +339,8 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     {
         _prefabArchive = null;      // defeat the same-archive cache — the file really did change
         BuildPrefab();
+        // …and so has the car's physics, which is drawn from the same file and cached separately.
+        _viewport.RefreshCarCollisionOverlay();
     }
 
     /// <summary>The headline over the entries: how many, and whether anything is broken.</summary>
@@ -324,9 +388,21 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     // the tab appears when the answer arrives. Token-guarded: selecting another archive mid-read must not be
     // overwritten by the first one landing late. Kept per ARCHIVE rather than per selection — clicking from
     // one door to the next inside a car must not re-read the file each time.
-    /// <summary>Re-reads the staged archive's prefab. Called when the SCENE changes, not just the selection:
-    /// the tab is about the archive, and it has to be there the moment a car opens.</summary>
-    public void RefreshPrefab() => BuildPrefab();
+    /// <summary>
+    /// Re-reads the staged archive's prefab. Called when the SCENE changes, not just the selection: the tab
+    /// is about the archive, and it has to be there the moment a car opens.
+    /// <para>
+    /// It DEFEATS the same-archive cache, because the scene changing is exactly when the file behind that name
+    /// can have become a different file. Restoring a backup swaps the .sds and re-extracts it under the same
+    /// path, so a cached read left the tab showing parts and collision volumes the archive no longer has —
+    /// the rollback looked like it had not worked.
+    /// </para>
+    /// </summary>
+    public void RefreshPrefab()
+    {
+        _prefabArchive = null;
+        BuildPrefab();
+    }
 
     private async void BuildPrefab()
     {
@@ -343,8 +419,15 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         RaisePrefab();
         if (archive == null) return;
 
+        // The open graph's names go with the read: a Dummy minted for a new climb box exists only in memory
+        // until Save, and without it the part it belongs to shows as a bare hash the moment it is made.
+        IReadOnlyDictionary<ulong, string> live = _viewport.LiveFrameNames(archive);
+        // …and where its bones stand, which is what turns a collision volume's stored position into the
+        // car's own axes. Read on this thread: the graph is the UI's.
+        IReadOnlyDictionary<ulong, System.Numerics.Matrix4x4> bones = _viewport.LiveBoneWorlds(archive);
+
         PrefabAssembly? read = null;
-        try { read = await Task.Run(() => PrefabAssembly.Read(archive)); }
+        try { read = await Task.Run(() => PrefabAssembly.Read(archive, live, bones)); }
         catch (Exception) { /* an archive the panel cannot read is a tab that does not appear */ }
 
         if (token != _prefabToken) return;
@@ -534,8 +617,14 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         && (SelectedTuningTable?.Bands ?? []).All(b => !b.IsVisible);
 
     /// <summary>Re-reads the staged archive's entity data. Called when the SCENE changes, not just the
-    /// selection: the tab is about the archive, and it has to be there the moment a car opens.</summary>
-    public void RefreshTuning() => BuildTuning();
+    /// selection: the tab is about the archive, and it has to be there the moment a car opens. Defeats the
+    /// same-archive cache for the same reason the prefab tab does — a restored backup is a different file
+    /// under the same name.</summary>
+    public void RefreshTuning()
+    {
+        _tuningArchive = null;
+        BuildTuning();
+    }
 
     private async void BuildTuning()
     {
@@ -710,7 +799,10 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
             try
             {
                 _selectedParent = value;
-                _viewport.Reparent(_node, value.Node); // reselects → SetNode → resyncs the panel in place
+                // The frame's HIERARCHY row, which is not always the selected one: a helper frame also has a
+                // row under the bone it hangs on, and moving THAT row would move an attachment rather than a
+                // parent link. Same object either way — the row is only how the edit is addressed.
+                _viewport.Reparent(HierarchyRowOf(_node), value.Node); // reselects → SetNode → resyncs in place
             }
             finally { _applyingParent--; }
         }
@@ -736,9 +828,7 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
             _parentCandidates = list;
             _parentSearchText = "";
             _parentCandidatesView = new ListCollectionView(list) { Filter = FilterParent };
-            _selectedParent = null;
-            foreach (ParentOption o in list)
-                if (ReferenceEquals(o.Node, _node?.Parent)) { _selectedParent = o; break; }
+            _selectedParent = CurrentParentOption();
 
             // The picker may only act once it is showing the node's real parent. When the parent is not among the
             // candidates the combo has nothing truthful to display, so a push from it would be pure noise.
@@ -756,10 +846,7 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         _applyingParent++;
         try
         {
-            ParentOption? current = null;
-            foreach (ParentOption o in _parentCandidates)
-                if (ReferenceEquals(o.Node, _node?.Parent)) { current = o; break; }
-            if (current == null)
+            if (CurrentParentOption() is not { } current)
             {
                 BuildParentCandidates();
                 return;
@@ -768,6 +855,60 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
             _parentPickerSynced = true;
         }
         finally { _applyingParent--; }
+    }
+
+    /// <summary>
+    /// The candidate the picker must be showing before it is allowed to act: the selected object's CURRENT
+    /// parent.
+    ///
+    /// <para>
+    /// Resolved from the FRAME first and from the tree row only as a fallback. A helper frame — a climb box,
+    /// a seat, a fuel tank — has two rows in the tree: one under the bone it hangs on, and one in the
+    /// hierarchy. The row under the bone has a BONE for a tree parent, and a bone is never a reparent
+    /// candidate, so the picker never synced and every click on it was silently ignored: a control that was
+    /// visible, enabled and inert. Which of the two rows happens to be selected must not decide whether
+    /// reparenting works at all.
+    /// </para>
+    /// </summary>
+    private ParentOption? CurrentParentOption()
+    {
+        foreach (ParentOption o in _parentCandidates)
+        {
+            if (ReferenceEquals(o.Node, _node?.Parent)) return o;
+        }
+        // The frame's OTHER row. A helper appears twice and only the hierarchy copy sits under its real
+        // parent, so the candidate to show is the one that already holds a row for this same object.
+        // Matched on the row's Source rather than on the frame's own Parent property, because a frame whose
+        // parent is a SCENE folder reports that parent as a different kind of adapter and would never match.
+        return _node == null ? null : HolderOf(_node);
+    }
+
+    /// <summary>The candidate that already holds a row for this object — its hierarchy parent.</summary>
+    private ParentOption? HolderOf(SceneNode node)
+    {
+        if (node.Source is not { } source) return null;
+        foreach (ParentOption o in _parentCandidates)
+        {
+            foreach (SceneNode child in o.Node.Children)
+            {
+                if (ReferenceEquals(child.Source, source) && !ReferenceEquals(child, node)) return o;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The row that stands for this object in the HIERARCHY. Usually the node itself; for the copy that
+    /// hangs under a bone it is the other row of the same object, which is the one a parent link belongs to.
+    /// </summary>
+    private SceneNode HierarchyRowOf(SceneNode node)
+    {
+        if (HolderOf(node) is not { } holder) return node;
+        foreach (SceneNode child in holder.Node.Children)
+        {
+            if (ReferenceEquals(child.Source, node.Source) && !ReferenceEquals(child, node)) return child;
+        }
+        return node;
     }
 
     // Flattens the document subtree into parent options (scene folders + frame objects), skipping the node itself

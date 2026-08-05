@@ -140,6 +140,44 @@ internal static unsafe class OverlayProbes
             Check(without <= 3, "a sub-pixel world glyph stays sub-pixel when no floor is asked for");
             Check(with is >= 20 and <= 40, "the minimum-size floor lifts it to roughly 2 x 14 px");
 
+            // ── The car-physics overlay: two colours, and a Clear that really clears.
+            //
+            // Both halves were reported as bugs. A volume that places a physics shape and one that describes
+            // itself were drawn identically, so an unnamed box in the scene could not be told from one the
+            // editor had added; and nothing cleared this layer on a scene reset, so restoring a car to its
+            // vanilla backup left the collision you had added still on screen over an archive that no longer
+            // had it.
+            renderer.SetNavDistrict("probe", []);
+            renderer.ShowPartShapes = true;
+            renderer.Render(target);
+            byte[] bare = RenderTargetReadback.Read(gpu, target);
+
+            List<Vector3> bar = [new(-6f, 5f, 1.5f), new(6f, 5f, 1.5f)];
+            List<Vector4> asSolid = [new(1f, 0.45f, 0.25f, 0.95f), new(1f, 0.45f, 0.25f, 0.95f)];
+            List<Vector4> asGlass = [new(0.42f, 0.80f, 0.95f, 0.75f), new(0.42f, 0.80f, 0.95f, 0.75f)];
+            renderer.SetPartShapeLines(bar, asSolid);
+            renderer.Render(target);
+            byte[] asShape = RenderTargetReadback.Read(gpu, target);
+
+            renderer.SetPartShapeLines(bar, asGlass);
+            renderer.Render(target);
+            byte[] asVolume = RenderTargetReadback.Read(gpu, target);
+
+            int shapePixels = CountChanged(bare, asShape);
+            int volumePixels = CountChanged(bare, asVolume);
+            sb.AppendLine($"car physics: {shapePixels} px for a shape-placing volume, "
+                + $"{volumePixels} px for a self-describing one, {CountChanged(asShape, asVolume)} px differ");
+            Check(shapePixels > 20 && volumePixels > 20, "both kinds of car-physics volume are drawn");
+            Check(CountChanged(asShape, asVolume) > shapePixels / 4,
+                "…and a self-describing volume is drawn in a DIFFERENT colour from one that places a shape");
+
+            renderer.ClearPartShapes();
+            renderer.Render(target);
+            int afterClear = CountChanged(bare, RenderTargetReadback.Read(gpu, target));
+            sb.AppendLine($"after ClearPartShapes: {afterClear} px left over");
+            Check(afterClear == 0,
+                "clearing the car-physics overlay really stops it drawing — what a scene reset owes it");
+
             sb.Insert(0, $"OVERLAY LINE PROBE: {(failed == 0 ? "PASS" : "FAIL")} — {passed} passed, {failed} failed\n\n");
         }
         catch (Exception ex)

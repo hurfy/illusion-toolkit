@@ -40,6 +40,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     internal readonly TransformEditController Editing;
     internal readonly CollisionEditController CollisionEditing;
     internal readonly CarCollisionController CarCollisionEditing;
+    internal readonly CarPartController CarPartEditing;
     internal readonly TranslokatorEditController CrashEditing;
     internal readonly ActorEditController ActorEditing;
     internal readonly PropertyEditController PropertyEditing;
@@ -58,6 +59,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         Editing = new TransformEditController(this);
         CollisionEditing = new CollisionEditController(this);
         CarCollisionEditing = new CarCollisionController(this);
+        CarPartEditing = new CarPartController(this);
         CrashEditing = new TranslokatorEditController(this);
         ActorEditing = new ActorEditController(this);
         PropertyEditing = new PropertyEditController(this);
@@ -280,6 +282,29 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         set => CarCollisionEditing.ShowShapes = value;
     }
 
+    /// <summary>
+    /// Re-reads the car's physics off disk and redraws it.
+    ///
+    /// <para>
+    /// For an edit that changes a collision volume WITHOUT going through the scene: typing a position into
+    /// the Prefab tab, resizing a self-describing box, deleting a volume, and the undo of any of those. The
+    /// prefab file is rewritten immediately, but the overlay serves what it read last, so without this the
+    /// number changes in the panel and the box on screen does not move — which reads as "the edit did
+    /// nothing".
+    /// </para>
+    /// </summary>
+    public void RefreshCarCollisionOverlay() => CarCollisionEditing.AdoptPrefabPlacements();
+
+    /// <summary>Gives a part a self-describing collision volume — glass (type 0) or a zone (type 6). No
+    /// ItemDesc shape and no gizmo handle, exactly as the shipped ones are built.</summary>
+    public void AddCollisionZone(uint volumeType, System.Numerics.Vector3 fullSize, int bone) =>
+        CarCollisionEditing.AddZoneToPart(volumeType, fullSize, bone);
+
+    /// <summary>Changes what an existing collision volume is — glass, a zone, or a placed physics shape. The
+    /// placement is carried across, which is the whole difficulty: the kinds live in different spaces.</summary>
+    public bool ChangeCollisionVolumeType(FileInfo archive, int flat, uint newType, out string? refusal) =>
+        CarCollisionEditing.ChangeVolumeType(archive, flat, newType, out refusal);
+
     /// <summary>Whether the selection is a bone, which is the only thing a collision box can hang off.</summary>
     public bool CanAddCollisionBox => CarCollisionEditing.CanAddBox;
 
@@ -294,10 +319,55 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <summary>Gives a part a physics shape — undoable, selected on the way out so the gizmo can place it,
     /// and the shape layer is switched on so it is visible the moment it exists.</summary>
     public void AddCollisionShape(
-        Formats.ItemDesc.RigidBodyShape kind, System.Numerics.Vector3 size, int bone)
+        Formats.ItemDesc.RigidBodyShape kind, System.Numerics.Vector3 size, int bone, int? surface = null)
     {
-        CarCollisionEditing.AddBoxToPart(kind, size, bone);
+        CarCollisionEditing.AddBoxToPart(kind, size, bone, surface);
         RaiseDirtyChanged();   // the Layers menu shows the shape layer as on now
+    }
+
+    /// <summary>
+    /// Gives the car a part it did not ship with — the prefab row AND the frame it names, as one undoable
+    /// step. Only the kinds whose frame is a helper (Dummy or Point) can be minted; the rest name a bone of
+    /// the rig and are refused with that reason.
+    /// </summary>
+    /// <returns>True when the car gained the part.</returns>
+    public bool AddCarPart(Formats.Prefab.CarItemKind kind) => CarPartEditing.AddPart(kind);
+
+    /// <summary>Whether a minted part could be hung right now — a bone has to be selected.</summary>
+    public bool CanAddCarPart => CarPartEditing.CanAddPart;
+
+    /// <summary>
+    /// The names the OPEN graph of <paramref name="archive"/> answers to, for resolving prefab references.
+    /// A frame minted this session is not on disk until Save, so the panel has to be told about it or a part
+    /// made a moment ago reads as a bare hash and cannot be picked anywhere else.
+    /// </summary>
+    public IReadOnlyDictionary<ulong, string> LiveFrameNames(System.IO.FileInfo archive)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+        return Staged(archive)?.FrameNames() ?? new Dictionary<ulong, string>();
+    }
+
+    /// <summary>
+    /// Where the staged car's bones stand — what turns a collision volume's stored position into the car's
+    /// own axes for the property panel, and back again when a number is typed in.
+    /// </summary>
+    public IReadOnlyDictionary<ulong, System.Numerics.Matrix4x4> LiveBoneWorlds(System.IO.FileInfo archive)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+        return Staged(archive)?.BoneWorlds() ?? new Dictionary<ulong, System.Numerics.Matrix4x4>();
+    }
+
+    private Assets.Adapters.SceneDocumentAdapter? Staged(System.IO.FileInfo archive)
+    {
+        foreach (Assets.Adapters.SceneDocumentAdapter document in CarCollisionEditing.StageDocuments())
+        {
+            if (string.Equals(document.SourceArchive.FullName, archive.FullName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return document;
+            }
+        }
+        return null;
     }
 
     /// <summary>Whether a city_crash archive is loaded, so props can be placed into it.</summary>

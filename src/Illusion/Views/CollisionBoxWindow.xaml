@@ -25,7 +25,19 @@
 
         <StackPanel Grid.Row="0" Margin="24,20,24,20">
 
-            <TextBlock Style="{StaticResource DimLabel}" Text="Shape" Margin="0,0,0,4" />
+            <!-- WHICH KIND of volume, which is the question that was missing entirely. A car's collision comes
+                 in two shapes and they are not variants of one thing: a type-5 volume points at an ItemDesc
+                 record and is the body, the doors, the bumpers; a type-0 volume points at nothing and IS the
+                 glass — all 527 shipped window volumes are type 0 and none of them anything else. Until this
+                 row existed the editor could only make type 5, so every box it added was body collision
+                 whichever part it was hung on, and asking for one on a window changed nothing at all. -->
+            <TextBlock Style="{StaticResource DimLabel}" Text="What it is" Margin="0,0,0,4" />
+            <v:DropDownField x:Name="KindBox" DisplayPath="Title" SelectionChanged="Kind_Changed"
+                             ToolTip="Solid points at a physics shape; glass and zones are a plain box that says what it is by its type." />
+            <TextBlock x:Name="KindHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+                       TextWrapping="Wrap" />
+
+            <TextBlock x:Name="ShapeCaption" Style="{StaticResource DimLabel}" Text="Shape" Margin="0,0,0,4" />
             <v:DropDownField x:Name="ShapeBox" DisplayPath="Title" SelectionChanged="Shape_Changed"
                              ToolTip="What the shape is. Only primitives — a convex hull needs a cooker we do not have." />
             <TextBlock x:Name="ShapeHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
@@ -38,6 +50,18 @@
             <v:DropDownField x:Name="PartBox" DisplayPath="Display" SelectionChanged="Part_Changed"
                              ToolTip="The deformable part the shape hangs off — it moves with that part." />
             <TextBlock x:Name="PartHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+                       TextWrapping="Wrap" />
+
+            <!-- The surface, back after a false negative. It was offered once, tested in game against a
+                 shipped box, and looked to do nothing — so it was taken out. The test was wrong, not the
+                 field: the number went in unbiased, and the raw slot id is the table index PLUS 2 (the same
+                 offset the world's own collision uses, measured over 372 785 triangles). So "breakable glass"
+                 at table 28 was written as a 28 the game reads as 30 — bulletproof glass. The bias is applied
+                 in CarCollisionBuilder now, and this row hands it a table index, never a raw value. -->
+            <TextBlock x:Name="SurfaceCaption" Style="{StaticResource DimLabel}" Text="Surface" Margin="0,0,0,4" />
+            <v:DropDownField x:Name="SurfaceBox" DisplayPath="Title" SelectionChanged="Surface_Changed"
+                             ToolTip="Which physics surface the shape names — what a shot or a scrape should sound and look like." />
+            <TextBlock x:Name="SurfaceHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
                        TextWrapping="Wrap" />
 
             <TextBlock x:Name="SizeCaption" Style="{StaticResource DimLabel}" Margin="0,0,0,4" />

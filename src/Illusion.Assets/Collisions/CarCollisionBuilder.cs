@@ -64,10 +64,22 @@ public static class CarCollisionBuilder
     /// <param name="size">Box: half-extents. Sphere: X is the radius. Capsule: X is the radius and Y the
     /// length of the straight section, which lies along the shape's local Z.</param>
     /// <param name="localInBoneSpace">Where the shape sits relative to the bone.</param>
+    /// <param name="surface">
+    /// Which physics surface the shape names, as a <c>MaterialsPhysics.tbl</c> INDEX — or null for "as the
+    /// game ships them", which is the raw 0 every one of the 1174 shipped car shapes carries.
+    /// <para>
+    /// A table index and not a raw value, deliberately. The field on disk is a PhysX slot id, offset from the
+    /// table by <see cref="Domain.CollisionMaterialCatalog.RawToTableBias"/> — the same offset the world's
+    /// collision uses. Writing the table index straight in is what made the first in-game test meaningless:
+    /// asking for 28 (breakable glass) wrote a 28 the game read as 30, bulletproof glass, and the result
+    /// looked like "the field does nothing". Taking the index and applying the bias here means a caller
+    /// cannot get it wrong.
+    /// </para>
+    /// </param>
     /// <returns>Null with a <paramref name="refusal"/> when it cannot be done; nothing is written then.</returns>
     public static AddedCollisionBox? AddShape(
         FrameObjectModel model, int bone, string name, RigidBodyShape kind, Vector3 size,
-        Matrix4x4 localInBoneSpace, string extractedFolder, out string? refusal)
+        Matrix4x4 localInBoneSpace, string extractedFolder, out string? refusal, int? surface = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         refusal = null;
@@ -159,7 +171,10 @@ public static class CarCollisionBuilder
                 // unique inside the archive.
                 DataHash = dataHash,
                 Shape = kind,
-                MaterialId = 0,
+                // Raw slot id, not the table index — see the parameter's own note.
+                MaterialId = surface is { } table
+                    ? (ushort)(table + Domain.CollisionMaterialCatalog.RawToTableBias)
+                    : (ushort)0,
                 Layer = -1,          // every shape on every shipped car
                 Transform = Identity3x4(),
                 BoxDimensions = kind == RigidBodyShape.Box ? size : default,
@@ -215,6 +230,83 @@ public static class CarCollisionBuilder
 
         return new AddedCollisionBox(stub, shape, path, bone, volume);
     }
+
+    /// <summary>
+    /// Writes a BOX shape record into the archive and announces it, without any of the wiring — for a caller
+    /// that already has a volume and only needs something for it to name (converting a self-describing volume
+    /// into a placed one).
+    /// </summary>
+    /// <param name="halfSize">Half-extents, the way a box record states itself.</param>
+    /// <param name="dataHash">The record's DATA hash, which is what a prefab volume names it by.</param>
+    internal static bool MintBoxShape(
+        string extractedFolder, Vector3 halfSize, out string? file, out ulong dataHash, out string? refusal)
+    {
+        file = null;
+        dataHash = 0;
+        refusal = null;
+
+        if (!Describes(RigidBodyShape.Box, halfSize, out refusal)) return false;
+
+        SdsManifest manifest;
+        try { manifest = SdsManifest.Load(extractedFolder); }
+        catch (Exception ex) when (ex is IOException or SdsFormatException)
+        {
+            refusal = "the archive's manifest cannot be read: " + ex.Message;
+            return false;
+        }
+
+        var taken = new HashSet<ulong>();
+        foreach (string existing in manifest.GetFiles("ItemDesc"))
+        {
+            try
+            {
+                ItemDescFile already = ItemDescFile.Load(existing);
+                taken.Add(already.Hash);
+                if (already.Element != null) taken.Add(already.Element.DataHash);
+            }
+            catch (Exception) { /* a shape we cannot read still must not have its hash reused */ }
+        }
+
+        string stem = "converted_" + taken.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        ulong hash = MintHash(stem, taken);
+        dataHash = MintHash(stem + "#data", taken);
+        var shape = new ItemDescFile
+        {
+            Hash = hash,
+            Type = ItemDescType.RigidBody,
+            SubType = (byte)RigidBodyShape.Box,
+            Element = new RigidBodyElement
+            {
+                DataHash = dataHash,
+                Shape = RigidBodyShape.Box,
+                MaterialId = 0,
+                Layer = -1,
+                Transform = Identity3x4(),
+                BoxDimensions = halfSize,
+            },
+        };
+
+        string name = NextShapeFileName(manifest, extractedFolder);
+        string path = Path.Combine(extractedFolder, name);
+        try
+        {
+            File.WriteAllBytes(path, shape.ToBytes());
+            manifest.AddEntry("ItemDesc", name, ItemDescVersion);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            refusal = "the shape could not be written: " + ex.Message;
+            try { if (File.Exists(path)) File.Delete(path); } catch (IOException) { /* best effort */ }
+            return false;
+        }
+
+        file = path;
+        return true;
+    }
+
+    /// <summary>Unwrites a shape minted by <see cref="MintBoxShape"/> that could not be used after all.</summary>
+    internal static void UnmintShape(string extractedFolder, string path) =>
+        RollBackShape(extractedFolder, path);
 
     /// <summary>Unwrites a shape that was written and then could not be used.</summary>
     private static void RollBackShape(string extractedFolder, string path)

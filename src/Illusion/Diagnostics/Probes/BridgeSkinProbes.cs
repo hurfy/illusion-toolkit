@@ -403,8 +403,16 @@ internal static class BridgeSkinProbes
                     BridgeMeshApplier.TryApply(model, stale, out string? scrambledWhy);
                 if (scrambled == null)
                 {
+                    // …and the refusal has to NAME the problem. "It would not work" sends a modeller back to
+                    // Blender with nothing to change; the pool that overflowed and the advice to split the
+                    // vertex groups is the difference between a wall and a next step.
                     Check("a push built on a stale vertex map is refused rather than applied", true,
                         scrambledWhy ?? "");
+                    Check("…and the refusal says which pool overflowed and what to do about it",
+                        scrambledWhy != null
+                        && scrambledWhy.Contains("pool", StringComparison.OrdinalIgnoreCase)
+                        && scrambledWhy.Contains("vertex group", StringComparison.OrdinalIgnoreCase),
+                        scrambledWhy ?? "no reason at all");
                 }
                 else
                 {
@@ -412,9 +420,17 @@ internal static class BridgeSkinProbes
                     bool resolves = ((Assets.Adapters.FrameNodeAdapter)model).Frame is
                         Formats.Frames.ObjectTypes.FrameObjectModel after
                         && SdsMeshLoader.GlobalBoneIds(after) != null;
+                    // WHY it does not resolve, not just that it does not. The answer has half a dozen
+                    // different shapes — a lost skin channel, a remap table with fewer groups than the mesh
+                    // has materials, an id past the end of its pool — and they are different bugs. A bare
+                    // "the game cannot read it" sends the next person looking in the wrong place.
+                    string unresolved = ((Assets.Adapters.FrameNodeAdapter)model).Frame is
+                        Formats.Frames.ObjectTypes.FrameObjectModel probed
+                        ? SdsMeshLoader.DescribeBoneRemap(probed)
+                        : "the node is not a skinned model";
                     scrambled.RestoreOriginal();
                     Check("a push built on a stale vertex map never leaves an unresolvable skin behind",
-                        resolves, resolves ? "" : "the mesh came back with a skin the game cannot read");
+                        resolves, resolves ? "" : unresolved);
                 }
 
                 // A vertex in no group at all. The toolkit used to guess one from the nearest vertex, which is

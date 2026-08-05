@@ -304,7 +304,7 @@
                     <Border Height="1" Background="{StaticResource EdgeFaint}" Margin="0,0,0,2" />
 
                     <Grid x:Name="PartShapesRow" Margin="0,8,0,12"
-                          ToolTip="The physics shapes a car is actually hit by — the mesh never is. Drawn for the whole car, not just the selected part.">
+                          ToolTip="The physics a car is actually hit by — the mesh never is. Drawn for the whole car, not just the selected part.&#10;&#10;ORANGE — a placed physics shape with no surface named: the body, the doors, the bumpers.&#10;BLUE — glass. Every window is one of these, and it is glass by its type, not by a material.&#10;AMBER — a zone: the engine bay, the snow volumes.&#10;ANY OTHER COLOUR — a shape that names a physics surface, painted the way that surface is painted in the world's own collision.">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -316,7 +316,8 @@
                               Data="{StaticResource IconCollision}" />
                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                             <TextBlock Text="Collision" Foreground="White" FontSize="12" />
-                            <TextBlock Text="What bullets and bumpers meet" Foreground="{StaticResource TextDim}"
+                            <TextBlock Text="Coloured by what each volume is"
+                                       Foreground="{StaticResource TextDim}"
                                        FontSize="10.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                         <ToggleButton Grid.Column="2" x:Name="PartShapesToggle"
@@ -516,9 +517,11 @@
                                      "camber", "Wheel3.Camber" and "wheel_civ09" are all questions this
                                      tab gets asked. -->
                                 <Grid Margin="0,9,0,0">
+                                    <!-- Delayed for the same reason as the prefab box below: the tuning tab
+                                         is 771 fields, and narrowing it per keystroke is a full rebuild. -->
                                     <TextBox x:Name="TuningSearchBox" Style="{StaticResource InputField}"
                                              Padding="24,0,6,0"
-                                             Text="{Binding TuningSearch, UpdateSourceTrigger=PropertyChanged}" />
+                                             Text="{Binding TuningSearch, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                     <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
                                                Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
                                                HorizontalAlignment="Left" VerticalAlignment="Center"
@@ -724,9 +727,13 @@
                                      Matches a row's name AND the frame it names, so both "mass" and "doorFL"
                                      are answers. Same shape as the search over the tree above. -->
                                 <Grid Margin="0,9,0,0">
+                                    <!-- Delay: applying a search opens every band that matches, and a car's
+                                         tab is ~500 rows of heavy templates (three-field vectors, pickers).
+                                         Rebuilding that per character put the frame rate on the floor and
+                                         hung the app; one pass once the typing settles costs nothing. -->
                                     <TextBox x:Name="PrefabSearchBox" Style="{StaticResource InputField}"
                                              Padding="24,0,6,0"
-                                             Text="{Binding PrefabSearch, UpdateSourceTrigger=PropertyChanged}" />
+                                             Text="{Binding PrefabSearch, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
                                     <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
                                                Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
                                                HorizontalAlignment="Left" VerticalAlignment="Center"

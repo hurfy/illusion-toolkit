@@ -120,9 +120,30 @@ public sealed unsafe class SceneRenderer : IDisposable
     /// </summary>
     public bool ShowPartShapes { get; set; }
 
-    /// <summary>Replaces the shape wireframe drawn for the selected part; empty clears it.</summary>
-    public void SetPartShapeLines(IReadOnlyList<Vector3> lineVertices) =>
-        _partShapeRenderer.SetDistrict(PartShapeKey, lineVertices);
+    /// <summary>
+    /// Replaces the car-physics wireframe, one colour per line.
+    ///
+    /// <para>
+    /// Coloured per volume because a car's collision is not one thing: a volume that places a physics shape
+    /// is the body, one of type 0 IS the glass, one of type 6 is a zone like the engine bay — and a shape
+    /// that names a surface is a different thing again. They are drawn on top of each other and an unlabelled
+    /// wireframe cannot say which it is, so colour is the only thing that can.
+    /// </para>
+    /// </summary>
+    public void SetPartShapeLines(IReadOnlyList<Vector3> lineVertices, IReadOnlyList<Vector4> colors) =>
+        _partShapeRenderer.SetDistrict(PartShapeKey, lineVertices, colors);
+
+    /// <summary>
+    /// Drops both wireframes — what a scene reset owes this layer.
+    ///
+    /// <para>
+    /// Every other overlay has a Clear of its own and the reset calls them all; this one did not, so the
+    /// lines uploaded before a reload kept being drawn after it. Restoring a car to its vanilla backup
+    /// therefore left the collision you had added still visible, and the archive on disk was already clean:
+    /// the boxes on screen were a GPU buffer nothing had told to go.
+    /// </para>
+    /// </summary>
+    public void ClearPartShapes() => _partShapeRenderer.Clear();
 
     private static readonly object PartShapeKey = new();
 
@@ -519,9 +540,16 @@ public sealed unsafe class SceneRenderer : IDisposable
         _helperHighlightRenderer.Render(ctx, overlayFrame,
             HelperStyle() with { Thickness = 2.4f, HiddenAlpha = 0.55f });
 
-        // The selected part's physics shapes — inside the body they belong to, for the same reason.
+        // A car's physics — inside the body it belongs to, for the same reason. Two colours, because there
+        // are two different things here and telling them apart by eye is the whole point: warm orange for a
+        // volume that PLACES a physics shape (what a shot or a kerb actually meets), cool blue for one that
+        // describes itself (a window pane, the engine bay, the roof) — shipped with every car, not body
+        // collision, and not something the editor put there.
         if (ShowPartShapes)
-            _partShapeRenderer.Render(ctx, overlayFrame, RigStyle(new Vector4(1f, 0.45f, 0.25f, 0.95f), 2f));
+        {
+            // White tint: every line carries its own colour, and the tint multiplies it.
+            _partShapeRenderer.Render(ctx, overlayFrame, RigStyle(new Vector4(1f, 1f, 1f, 0.95f), 2f));
+        }
 
         // Actor glyphs: everything the .act pack places that has no geometry of its own, coloured per segment
         // (per category), so the tint stays neutral.

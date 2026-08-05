@@ -120,6 +120,43 @@ internal static class PickerProbes
             Check("Undo resyncs the picker without swapping the view",
                 ReferenceEquals(vm.ParentCandidatesView, viewBeforeUndo));
 
+            // 7) The SECOND row of the same frame — the copy that hangs under a bone.
+            //
+            // A helper frame (a climb box, a seat, a fuel tank) appears twice in the tree, and the row under
+            // the bone has a BONE for a tree parent. A bone is never a reparent candidate, so a picker that
+            // syncs on the tree parent alone never syncs at all there: the control shows, enables, and
+            // silently ignores every click. Reported as "I try to reparent and nothing happens on click".
+            var boneRow = new SceneNode("probe bone", "Bone", true);
+            var attachment = new SceneNode($"{objectNode.Name}  (Attachment)", "Attachment", false)
+            {
+                Source = objectNode.Source,
+            };
+            boneRow.AddChild(attachment);
+            // Inside the document's subtree, where a real skeleton branch hangs — the panel finds the
+            // document by walking UP from the selected row, so a row parked outside it has no candidates at
+            // all and would test nothing.
+            frNode.AddChild(boneRow);
+
+            vm.SetNode(attachment);
+            SceneNode? realParent = objectNode.Parent;
+            Check("The picker is available on a frame's under-the-bone row too", vm.CanReparent);
+            Check("…and it opens showing that frame's REAL parent, not the bone it hangs on",
+                vm.SelectedParent != null && ReferenceEquals(vm.SelectedParent.Node, realParent),
+                $"showing \"{vm.SelectedParent?.Node.Name ?? "nothing"}\", "
+                    + $"the frame sits under \"{realParent?.Name ?? "null"}\"");
+
+            ParentOption? fromBone = View(vm).FirstOrDefault(o =>
+                o.Node.Source is IFrameScene && !ReferenceEquals(o.Node, realParent));
+            if (fromBone != null)
+            {
+                vm.SelectedParent = fromBone;
+                // The frame's own row is what moves — the row under the bone stays where it is, because a
+                // bone attachment is not a hierarchy link.
+                Check("…and picking a parent from that row actually reparents the frame",
+                    ReferenceEquals(objectNode.Parent, fromBone.Node),
+                    $"the frame is now under \"{objectNode.Parent?.Name ?? "null"}\"");
+            }
+
             sb.Insert(0, $"REPARENT PICKER PROBE ({district}): {pass} passed, {fail} failed\n\n");
         }
         catch (Exception ex)

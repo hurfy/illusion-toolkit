@@ -76,10 +76,12 @@ public partial class ResourceEditorWindow : Window
         Browser.CollapsedChanged += UpdateBrowserRow;
         Browser.ArchiveEdited += OnArchiveEdited;
 
+        // The gate is IsTypingUncommitted and not IsTextFieldFocused: a numeric field keeps the caret after
+        // Enter, so the plain focus rule refused undo at the exact moment the user wanted the edit back.
         CommandBindings.Add(new CommandBinding(EditorCommands.Undo, (_, _) => Stage.Undo(),
-            (_, e) => e.CanExecute = Stage.History.CanUndo && !IsTextFieldFocused()));
+            (_, e) => e.CanExecute = Stage.History.CanUndo && !EditorCommands.IsTypingUncommitted()));
         CommandBindings.Add(new CommandBinding(EditorCommands.Redo, (_, _) => Stage.Redo(),
-            (_, e) => e.CanExecute = Stage.History.CanRedo && !IsTextFieldFocused()));
+            (_, e) => e.CanExecute = Stage.History.CanRedo && !EditorCommands.IsTypingUncommitted()));
         Stage.History.Changed += CommandManager.InvalidateRequerySuggested;
 
         CommandBindings.Add(new CommandBinding(EditorCommands.Delete, (_, _) => Stage.DeleteSelected(),
@@ -431,6 +433,8 @@ public partial class ResourceEditorWindow : Window
             map[HotkeyId.CameraFast].Modifiers, map[HotkeyId.CameraSlow].Modifiers);
     }
 
+    // Delete and Duplicate stand aside for any focused field — a caret is a caret, and Delete there has to
+    // delete a character. Undo asks a stricter question; see the Undo binding above.
     private static bool IsTextFieldFocused() =>
         Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase;
 

@@ -51,7 +51,9 @@ public sealed class PrefabRowViewModel : INotifyPropertyChanged
     /// frame in the archive", and there is no such question about a depth or a mass. It also keeps the width
     /// it costs on the rows where it says something — the panel is narrow and every column is paid for.
     /// </summary>
-    public bool HasDot => _row.Kind is PrefabRefKind.Reference or PrefabRefKind.Dangling or PrefabRefKind.Unset;
+    public bool HasDot =>
+        _row.Kind is PrefabRefKind.Reference or PrefabRefKind.Dangling or PrefabRefKind.Unset
+        && !_row.ChoosesVolumeType;   // a KIND always resolves — there is nothing for a dot to report
 
     /// <summary>Whether the row draws its own name line. A position does not — the vector box draws its name
     /// and its copy/paste buttons itself, and a second name over it would be the same word twice.</summary>
@@ -315,6 +317,13 @@ public sealed class PrefabGroupRowsViewModel : INotifyPropertyChanged
     /// </summary>
     public IReadOnlyList<PrefabElementViewModel> Elements { get; private set; }
 
+    /// <summary>The band split once, kept. Splitting allocates a view model per element, and a fresh instance
+    /// is a container WPF cannot reuse — re-splitting per keystroke rebuilt the whole panel each time.</summary>
+    private List<PrefabElementViewModel>? _whole;
+
+    /// <summary>The query this band was last narrowed to, so an unchanged one costs nothing.</summary>
+    private string _lastQuery = "";
+
     /// <summary>Whether the band has anything left to show under the current search.</summary>
     public bool IsVisible { get; private set; } = true;
 
@@ -350,9 +359,15 @@ public sealed class PrefabGroupRowsViewModel : INotifyPropertyChanged
     /// </summary>
     public void Search(string query)
     {
+        // Nothing to do when the answer cannot have changed. Every keystroke used to re-split the band and
+        // hand WPF a fresh set of element view models even when the band was collapsed and stayed collapsed
+        // — new instances mean no container reuse, so the whole panel was rebuilt per character.
+        if (string.Equals(query, _lastQuery, StringComparison.Ordinal)) return;
+        _lastQuery = query;
+
         if (query.Length == 0)
         {
-            Elements = Split(Rows);
+            Elements = _whole ??= Split(Rows);
             // An empty band that can be added to still stands: its "+" is the only way back from removing
             // the last thing in it.
             IsVisible = Rows.Count > 0 || CanAdd;
@@ -364,14 +379,14 @@ public sealed class PrefabGroupRowsViewModel : INotifyPropertyChanged
         {
             // The band itself is what was asked for — show all of it, including an empty one, which no row
             // could ever match on behalf of.
-            Elements = Split(Rows);
+            Elements = _whole ??= Split(Rows);
             IsVisible = true;
             IsExpanded = true;
         }
         else
         {
             var kept = new List<PrefabElementViewModel>();
-            foreach (PrefabElementViewModel element in Split(Rows))
+            foreach (PrefabElementViewModel element in _whole ??= Split(Rows))
             {
                 bool headMatches = element.Rows.Count > 0 && Hit(element.Rows[0], query);
                 if (headMatches)

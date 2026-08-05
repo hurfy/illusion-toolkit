@@ -483,6 +483,28 @@ internal static class EditorProbes
             Check("Block fields shrink freely (no clip on a narrow panel)",
                 blockField != null && blockField.MinWidth <= 8, $"minWidth={blockField?.MinWidth.ToString() ?? "null"}");
 
+            // What Ctrl+Z asks before standing aside. A numeric field commits on Enter and KEEPS the caret,
+            // so "a text box has the focus" is not "the user is mid-edit" — gating undo on focus alone
+            // refused it at the exact moment the user wanted the edit they had just made taken back, which
+            // is what "Ctrl+Z does not work for the prefab" was. Only a field whose text has NOT been written
+            // back may keep the key.
+            var pending = new Views.Vector3Box { Label = "Position", X = 1.5, Y = 2, Z = 3.25 };
+            pending.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Check("a field showing its committed value is not being typed into", !pending.HasPendingEdit,
+                $"X field reads '{(pending.FindName("BlockX") as System.Windows.Controls.TextBox)?.Text}'");
+
+            if (pending.FindName("BlockX") is System.Windows.Controls.TextBox typed)
+            {
+                typed.Text = "1.75";
+                Check("…and one holding a number it has not written back IS", pending.HasPendingEdit);
+                typed.Text = "1.7";     // still not 1.5
+                Check("…at any precision", pending.HasPendingEdit);
+                typed.Text = "not a number";
+                Check("…and so is one holding text that is not a number at all", pending.HasPendingEdit);
+                typed.Text = "1.5";
+                Check("…and typing the old value back makes it idle again", !pending.HasPendingEdit);
+            }
+
             var compactBox = new Views.Vector3Box { Compact = true };
             compactBox.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             double cw = compactBox.DesiredSize.Width;

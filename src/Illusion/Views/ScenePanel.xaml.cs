@@ -311,10 +311,18 @@ public partial class ScenePanel : UserControl
         {
             Owner = Window.GetWindow(this),
         };
-        if (dialog.ShowDialog() == true && dialog.Size is { } size && dialog.Kind is { } kind
-            && dialog.Part is { } part)
+        if (dialog.ShowDialog() != true || dialog.Size is not { } size || dialog.Part is not { } part) return;
+
+        // Two different things behind one dialog: a placed physics shape, or a plain box that is what its
+        // type says. They are not variants — a window is type 0 on all 527 shipped ones and a body type 5 on
+        // all 407 — so they take different paths from here.
+        if (dialog.VolumeType is { } volumeType)
         {
-            _viewport.AddCollisionShape(kind, size, part.Bone);
+            _viewport.AddCollisionZone(volumeType, size, part.Bone);
+        }
+        else if (dialog.Kind is { } kind)
+        {
+            _viewport.AddCollisionShape(kind, size, part.Bone, dialog.Surface);
         }
     }
 

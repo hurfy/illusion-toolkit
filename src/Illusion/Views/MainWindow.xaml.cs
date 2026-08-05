@@ -50,8 +50,10 @@ public partial class MainWindow : Window
         // Undo / redo: Edit-menu commands, driving the viewport's edit history; their enabled state follows
         // CanUndo/CanRedo (re-queried when the history changes). The keys that reach them come from the
         // keymap — see OnPreviewKeyDown; no command below carries a KeyGesture of its own.
-        CommandBindings.Add(new CommandBinding(EditorCommands.Undo, (_, _) => Viewport.Undo(), (_, e) => e.CanExecute = Viewport.History.CanUndo && !IsTextFieldFocused()));
-        CommandBindings.Add(new CommandBinding(EditorCommands.Redo, (_, _) => Viewport.Redo(), (_, e) => e.CanExecute = Viewport.History.CanRedo && !IsTextFieldFocused()));
+        // The gate is IsTypingUncommitted and not IsTextFieldFocused: a numeric field keeps the caret after
+        // Enter, so the plain focus rule refused undo at the exact moment the user wanted the edit back.
+        CommandBindings.Add(new CommandBinding(EditorCommands.Undo, (_, _) => Viewport.Undo(), (_, e) => e.CanExecute = Viewport.History.CanUndo && !EditorCommands.IsTypingUncommitted()));
+        CommandBindings.Add(new CommandBinding(EditorCommands.Redo, (_, _) => Viewport.Redo(), (_, e) => e.CanExecute = Viewport.History.CanRedo && !EditorCommands.IsTypingUncommitted()));
         Viewport.History.Changed += CommandManager.InvalidateRequerySuggested;
 
         // Delete selected objects: the Delete key (gated off text fields so it still deletes characters there)
@@ -262,8 +264,8 @@ public partial class MainWindow : Window
 
     private void RemoveUnusedHulls_Click(object sender, RoutedEventArgs e) => Viewport.RemoveUnusedHulls();
 
-    // Keep scene undo/redo (Ctrl+Z / Ctrl+Shift+Z) from firing while a text field is focused — a TextBox has its
-    // own text-undo, and the mirror gesture Ctrl+Shift+Z would otherwise leak into scene redo mid-edit.
+    // Delete and Duplicate stand aside for any focused field — a caret is a caret, and Delete there has to
+    // delete a character. Undo asks a stricter question; see the Undo binding above.
     private static bool IsTextFieldFocused() =>
         Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase;
 

@@ -1,9 +1,11 @@
 using System.Globalization;
 using System.Numerics;
 using Illusion.Assets.Sds;
+using Illusion.Domain;
 using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames.ObjectTypes;
+using Illusion.Formats.ItemDesc;
 using Illusion.Formats.Hashing;
 using Illusion.Formats.Prefab;
 
@@ -65,15 +67,26 @@ public sealed class PrefabAssembly
     /// background thread. Returns null when the archive carries no PREFAB at all — which is the common case
     /// (257 of 1324 archives carry one).
     /// </summary>
-    public static PrefabAssembly? Read(FileInfo archive)
+    /// <param name="live">Frame names from the graph that is OPEN, when there is one. A frame minted this
+    /// session — the Dummy a new climb box hangs on — is not on disk until Save, so without these it reads
+    /// as a bare hash and cannot be picked in any other slot: the part would look broken the moment it was
+    /// made. Live names win over the file's.</param>
+    /// <param name="boneWorlds">Where the car's bones stand, when the archive is on a stage. A collision
+    /// volume is written in the space of a bone, and most car bones are turned relative to the car — so
+    /// without these the position rows show numbers whose axes are not the ones the viewport draws.</param>
+    public static PrefabAssembly? Read(
+        FileInfo archive, IReadOnlyDictionary<ulong, string>? live = null,
+        IReadOnlyDictionary<ulong, Matrix4x4>? boneWorlds = null)
     {
         ArgumentNullException.ThrowIfNull(archive);
-        return ReadFrom(MafiaEnvironment.ExtractedDir(archive));
+        return ReadFrom(MafiaEnvironment.ExtractedDir(archive), live, boneWorlds);
     }
 
     /// <summary>The same, from a working copy that is not the archive's own — what the regression harness
     /// reads, so an edit it makes never lands in the player's install.</summary>
-    public static PrefabAssembly? ReadFrom(string extracted)
+    public static PrefabAssembly? ReadFrom(
+        string extracted, IReadOnlyDictionary<ulong, string>? live = null,
+        IReadOnlyDictionary<ulong, Matrix4x4>? boneWorlds = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(extracted);
 
@@ -83,6 +96,8 @@ public sealed class PrefabAssembly
         if (files.Count == 0) return null;
 
         Dictionary<ulong, string> names = FrameNames(extracted);
+        foreach ((ulong hash, string name) in live ?? new Dictionary<ulong, string>()) names[hash] = name;
+        Dictionary<ulong, ushort> surfaces = ShapeSurfaces(extracted);
         var entries = new List<PrefabEntryView>();
 
         // The ones the core cannot read are counted, not listed. A city district carries over a thousand
@@ -98,7 +113,7 @@ public sealed class PrefabAssembly
             for (int i = 0; i < prefab.PrefabCount; i++)
             {
                 (int type, int size) = prefab.Entries[i];
-                if (Describe(prefab, i, type, size, names) is { Decoded: true } decoded)
+                if (Describe(prefab, i, type, size, names, surfaces, boneWorlds) is { Decoded: true } decoded)
                 {
                     entries.Add(decoded);
                     continue;
@@ -160,8 +175,33 @@ public sealed class PrefabAssembly
             ? name
             : "type " + type.ToString(CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// The physics surface each of the archive's own shapes names, keyed by the DATA hash a prefab volume
+    /// addresses it with. Every shipped car shape carries 0 ("unassigned"), so a non-zero one is a shape the
+    /// toolkit minted with a surface asked for — worth showing, because it is invisible everywhere else.
+    /// </summary>
+    private static Dictionary<ulong, ushort> ShapeSurfaces(string extracted)
+    {
+        var found = new Dictionary<ulong, ushort>();
+        IReadOnlyList<string> files;
+        try { files = SdsManifest.Load(extracted).GetFiles("ItemDesc"); }
+        catch (Exception ex) when (ex is IOException or SdsFormatException) { return found; }
+
+        foreach (string file in files)
+        {
+            try
+            {
+                ItemDescFile shape = ItemDescFile.Load(file);
+                if (shape.Element is RigidBodyElement rigid) found[rigid.DataHash] = rigid.MaterialId;
+            }
+            catch (Exception ex) when (ex is IOException or SdsFormatException) { /* unreadable shape */ }
+        }
+        return found;
+    }
+
     private static PrefabEntryView Describe(
-        PrefabFile prefab, int index, int type, int size, Dictionary<ulong, string> names)
+        PrefabFile prefab, int index, int type, int size, Dictionary<ulong, string> names,
+        Dictionary<ulong, ushort> surfaces, IReadOnlyDictionary<ulong, Matrix4x4>? boneWorlds)
     {
         string typeName = TypeName(type);
         string owner = "0x" + prefab.Hashes[index].ToString("X16", CultureInfo.InvariantCulture);
@@ -172,7 +212,7 @@ public sealed class PrefabAssembly
         CarPrefab? car = prefab.DecodedKinds[index] != 0 ? prefab.Car : null;
         if (car != null && type == 2)
         {
-            List<PrefabGroupView> groups2 = CarGroups(car, names, prefab);
+            List<PrefabGroupView> groups2 = CarGroups(car, names, prefab, surfaces, boneWorlds);
             int total2 = groups2.Sum(g => g.Rows.Count(r => r.Kind == PrefabRefKind.Reference));
             int dangling2 = groups2.Sum(g => g.DanglingCount);
             return new PrefabEntryView(owner, typeName, bytes, decoded: true, groups2,
@@ -185,7 +225,8 @@ public sealed class PrefabAssembly
     }
 
     private static List<PrefabGroupView> CarGroups(
-        CarPrefab car, Dictionary<ulong, string> names, PrefabFile file)
+        CarPrefab car, Dictionary<ulong, string> names, PrefabFile file,
+        Dictionary<ulong, ushort> surfaces, IReadOnlyDictionary<ulong, Matrix4x4>? boneWorlds)
     {
         PrefabRefView Reference(string label, ulong hash, CarFrameSlot slot, int index, string? detail = null)
         {
@@ -378,21 +419,58 @@ public sealed class PrefabAssembly
             foreach (CarPhysicsVolume volume in part.Volumes)
             {
                 int flat = file.CarVolumeIndex(part.Index, volume.Index);
+                // A shape's SURFACE, when it names one. Shipped shapes all carry 0, so this row is how a
+                // toolkit-minted shape shows what it was given — the field is reachable nowhere else.
+                string surface = "";
+                if (volume.NamesShape && surfaces.TryGetValue(volume.ShapeHash, out ushort id) && id != 0)
+                {
+                    // ForRawId, not ForTableIndex: the field on disk is a PhysX slot id and the table index is
+                    // that minus the bias. Reading it as a table index named the surface two places off — and
+                    // that is the same mistake that made the first in-game surface test come back empty.
+                    surface = $"  ·  {CollisionMaterialCatalog.ForRawId(id).Name}";
+                }
+                // WHAT it is, as a picker rather than a fact. The kinds are not interchangeable — a window is
+                // type 0 on all 527 shipped ones, a body type 5 on all 407 — and until this could be changed
+                // the only way to turn one into the other was to delete it and lose its placement.
                 volumes.Add(Sub(new PrefabRefView(
-                    volume.NamesShape ? "Shape" : "Box",
+                    "What it is",
+                    VolumeKindName(volume.VolumeType) + (volume.NamesShape ? surface : ""),
+                    PrefabRefKind.Reference,
                     volume.NamesShape
-                        ? "0x" + volume.ShapeHash.ToString("X16", CultureInfo.InvariantCulture)
-                        : $"type {volume.VolumeType}",
-                    PrefabRefKind.Fact,
-                    volume.NamesShape
-                        ? "a physics shape from this archive's ItemDesc — its size is the shape's"
-                        : "a box the volume describes itself, in full sizes")
-                    { Item = CarItemKind.CollisionVolume, ItemIndex = flat }));
-                volumes.Add(Sub(Vector("Position", new Vector3(
+                        ? "places a physics shape from this archive's ItemDesc — its size is the shape's"
+                        : "a box that says what it is by its type; it states its own full size")
+                {
+                    Item = CarItemKind.CollisionVolume,
+                    ItemIndex = flat,
+                    Index = flat,
+                    Options = VolumeKinds,
+                    ChoosesVolumeType = true,
+                }));
+                // Shown in the CAR's axes, not in the bone's.
+                //
+                // A volume is stored in the space of a bone — its own part's when it places a shape, that of
+                // the part it hangs off when it describes itself — and most car bones are turned relative to
+                // the car. Read raw, the field lied about which way it pointed: on a door-mounted window,
+                // typing into Z moved the box along the car and into Y moved it upwards. So the bone is
+                // divided out here and multiplied back in on the way to the file; what stays in the file is
+                // untouched, and X is across the car, Y along it, Z up — the same axes the viewport draws.
+                ulong owner = volume.NamesShape ? part.Frame : (part.ParentFrame == 0 ? part.Frame : part.ParentFrame);
+                Matrix4x4? space = boneWorlds != null && boneWorlds.TryGetValue(owner, out Matrix4x4 at)
+                    ? at
+                    : null;
+                var stored = new Vector3(
                     file.GetCarValue(CarValueSlot.CollisionVolumePosition, flat, 0),
                     file.GetCarValue(CarValueSlot.CollisionVolumePosition, flat, 1),
-                    file.GetCarValue(CarValueSlot.CollisionVolumePosition, flat, 2)),
-                    CarValueSlot.CollisionVolumePosition, flat)));
+                    file.GetCarValue(CarValueSlot.CollisionVolumePosition, flat, 2));
+                volumes.Add(Sub(Vector("Position",
+                    space is { } m ? Vector3.Transform(stored, m) : stored,
+                    CarValueSlot.CollisionVolumePosition, flat) with
+                {
+                    Space = space,
+                    Detail = space == null
+                        ? $"measured from \"{names.GetValueOrDefault(owner, bone)}\", in ITS axes"
+                        : "in the car's own axes: X across, Y along, Z up",
+                }));
                 if (!volume.NamesShape)
                 {
                     volumes.Add(Sub(Vector("Size", new Vector3(
@@ -426,6 +504,25 @@ public sealed class PrefabAssembly
         static PrefabRefView Vector(string label, Vector3 v, CarValueSlot slot, int index) =>
             new(label, Point(v), PrefabRefKind.Vector, null, null, index, slot, v.X, v.Y, v.Z);
     }
+
+    /// <summary>The kinds a collision volume can be, as a picker offers them. The hash slot carries the type
+    /// number, which is all a type is.</summary>
+    private static readonly IReadOnlyList<FrameChoice> VolumeKinds =
+    [
+        new(5, "Solid — a physics shape"),
+        new(0, "Glass"),
+        new(6, "Zone — engine bay, snow"),
+    ];
+
+    /// <summary>What a volume type is, in words.</summary>
+    private static string VolumeKindName(uint type) => type switch
+    {
+        0 => "Glass",
+        5 => "Solid — a physics shape",
+        6 => "Zone — engine bay, snow",
+        _ => "type " + type.ToString(CultureInfo.InvariantCulture),
+    };
+
 
     // A band built straight off a slot's own count — for the lists that have no view-model of their own.
     private static void Slots(
@@ -510,12 +607,34 @@ public sealed record PrefabRefView(
     /// of going stale the moment somebody types into it.</summary>
     public string? Format { get; init; }
 
+    /// <summary>
+    /// The matrix this row's X/Y/Z were converted OUT of, when they were — so the value typed back in can be
+    /// converted into it again. Null means the row's numbers are the file's own.
+    ///
+    /// <para>
+    /// A collision volume is stored in the space of a bone, and most car bones are turned relative to the
+    /// car; the panel shows the car's axes instead, because a field whose Z runs along the car is a field
+    /// that cannot be used. Both directions have to know the same matrix, which is why it rides on the row.
+    /// </para>
+    /// </summary>
+    public Matrix4x4? Space { get; init; }
+
+    /// <summary>
+    /// The choices THIS row offers, when they are not the archive's frames — today only the kinds a collision
+    /// volume can be. Null means the ordinary frame list.
+    /// </summary>
+    public IReadOnlyList<FrameChoice>? Options { get; init; }
+
+    /// <summary>Whether picking from <see cref="Options"/> changes a collision volume's KIND rather than
+    /// pointing a slot at a frame. The two go through the same dropdown and mean nothing alike.</summary>
+    public bool ChoosesVolumeType { get; init; }
+
     /// <summary>Where the PART sits in its own list — which is not where its frame sits in the frame list:
     /// axles are listed one per row but stored two at a time, so an axle row's part index is its pair.</summary>
     public int PartIndex => ItemIndex < 0 ? Index : ItemIndex;
 
     /// <summary>Whether this row can be pointed at another frame. A number is edited, not pointed.</summary>
-    public bool CanEdit => Slot != null;
+    public bool CanEdit => Slot != null || ChoosesVolumeType;
 
     /// <summary>Whether this row holds a value the game reads and the toolkit can write.</summary>
     public bool CanSet => ValueSlot != null;

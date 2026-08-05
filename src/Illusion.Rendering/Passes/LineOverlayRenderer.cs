@@ -49,6 +49,23 @@ internal sealed unsafe class LineOverlayRenderer : IDisposable
         };
     }
 
+    /// <summary>
+    /// The same, but every line carries its own colour — for a layer whose items mean different things and
+    /// have to be told apart at a glance. The pass tint multiplies these, so it should be white.
+    /// </summary>
+    public void SetDistrict(object key, IReadOnlyList<Vector3> lineVertices, IReadOnlyList<Vector4> colors)
+    {
+        RemoveDistrict(key);
+        if (lineVertices == null || colors == null || lineVertices.Count < 2) return;
+
+        OverlaySegment[] segments = OverlaySegments.FromLineList(lineVertices, colors);
+        _districts[key] = new District
+        {
+            Vb = _pass.CreateBuffer(segments),
+            SegmentCount = (uint)segments.Length,
+        };
+    }
+
     /// <summary>Drops one district's graph (district unload).</summary>
     public void RemoveDistrict(object key)
     {
