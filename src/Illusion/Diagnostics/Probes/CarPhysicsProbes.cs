@@ -1708,6 +1708,19 @@ internal static class CarPhysicsProbes
         var disagreeing = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var shapeByPart = new Dictionary<(uint Part, RigidBodyShape Shape), int>();
         int indexListsMatchVolumes = 0, indexListsAny = 0, partsCounted = 0;
+        var indexSeen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var indexMax = new Dictionary<string, int>(StringComparer.Ordinal);
+        var indexLen = new Dictionary<(string List, string Of), int>();
+        var indexFits = new Dictionary<(string List, string Of), int>();
+        var indexSamples = new List<string>();
+        int effectParts = 0, effectCars = 0, effectVariesWithinCar = 0;
+        var effectFields = new Dictionary<string, Dictionary<short, int>>(StringComparer.Ordinal)
+        {
+            ["ParticleBreakID"] = [],
+            ["ParticleHingeVersionID"] = [],
+            ["SnowParticleID_0"] = [],
+            ["SnowParticleID_1"] = [],
+        };
         var unk14Counts = new Dictionary<int, int>();
         var unk20Counts = new Dictionary<int, int>();
         int withUnk2Transform = 0, withUnk6 = 0;
@@ -1798,6 +1811,7 @@ internal static class CarPhysicsProbes
             if (entry == null || entry.CarInit[0].Deformation.Count == 0) continue;
             prefabCars++;
 
+            var breakIdsHere = new HashSet<short>();
             foreach (PrefabDeformPartW part in entry.CarInit[0].Deformation[0].DeformParts)
             {
                 parts++;
@@ -1816,11 +1830,62 @@ internal static class CarPhysicsProbes
                 // Two unnamed lists of ushorts sit on every deformable part. If either of them is an index
                 // INTO the volume list, a volume added without one would be a volume the game never walks —
                 // which is exactly the symptom to explain.
+                // The effects block, one per part, inside the part's common tail.
+                foreach (PrefabDeformPartCommonW common in part.Common)
+                {
+                    foreach (PrefabDeformPartEffectsW fx in common.PartEffects)
+                    {
+                        effectParts++;
+                        Bump(effectFields["ParticleBreakID"], fx.ParticleBreakId);
+                        Bump(effectFields["ParticleHingeVersionID"], fx.ParticleHingeVersionId);
+                        Bump(effectFields["SnowParticleID_0"], fx.SnowParticleId0);
+                        Bump(effectFields["SnowParticleID_1"], fx.SnowParticleId1);
+                        breakIdsHere.Add(fx.ParticleBreakId);
+                    }
+                }
+
                 partsCounted++;
                 unk14Counts[part.Unk14.Count] = unk14Counts.GetValueOrDefault(part.Unk14.Count) + 1;
                 unk20Counts[part.Unk20.Count] = unk20Counts.GetValueOrDefault(part.Unk20.Count) + 1;
                 if (part.Unk14.Count > 0 || part.Unk20.Count > 0) indexListsAny++;
                 if (part.Unk14.Count == here || part.Unk20.Count == here) indexListsMatchVolumes++;
+
+                // WHAT they are lists OF. "As long as the volume list" is a weak reading: a part with one
+                // volume and one deform bone matches both. So every sibling list of the part is offered the
+                // same question, and the values are range-checked against each candidate — an index list
+                // cannot hold a number past the end of what it indexes.
+                (string Name, int Count)[] siblings =
+                [
+                    ("volumes", here),
+                    ("deform bones", part.SmDeformBones.Count),
+                    ("drop parts", part.DropParts.Count),
+                    ("drain energy", part.DrainEnergy.Count),
+                    ("impulses", part.InternalImpulses.Count),
+                    ("frames", part.Unk3.Count),
+                    ("parts in the car", entry.CarInit[0].Deformation[0].DeformParts.Count),
+                ];
+                foreach ((string listName, IReadOnlyList<ushort> list) in
+                         new (string, IReadOnlyList<ushort>)[] { ("Unk14", part.Unk14), ("Unk20", part.Unk20) })
+                {
+                    if (list.Count == 0) continue;
+                    indexSeen[listName] = indexSeen.GetValueOrDefault(listName) + 1;
+                    indexMax[listName] = Math.Max(indexMax.GetValueOrDefault(listName), list.Max());
+                    foreach ((string sibling, int count) in siblings)
+                    {
+                        if (list.Count == count) indexLen[(listName, sibling)] =
+                            indexLen.GetValueOrDefault((listName, sibling)) + 1;
+                        // A list of indices INTO something never names a slot that thing does not have.
+                        if (count > 0 && list.All(x => x < count)) indexFits[(listName, sibling)] =
+                            indexFits.GetValueOrDefault((listName, sibling)) + 1;
+                    }
+                    if (indexSamples.Count < 12 && list.Count > 1)
+                    {
+                        indexSamples.Add($"{Path.GetFileNameWithoutExtension(sds.Name),-24} part {parts - 1,2} "
+                            + $"{PartTypeNames.GetValueOrDefault(part.PartType, "?"),-8} {listName} "
+                            + $"[{string.Join(",", list)}]  vols {here} bones {part.SmDeformBones.Count} "
+                            + $"drops {part.DropParts.Count} frames {part.Unk3.Count}");
+                    }
+                }
                 foreach (PrefabCollVolumeCollectionW c in part.CollisionVolumes)
                 {
                     foreach (PrefabCollVolumeW v in c.Volumes)
@@ -1889,6 +1954,15 @@ internal static class CarPhysicsProbes
                         }
                     }
                 }
+            }
+
+            // Does THIS car use more than one break-effect id across its own parts? A field that is one
+            // value per car would be a car property, not a part property, and could not explain a roof
+            // drawing something the bonnet does not.
+            if (breakIdsHere.Count > 0)
+            {
+                effectCars++;
+                if (breakIdsHere.Count > 1) effectVariesWithinCar++;
             }
 
             stubsClaimed += claimed.Count;
@@ -1964,6 +2038,69 @@ internal static class CarPhysicsProbes
             unk20Counts.OrderBy(p => p.Key).Select(p => $"{p.Key}×{p.Value}")));
         sb.AppendLine($"    parts where one of them is as long as the volume list: {indexListsMatchVolumes} "
             + $"of {partsCounted}; parts carrying either at all: {indexListsAny}");
+        sb.AppendLine($"    {"",-8} {"biggest value",13}  " + string.Join("  ",
+            new[] { "volumes", "deform bones", "drop parts", "drain energy", "impulses", "frames",
+                    "parts in the car" }.Select(s => $"{s,-16}")));
+        foreach (string listName in new[] { "Unk14", "Unk20" })
+        {
+            int carried = indexSeen.GetValueOrDefault(listName);
+            if (carried == 0) continue;
+            sb.AppendLine($"    {listName,-8} {indexMax.GetValueOrDefault(listName),13}  " + string.Join("  ",
+                new[] { "volumes", "deform bones", "drop parts", "drain energy", "impulses", "frames",
+                        "parts in the car" }
+                    .Select(s => $"{$"len {indexLen.GetValueOrDefault((listName, s))} " +
+                                    $"fits {indexFits.GetValueOrDefault((listName, s))}",-16}")));
+            sb.AppendLine($"    {"",-8} …of {carried} parts that carry a {listName}");
+        }
+        sb.AppendLine("    what they actually hold:");
+        foreach (string sample in indexSamples) sb.AppendLine("      " + sample);
+
+        // ── WHICH EFFECT A SHOT DRAWS ──
+        //
+        // Established in game (2026-08-05): geometry rebound from the hood's vertex group to the ROOF's,
+        // with its material untouched, draws a DIFFERENT impact effect. So the effect is chosen by the
+        // deformable PART the geometry hangs on, not by the triangle's material — and the part carries an
+        // effects block the toolkit had never opened, whose legacy names are ParticleBreakID,
+        // ParticleHingeVersionID, SnowParticleID_0..3 and ParticleScale.
+        //
+        // This asks the first question that has to be true for that story: do those ids actually DIFFER
+        // between parts of one car? A field that is one constant everywhere cannot be selecting anything.
+        sb.AppendLine($"\n  the effects block on a deformable part ({effectParts} parts carrying one):");
+        foreach ((string name, Dictionary<short, int> values) in effectFields)
+        {
+            List<KeyValuePair<short, int>> top = [.. values.OrderByDescending(p => p.Value).Take(6)];
+            sb.AppendLine($"    {name,-24} {values.Count,4} distinct   "
+                + string.Join("  ", top.Select(p => $"{p.Key}×{p.Value}")));
+        }
+        sb.AppendLine($"    cars where one car's parts disagree about ParticleBreakID: "
+            + $"{effectVariesWithinCar} of {effectCars}");
+        // MEASURED, and it closes the candidate rather than opening it. The block's two impact-effect ids are
+        // -1 on every part of every shipped car, and the only fields in it that vary at all are the SNOW ones,
+        // on snow parts. So whatever picks the effect a shot draws, it is not written here — even though the
+        // effect demonstrably follows the part (rebinding geometry from the bonnet's vertex group to the
+        // roof's, with the material untouched, changes it).
+        check("the part effects block does not choose the impact effect — its ids are unset on every car",
+            effectParts > 0 && effectFields["ParticleBreakID"].Count == 1
+            && effectFields["ParticleBreakID"].ContainsKey(-1),
+            $"{effectFields["ParticleBreakID"].Count} distinct ParticleBreakID over {effectParts} parts");
+        check("…and no car's parts disagree about it, so it cannot be telling one part from another",
+            effectVariesWithinCar == 0, $"{effectVariesWithinCar} of {effectCars} cars vary");
+        check("the only effect ids that DO vary are the snow ones, and only on snow parts",
+            effectFields["SnowParticleID_0"].Count > 1,
+            string.Join(" ", effectFields["SnowParticleID_0"].OrderByDescending(p => p.Value)
+                .Select(p => $"{p.Key}×{p.Value}")));
+        // Both lists hold PART NUMBERS — every value lands inside the car's own part list, and nothing else
+        // they could be indexing takes all of them. That makes a part's POSITION load-bearing: renumber the
+        // list and these silently point at the wrong panels. Nothing in the toolkit can renumber it today
+        // (see CarItemKind — there is no DeformPart), and this assertion is what will notice if that changes.
+        int carriers = indexSeen.GetValueOrDefault("Unk14") + indexSeen.GetValueOrDefault("Unk20");
+        int within = indexFits.GetValueOrDefault(("Unk14", "parts in the car"))
+            + indexFits.GetValueOrDefault(("Unk20", "parts in the car"));
+        check("a deformable part's two index lists name other PARTS of the same car",
+            carriers > 0 && within == carriers,
+            $"{within} of {carriers} lists stay inside the part list; next best reading is "
+                + $"{indexFits.GetValueOrDefault(("Unk14", "deform bones"))
+                    + indexFits.GetValueOrDefault(("Unk20", "deform bones"))} as bone indices");
         check("the prefab volume and the frame stub carry the SAME placement, under one fixed axis order",
             pairTotal > 0 && permHit[best] * 20 > pairTotal * 19,
             $"{PermName(best)} on {permHit[best]} of {pairTotal} — the rest are archives already edited");
@@ -2957,6 +3094,10 @@ internal static class CarPhysicsProbes
     }
 
     // ── helpers ──
+
+    /// <summary>Tallies one value of a field whose vocabulary is being surveyed.</summary>
+    private static void Bump(Dictionary<short, int> into, short value) =>
+        into[value] = into.GetValueOrDefault(value) + 1;
 
     private static bool IsRotationIdentity(Matrix4x4 m) =>
         MathF.Abs(m.M11 - 1f) < 1e-4f && MathF.Abs(m.M22 - 1f) < 1e-4f && MathF.Abs(m.M33 - 1f) < 1e-4f

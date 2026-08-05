@@ -105,6 +105,16 @@ public enum CarValueSlot
 /// A kind of part a car's assembly can gain or lose. Coarser than <see cref="CarFrameSlot"/> on purpose:
 /// a door is one thing with three fields, and adding "a door frame" without the handle and lock beside it
 /// would be adding half a door.
+///
+/// <para>
+/// A DEFORMABLE PART is deliberately not on this list, and adding it is not a small job. A part is addressed
+/// by its POSITION in the car's part list, and five separate tables hold those positions: the part's own two
+/// index lists (measured — every value of both lands inside the part list, 764 of 764 and 334 of 334, and no
+/// other list they could be indexing takes all of them), <c>DrainEnergy.DrainPart</c>,
+/// <c>DropParts.DropPart</c>, and <c>PartBreakEnergy.PartId</c>. Inserting or dropping a part renumbers
+/// everything after it, and every one of those references then names the wrong panel — with no error, in a
+/// system whose only symptom is that damage behaves oddly. Whoever adds it renumbers all five.
+/// </para>
 /// </summary>
 public enum CarItemKind
 {
