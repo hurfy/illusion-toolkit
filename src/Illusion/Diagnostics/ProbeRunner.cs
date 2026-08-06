@@ -698,12 +698,18 @@ internal static class ProbeRunner
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
                     args.Length >= 3 ? args[2] : null);
                 return true;
-            // DESTRUCTIVE, and on purpose: grows every per-piece hit box of a car in its extracted working
-            // copy so the next pack can be shot at. Undone by re-extracting. See HitBoxProbes.
-            // The game.s own impact-effect tables (car_particles_keys, materials_shots), dumped in full.
+            // The game's own impact-effect tables (car_particles_keys, materials_shots), dumped in full.
             case "--probe-effect-tables":
                 EffectTableProbes.RunEffectTablesProbe();
                 return true;
+            // What an .eff holds: the chunk tree of every effects file in the game, the patterns inside it,
+            // and which of the car's own numbers name them. Optional arg = the car.
+            // Output: %TEMP%\illusion_effects.txt
+            case "--probe-effects":
+                EffectProbes.RunEffectsProbe(args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
+            // DESTRUCTIVE, and on purpose: grows every per-piece hit box of a car in its extracted working
+            // copy so the next pack can be shot at. Undone by re-extracting. See HitBoxProbes.
             case "--probe-hitbox-blowup":
                 HitBoxProbes.RunHitBoxBlowupProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",
