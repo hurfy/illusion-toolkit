@@ -534,7 +534,7 @@ internal static class EffectProbes
                 + $"{band.Operators.Sum(o => o.Rows.Count)} value(s)");
         }
 
-        check("every emitter starts folded, since a car's fire is eight of them",
+        check("every generation starts folded, since a car's fire is eight of them",
             first.Generations.All(g => !g.IsExpanded), $"{first.Generations.Count} band(s)");
         check("the bands hold operator cards with editable numbers",
             first.Generations.Sum(g => g.Operators.Count) > 0

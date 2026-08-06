@@ -58,7 +58,7 @@ public sealed class EffectOperatorView
     public int ValueCount => Parameters.Sum(p => p.Rows.Count);
 }
 
-/// <summary>One generation — an emitter: a stream of particles with its own operators.</summary>
+/// <summary>One generation: one stream of particles, with its own birth rate and its own operators shaping it.</summary>
 public sealed class EffectGenerationView
 {
     public EffectGenerationView(string title, IReadOnlyList<EffectOperatorView> operators)
@@ -71,7 +71,7 @@ public sealed class EffectGenerationView
 
     public IReadOnlyList<EffectOperatorView> Operators { get; }
 
-    /// <summary>"Birth, Position, Speed, …" — what this emitter is made of, at a glance.</summary>
+    /// <summary>"Birth, Position, Speed, …" — what this generation is made of, at a glance.</summary>
     public string OperatorList => string.Join(", ", Operators.Select(o => o.Enabled ? o.Title : o.Title + " (off)"));
 
     public int ValueCount => Operators.Sum(o => o.ValueCount);
@@ -113,7 +113,7 @@ public sealed class EffectView
     public string Title => Role.Length > 0 ? $"{Role} (effect {Id})" : $"Effect {Id}";
 
     public string Summary =>
-        $"{Generations.Count} generation(s), {Frames} emitter(s)" + (Sounds > 0 ? $", {Sounds} sound(s)" : "");
+        $"{Generations.Count} generation(s), {Frames} emitter node(s)" + (Sounds > 0 ? $", {Sounds} sound(s)" : "");
 
     public int ValueCount => Generations.Sum(g => g.ValueCount);
 }

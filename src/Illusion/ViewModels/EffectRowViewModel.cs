@@ -9,7 +9,7 @@ namespace Illusion.ViewModels;
 /// <summary>
 /// One editable number of an effect. Committed on losing focus, like every other numeric field in the
 /// panel, and refused rather than clamped when the text is not a number — a birth rate of "fast" is a typo,
-/// and silently making it zero would put the emitter out without saying so.
+/// and silently making it zero would put the generation out without saying so.
 /// </summary>
 public sealed class EffectValueRowViewModel : INotifyPropertyChanged
 {
@@ -101,7 +101,7 @@ public sealed class EffectOperatorRowsViewModel : INotifyPropertyChanged
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-/// <summary>One generation — one emitter — as a foldable band of operator cards.</summary>
+/// <summary>One generation — one stream of particles — as a foldable band of operator cards.</summary>
 public sealed class EffectGenerationRowsViewModel : INotifyPropertyChanged
 {
     private bool _expanded;
@@ -140,7 +140,7 @@ public sealed class EffectGenerationRowsViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 }
 
-/// <summary>One effect of the archive: what it is, and the emitters it is made of.</summary>
+/// <summary>One effect of the archive: what it is, and the generations it is layered from.</summary>
 public sealed class EffectRowsViewModel
 {
     // Warm for the one that burns, cool for the one that rains, grey for an effect nothing names — the

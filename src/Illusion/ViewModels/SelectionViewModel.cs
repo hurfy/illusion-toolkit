@@ -599,7 +599,7 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     /// <summary>The effects as rows the panel can bind.</summary>
     public IReadOnlyList<EffectRowsViewModel> EffectList => _effectRows;
 
-    /// <summary>The effect on screen. One at a time: a car's fire alone is eight emitters of cards.</summary>
+    /// <summary>The effect on screen. One at a time: a car's fire alone is eight generations of cards.</summary>
     public EffectRowsViewModel? SelectedEffect
     {
         get => _effectIndex < _effectRows.Count ? _effectRows[_effectIndex] : null;

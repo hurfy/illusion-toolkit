@@ -1094,7 +1094,7 @@
                  effect a car names (the exhaust smoke, the explosion, the sparks, the breaking glass) lives
                  in the shared particle library, where an edit would change every car in the game at once.
 
-                 One effect at a time, its emitters as folding bands: a car's fire is eight of them and
+                 One effect at a time, its generations as folding bands: a car's fire is eight of them and
                  sixty operator cards between them. -->
             <TabItem x:Name="EffectsTab" Header="Effects" Tag="&#xE945;"
                      ToolTip="Effects — the effects this archive carries of its own"
@@ -1160,7 +1160,7 @@
                                                     <Border Style="{StaticResource GroupHeaderCard}" Margin="0,0,0,6">
                                                         <Grid MinHeight="24">
                                                             <ToggleButton Style="{StaticResource GroupHeaderToggle}"
-                                                                          ToolTip="Open or close this emitter"
+                                                                          ToolTip="Open or close this generation"
                                                                           IsChecked="{Binding IsExpanded, Mode=TwoWay}">
                                                                 <Grid Background="Transparent">
                                                                     <Grid.ColumnDefinitions>
