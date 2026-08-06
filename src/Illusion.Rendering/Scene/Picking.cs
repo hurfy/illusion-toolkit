@@ -13,6 +13,13 @@ public static class Picking
     /// <summary>
     /// Screen pixel → world ray. Uses the row-vector convention throughout (clip = worldRow · viewProj),
     /// so unprojection is clipRow · inverse(viewProj). D3D NDC z ∈ [0,1]: z=0 is the near plane, z=1 the far.
+    /// <para>
+    /// The ray starts on the NEAR PLANE, not at the camera. Under a perspective projection the two are the same
+    /// line — every ray converges on the eye, so starting half a metre along it changes nothing but where t is
+    /// measured from. Under a parallel one they are not: there the direction is the same for every pixel and it
+    /// is the ORIGIN that differs, so a ray anchored at the camera would make the whole screen pick along one
+    /// line. <paramref name="cameraPos"/> is only the answer for a projection that cannot be inverted at all.
+    /// </para>
     /// </summary>
     public static (Vector3 Origin, Vector3 Dir) BuildRay(
         Matrix4x4 viewProj, Vector3 cameraPos, double screenX, double screenY, double width, double height)
@@ -30,7 +37,7 @@ public static class Picking
         Vector3 dir = far - near;
         float len = dir.Length();
         dir = len > 1e-8f ? dir / len : Vector3.UnitX;
-        return (cameraPos, dir);
+        return (near, dir);
     }
 
     private static Vector3 Unproject(Vector4 clip, Matrix4x4 invViewProj)

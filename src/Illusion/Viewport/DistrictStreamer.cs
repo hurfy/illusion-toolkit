@@ -1200,7 +1200,7 @@ internal sealed class DistrictStreamer
     /// layer that is switched off is not silently clickable, and a placeholder that was left out of the
     /// drawing is left out of the picking with it.
     /// </summary>
-    public SceneNode? PickGlyph(Vector3 origin, Vector3 dir, out float bestT)
+    public SceneNode? PickGlyph(Vector3 origin, Vector3 dir, out float bestT, float parallelSlack = -1f)
     {
         bestT = float.PositiveInfinity;
         SceneNode? hit = null;
@@ -1227,7 +1227,7 @@ internal sealed class DistrictStreamer
                 radii.Add(radius);
             }
 
-            int index = ActorPicking.Pick(anchors, radii, origin, dir, out float t);
+            int index = ActorPicking.Pick(anchors, radii, origin, dir, out float t, parallelSlack);
             if (index >= 0 && t < bestT) { bestT = t; hit = candidates[index]; }
         }
 

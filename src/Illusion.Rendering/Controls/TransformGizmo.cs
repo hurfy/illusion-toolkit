@@ -765,9 +765,15 @@ public sealed class TransformGizmo : FrameworkElement
     private (Vector3 Origin, Vector3 Dir) Ray(Point mouse) =>
         Picking.BuildRay(_host!.GizmoViewProjection, _host.GizmoCameraPosition, mouse.X, mouse.Y, ActualWidth, ActualHeight);
 
+    // "Facing the viewer": the drag plane a plane-move slides in, and the axis a free rotate turns about.
+    // Under a perspective projection that is the line from the eye to the pivot — which IS the view ray at the
+    // pivot's own place on screen. A parallel projection has no eye and one direction for the whole screen, so
+    // the line from where the camera happens to stand is not it: off-centre it tilts away by as much as the
+    // half-angle the perspective lens had, and the plane the pointer drags in would tilt with it.
     private Vector3 ViewDir()
     {
-        Vector3 v = _dragPivot - _host!.GizmoCameraPosition;
+        if (_host!.GizmoParallelDir is { } parallel) return parallel;
+        Vector3 v = _dragPivot - _host.GizmoCameraPosition;
         float len = v.Length();
         return len > 1e-6f ? v / len : Vector3.UnitX;
     }

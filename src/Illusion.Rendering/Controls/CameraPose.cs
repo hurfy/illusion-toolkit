@@ -8,4 +8,8 @@ namespace Illusion.Rendering.Controls;
 /// map for the library and comes back.
 /// </summary>
 /// <param name="OrbitDistance">Distance to the orbit pivot. Zero means "unknown, keep the current one".</param>
-public readonly record struct CameraPose(Vector3 Position, float Yaw, float Pitch, float OrbitDistance);
+/// <param name="Orthographic">The view was in the parallel projection an axis snap leaves it in.</param>
+/// <param name="OrthoHeight">How much world that parallel view spanned — its zoom, which no other field
+/// carries: with no vanishing point the standoff says nothing about how big anything was drawn.</param>
+public readonly record struct CameraPose(Vector3 Position, float Yaw, float Pitch, float OrbitDistance,
+    bool Orthographic = false, float OrthoHeight = 0f);

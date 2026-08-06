@@ -330,7 +330,19 @@ internal static class GpuProbes
                 renderer.Render(target);   // includes the GPU-completion fence (GpuContext.WaitForGpu)
                 sb.AppendLine($"[OK] {mode}: rendered, drawn={renderer.DrawnMeshes}");
             }
-            sb.Insert(0, $"MODES PROBE: {modes.Length} modes rendered without error\n\n");
+
+            // The same four again through the PARALLEL projection an axis snap leaves the view in. It is the
+            // one thing the pure-maths probes cannot cover: the sky ray, the lighting eye and the overlay
+            // depth nudge are all derived differently there, and each of them reaches the GPU.
+            renderer.Camera.Orthographic = true;
+            renderer.Camera.OrthoHeight = 2f;
+            foreach (RenderMode mode in modes)
+            {
+                renderer.Mode = mode;
+                renderer.Render(target);
+                sb.AppendLine($"[OK] {mode} (parallel): rendered, drawn={renderer.DrawnMeshes}");
+            }
+            sb.Insert(0, $"MODES PROBE: {modes.Length} modes rendered in both projections without error\n\n");
         }
         catch (Exception ex) { sb.AppendLine("EXCEPTION: " + ex); }
         finally
@@ -340,6 +352,89 @@ internal static class GpuProbes
             gpu?.Dispose();
             File.WriteAllText(outFile, sb.ToString());
         }
+    }
+
+    // The sky backdrop, measured rather than assumed: renders the procedural gradient with an empty scene and
+    // reads the centre column back, in both projections. The gradient runs from the horizon colour to the
+    // zenith one across the vertical field, so a viewport that is drawing a sky at all has a spread down that
+    // column — and one that has collapsed to a single flat colour has none.
+    internal static void RunSkyProbe()
+    {
+        string outFile = Path.Combine(Path.GetTempPath(), "illusion_sky.txt");
+        var sb = new StringBuilder();
+        int pass = 0, fail = 0;
+        void Check(string name, bool ok, string detail = "")
+        {
+            if (ok) pass++; else fail++;
+            sb.AppendLine($"[{(ok ? "PASS" : "FAIL")}] {name}{(detail == "" ? "" : " — " + detail)}");
+        }
+
+        GpuContext? gpu = null;
+        SceneRenderer? renderer = null;
+        SharedRenderTarget? target = null;
+        try
+        {
+            gpu = new GpuContext();
+            renderer = new SceneRenderer(gpu) { ShowSky = true };
+
+            const int S = 128;
+            target = new SharedRenderTarget(gpu, S, S);
+
+            // Level, looking along +Y: the horizon crosses the middle of the frame, so the column runs from
+            // ground-side to zenith and the spread is as large as this sky ever gets.
+            renderer.Camera.AspectRatio = 1f;
+            renderer.Camera.LookAt(new Vector3(0f, -40f, 0f), Vector3.Zero);
+
+            renderer.Render(target);
+            float perspective = ColumnSpread(Readback(gpu, target), S);
+            Check("a perspective view draws a sky with a horizon in it", perspective > 0.05f,
+                $"spread={perspective:F4}");
+
+            // The parallel projection an axis snap leaves the view in has to keep drawing one.
+            renderer.Camera.Orthographic = true;
+            renderer.Camera.OrthoHeight = 46f;
+            renderer.Render(target);
+            float parallel = ColumnSpread(Readback(gpu, target), S);
+            Check("a parallel view draws one too", parallel > 0.05f, $"spread={parallel:F4}");
+            Check("and draws the same one", MathF.Abs(parallel - perspective) < 0.02f,
+                $"perspective={perspective:F4} parallel={parallel:F4}");
+
+            // Zoomed right in, the sky is still a backdrop: it sits at infinity, so it must not zoom with it.
+            renderer.Camera.OrthoHeight = 2f;
+            renderer.Render(target);
+            float zoomed = ColumnSpread(Readback(gpu, target), S);
+            Check("and does not zoom with the scene", MathF.Abs(zoomed - parallel) < 0.02f,
+                $"{parallel:F4} → {zoomed:F4}");
+
+            sb.Insert(0, $"SKY PROBE: {pass} passed, {fail} failed\n\n");
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine("EXCEPTION: " + ex);
+            sb.Insert(0, "SKY PROBE: FAIL\n\n");
+        }
+        finally
+        {
+            target?.Dispose();
+            renderer?.Dispose();
+            gpu?.Dispose();
+            File.WriteAllText(outFile, sb.ToString());
+        }
+    }
+
+    // How much the sky changes from the top of the centre column to the bottom, as the largest per-channel
+    // difference. Zero means every pixel of that column came out the same colour — no horizon, no gradient.
+    private static float ColumnSpread(byte[] bgra, int size)
+    {
+        float minR = 1f, maxR = 0f, minG = 1f, maxG = 0f, minB = 1f, maxB = 0f;
+        for (int y = 0; y < size; y++)
+        {
+            (float r, float g, float b) = Pixel(bgra, size, size / 2, y);
+            minR = MathF.Min(minR, r); maxR = MathF.Max(maxR, r);
+            minG = MathF.Min(minG, g); maxG = MathF.Max(maxG, g);
+            minB = MathF.Min(minB, b); maxB = MathF.Max(maxB, b);
+        }
+        return MathF.Max(maxR - minR, MathF.Max(maxG - minG, maxB - minB));
     }
 
     // Selection outline (windowless GPU render + pixel readback): renders a centred quad with the silhouette

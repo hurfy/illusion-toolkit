@@ -104,7 +104,8 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     public CameraPose CameraPose
     {
         get => Renderer is { } r
-            ? new CameraPose(r.Camera.Position, r.Camera.Yaw, r.Camera.Pitch, _orbitDistance)
+            ? new CameraPose(r.Camera.Position, r.Camera.Yaw, r.Camera.Pitch, _orbitDistance,
+                r.Camera.Orthographic, r.Camera.OrthoHeight)
             : default;
         set
         {
@@ -114,6 +115,8 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
             r.Camera.Yaw = value.Yaw;
             r.Camera.Pitch = Math.Clamp(value.Pitch, -PitchLimit, PitchLimit);
             if (value.OrbitDistance > 0f) _orbitDistance = value.OrbitDistance;
+            r.Camera.Orthographic = value.Orthographic;
+            if (value.OrthoHeight > 0f) r.Camera.OrthoHeight = value.OrthoHeight;
         }
     }
 
@@ -379,6 +382,9 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
         if (fwd != 0 || right != 0)
         {
+            // Flying is a perspective activity: half of it is moving along the view axis, which a parallel
+            // projection draws as nothing happening at all. Taking off leaves it, exactly as looking around does.
+            LeaveParallelView();
             Renderer.Camera.Move(right * speed, fwd * speed, 0f);
         }
     }
@@ -427,13 +433,23 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
     /// <summary>
     /// Snap the camera to look straight down a world axis (front/back/top/bottom/left/right),
-    /// orbiting the current focus pivot. Called by the navigation gizmo when an axis ball is clicked.
+    /// orbiting the current focus pivot, and switch the view to a PARALLEL projection while it is there.
+    /// Called by the navigation gizmo when an axis ball is clicked.
+    /// <para>
+    /// The projection is the point of the snap, not a side effect of it. Aimed down an axis with no vanishing
+    /// point, the viewport stops being a photograph and becomes a drawing: two things at different depths are
+    /// drawn at the same scale, so an edge that lines up on screen lines up in the world, and an object dragged
+    /// sideways does not drift because it also came closer. That is what makes placing things by eye possible.
+    /// Turning off the axis puts the perspective back — see <see cref="LeaveParallelView"/>.
+    /// </para>
     /// </summary>
     public void SnapCameraToAxis(Vector3 axis)
     {
         if (Renderer == null) return;
         Camera cam = Renderer.Camera;
         Vector3 pivot = cam.Position + cam.Forward * _orbitDistance;
+
+        CameraNavigator.EnterParallel(cam, _orbitDistance);
 
         // Look along -axis so the chosen axis points back at the viewer.
         float endYaw, endPitch;
@@ -472,7 +488,25 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     {
         if (Renderer == null) return;
         _tweening = false;
+        LeaveParallelView();
         CameraNavigator.Orbit(Renderer.Camera, _orbitDistance, deltaYaw, deltaPitch);
+    }
+
+    /// <summary>
+    /// Puts the perspective back, without moving what is on screen: the parallel extent is converted into the
+    /// standoff that spans the same height, and the camera is placed at it around the pivot it was already
+    /// turning about — so the swap costs nothing but depth, and the orbit that triggered it carries on around
+    /// the same point.
+    /// <para>Every gesture that turns the view OFF the axis calls this, and nothing else does. A parallel
+    /// projection aimed anywhere but down an axis is not useful — it just reads as a perspective with the
+    /// perspective broken — so the view leaves it the moment it stops being aimed, which is the reflex Blender
+    /// calls "auto perspective". Sliding and zooming stay in it: those keep the aim.</para>
+    /// </summary>
+    private void LeaveParallelView()
+    {
+        if (Renderer is not { Camera.Orthographic: true } r) return;
+        _tweening = false;   // the snap that got here is over; it must not drag the camera back afterwards
+        _orbitDistance = CameraNavigator.LeaveParallel(r.Camera, _orbitDistance);
     }
 
     /// <summary>
@@ -485,6 +519,9 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
         Camera cam = Renderer.Camera;
         (Vector3 eye, float distance) = CameraNavigator.FrameOn(cam, center, radius);
         _orbitDistance = distance;
+        // A parallel view is framed by its extent, not by how close the camera stands: without this the camera
+        // would move to the object and the object would stay exactly the same size on screen.
+        if (cam.Orthographic) cam.OrthoHeight = CameraNavigator.OrthoHeightFor(cam, distance);
 
         _tweenStartPos = cam.Position;
         _tweenStartYaw = cam.Yaw;
@@ -576,15 +613,21 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
 
         if (_walkMode)
         {
+            LeaveParallelView();
             Renderer.Camera.AddLook(-dx * sens, -dy * sens);   // stand still and turn on the spot
             return;
         }
 
         // Shift is read per move, not at button-down, so a drag can slide into a pan and back without letting go.
         if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
             CameraNavigator.Pan(Renderer.Camera, _orbitDistance, dx, dy, ActualHeight);
+        }
         else
+        {
+            LeaveParallelView();
             CameraNavigator.Orbit(Renderer.Camera, _orbitDistance, -dx * sens, -dy * sens);
+        }
     }
 
     /// <summary>Moves the camera toward (positive notches) or away from the point it is aimed at. Public so an
@@ -593,7 +636,10 @@ public class ViewportControl : Image, IDisposable, IGizmoTarget
     {
         if (Renderer == null) return;
         _tweening = false;
-        _orbitDistance = CameraNavigator.Dolly(Renderer.Camera, _orbitDistance, notches);
+        Camera cam = Renderer.Camera;
+        _orbitDistance = cam.Orthographic
+            ? CameraNavigator.DollyParallel(cam, _orbitDistance, notches)
+            : CameraNavigator.Dolly(cam, _orbitDistance, notches);
     }
 
     /// <summary>Wheel zooms toward the point the camera is aimed at. Overridden by a subclass that orbits

@@ -114,10 +114,23 @@ float4 PSMain(SkyOut i) : SV_TARGET
     {
         var ctx = gpu.Context11;
 
-        Matrix4x4.Invert(camera.ViewProjection, out Matrix4x4 inv);
+        // The sky is drawn through a PERSPECTIVE view-projection even when the scene is not. This shader turns
+        // each pixel back into a world ray and looks the sky up along it, and a parallel projection has one
+        // ray for the whole screen — its rays do not diverge, that is the entire point of it — so reconstructing
+        // through one collapses the panorama to a single texel and the gradient to a flat wash: the horizon
+        // disappears. There is no better answer to draw instead, because a backdrop infinitely far away has no
+        // parallel projection worth looking at. Borrowing the perspective the view would have had at the same
+        // framing keeps a sky on screen, and keeps it in the SAME place across a switch between the two.
+        Matrix4x4 proj = camera.Orthographic
+            ? Matrix4x4.CreatePerspectiveFieldOfView(camera.Fov, camera.AspectRatio, camera.Near, camera.Far)
+            : camera.Projection;
+        Matrix4x4.Invert(camera.View * proj, out Matrix4x4 inv);
         var consts = new SkyConstants
         {
             InvViewProj = inv,
+            // Those rays fan out from where the camera actually stands, so this is the real eye — NOT
+            // Camera.ShadingEye, which reports the parallel-ray answer the mesh lighting wants and would
+            // flatten the sky all over again.
             CameraPos = new Vector4(camera.Position, 1f),
             Params = new Vector4(_panorama.Handle != null ? 1f : 0f, 0, 0, 0),
         };

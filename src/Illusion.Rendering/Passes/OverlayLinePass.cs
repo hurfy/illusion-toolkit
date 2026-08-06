@@ -14,7 +14,11 @@ namespace Illusion.Rendering.Passes;
 /// <param name="HalfViewport">Half the target size in pixels — the NDC-to-pixel factor.</param>
 /// <param name="PixelScale">Metres per pixel per unit of clip-space W: <c>mpp = clipW * PixelScale</c>.
 /// Derived from the projection, so it already accounts for the field of view and the target height.</param>
-internal readonly record struct OverlayFrame(Matrix4x4 ViewProj, Vector2 HalfViewport, float PixelScale);
+/// <param name="DepthBiasScale">Multiplies every layer's <see cref="OverlayLineStyle.DepthBias"/>. One under a
+/// perspective projection, which is what the bias is tuned for; far smaller under a parallel one, whose clip
+/// depth is linear and would turn the same bias into metres. See SceneRenderer.OverlayDepthBiasScale.</param>
+internal readonly record struct OverlayFrame(Matrix4x4 ViewProj, Vector2 HalfViewport, float PixelScale,
+    float DepthBiasScale = 1f);
 
 /// <summary>How an overlay reads the scene's depth buffer.</summary>
 internal enum OverlayDepth
@@ -302,6 +306,9 @@ float4 PSMain(PSIn i) : SV_TARGET
         }
     }
 
+    /// <summary>Four steps of a 24-bit depth buffer — the smallest depth nudge worth writing at all.</summary>
+    private const float MinResolvableDepthBias = 4f / 16777216f;
+
     /// <summary>
     /// Binds the pipeline for one depth reading of one layer. Call once, then <see cref="DrawSegments"/> for
     /// each buffer, then <see cref="End"/> — a layer split across depth readings binds twice.
@@ -325,10 +332,16 @@ float4 PSMain(PSIn i) : SV_TARGET
         ctx.PSSetConstantBuffers(0, 1, &cb);
         ctx.IASetPrimitiveTopology(D3DPrimitiveTopology.D3DPrimitiveTopologyTrianglestrip);
 
+        // A nudge the depth buffer cannot resolve is no nudge at all, and rescaling for a parallel projection
+        // zoomed right in lands well under one of its steps — so floor it at a few, while a style that asked
+        // for no bias at all still gets none.
+        float bias = style.DepthBias * frame.DepthBiasScale;
+        if (style.DepthBias > 0f) bias = MathF.Max(bias, MinResolvableDepthBias);
+
         var consts = new OverlayLineConstants
         {
             Wvp = frame.ViewProj,
-            Viewport = new Vector4(frame.HalfViewport.X, frame.HalfViewport.Y, frame.PixelScale, style.DepthBias),
+            Viewport = new Vector4(frame.HalfViewport.X, frame.HalfViewport.Y, frame.PixelScale, bias),
             Style = new Vector4(style.Thickness, MathF.Max(style.Feather, 0.25f), alphaMul, style.MinGlyphPixels),
             Tint = style.Tint,
         };

@@ -91,6 +91,11 @@ internal static class ProbeRunner
             case "--probe-modes":
                 GpuProbes.RunModesProbe();
                 return true;
+            // Sky backdrop: renders the gradient sky in both projections and reads the centre column back, so
+            // the horizon is measured rather than assumed. Output: %TEMP%\illusion_sky.txt
+            case "--probe-sky":
+                GpuProbes.RunSkyProbe();
+                return true;
             // Overlay lines (the shared helper-drawing pass): pixel width, feathered edge, distance
             // independence, the visible/hidden depth split, and both glyph sizing modes — measured by
             // reading the rendered pixels back. Output: %TEMP%\illusion_overlay.txt (+ two PNGs).

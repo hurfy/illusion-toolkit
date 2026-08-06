@@ -22,6 +22,9 @@ internal sealed class FakeTransformGizmoHost : ITransformGizmoHost
 {
     public Matrix4x4 GizmoViewProjection { get; set; } = Matrix4x4.Identity;
     public Vector3 GizmoCameraPosition { get; set; } = new(0f, 0f, -10f);
+    /// <summary>Null = a perspective projection, where the gizmo derives the view direction from the camera
+    /// position. Set it to make the fake a parallel view.</summary>
+    public Vector3? GizmoParallelDir { get; set; }
     public GizmoMode GizmoMode { get; set; } = GizmoMode.Move;
     public bool HasGizmoTarget { get; set; } = true;
     public bool CanTransformSelection { get; set; } = true;

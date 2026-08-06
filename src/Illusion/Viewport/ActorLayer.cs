@@ -139,8 +139,9 @@ internal sealed class ActorLayer
     }
 
     /// <summary>Nearest actor glyph under the ray, or null. Glyphs draw over everything, so they win a pick
-    /// outright — clicking the marker you can see selects that actor, wall in between or not.</summary>
-    public SceneNode? Pick(Vector3 origin, Vector3 dir, out float bestT)
+    /// outright — clicking the marker you can see selects that actor, wall in between or not.
+    /// <paramref name="parallelSlack"/> is <see cref="ActorPicking.ParallelSlack"/> for the viewport's camera.</summary>
+    public SceneNode? Pick(Vector3 origin, Vector3 dir, out float bestT, float parallelSlack = -1f)
     {
         // A click must never be tested against entries the last edit already invalidated: an actor pick wins
         // outright over the geometry behind it, so one stale marker would swallow every click near it. The
@@ -154,7 +155,8 @@ internal sealed class ActorLayer
             var positions = new Vector3[list.Count];
             for (int i = 0; i < list.Count; i++) positions[i] = list[i].Position;
 
-            int index = ActorPicking.Pick(positions, origin, dir, ActorMarkerBuilder.Radius, out float t);
+            int index = ActorPicking.Pick(positions, origin, dir, ActorMarkerBuilder.Radius, out float t,
+                parallelSlack);
             if (index >= 0 && t < bestT)
             {
                 bestT = t;

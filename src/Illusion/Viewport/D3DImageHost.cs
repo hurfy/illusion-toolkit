@@ -16,6 +16,7 @@ using Illusion.Rendering.Controls;
 using Illusion.Rendering.Gizmos;
 using Illusion.Rendering.Gpu;
 using Illusion.Rendering.Passes;
+using Illusion.Rendering.Scene;
 using Illusion.Scene;
 
 namespace Illusion.Viewport;
@@ -778,11 +779,15 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     private Point _lastHoverPos;
 
+    /// <summary>How far off a glyph a click may still land, when the projection is the parallel one an axis
+    /// snap leaves the view in. -1 (grow the allowance with distance) under a perspective one.</summary>
+    private float GlyphSlack => Renderer is { } r ? ActorPicking.ParallelSlack(r.Camera) : -1f;
+
     protected override void OnViewportHover(Point pos)
     {
         _lastHoverPos = pos;
         (Vector3 origin, Vector3 dir) = BuildViewportRay(pos);
-        SceneNode? hit = Streamer.PickGlyph(origin, dir, out _);
+        SceneNode? hit = Streamer.PickGlyph(origin, dir, out _, GlyphSlack);
         if (ReferenceEquals(hit, HoveredGlyph))
         {
             // Same object, new cursor position — the label follows the cursor, the highlight does not change.
@@ -872,13 +877,13 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
         SceneNode? crash = Streamer.PickCrash(origin, dir, out float crashT);
         // Actor glyphs draw over everything and have no geometry of their own, so they are tested separately
         // and win outright: clicking a marker you can see selects that actor, whatever stands in front of it.
-        SceneNode? actor = Streamer.Actors.Pick(origin, dir, out _);
+        SceneNode? actor = Streamer.Actors.Pick(origin, dir, out _, GlyphSlack);
         if (actor != null) return actor;
 
         // Helper glyphs and bones are drawn over the scene for the same reason, and are picked the same way:
         // what you can see, you can click. Only what is actually drawn is tested (see PickGlyph), so a hidden
         // layer never swallows a click meant for the geometry behind it.
-        SceneNode? glyph = Streamer.PickGlyph(origin, dir, out _);
+        SceneNode? glyph = Streamer.PickGlyph(origin, dir, out _, GlyphSlack);
         if (glyph != null) return glyph;
 
         if (col != null && (gm == null || colT <= meshT) && (crash == null || colT <= crashT)) return col;
@@ -912,6 +917,7 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
 
     public Matrix4x4 GizmoViewProjection => Renderer?.Camera.ViewProjection ?? Matrix4x4.Identity;
     public Vector3 GizmoCameraPosition => Renderer?.Camera.Position ?? Vector3.Zero;
+    public Vector3? GizmoParallelDir => Renderer is { Camera.Orthographic: true } r ? r.Camera.Forward : null;
 
     /// <summary>Active manipulation tool (driven by the viewport tool shelf). None = select-only.</summary>
     public GizmoMode GizmoMode { get; set; } = GizmoMode.None;

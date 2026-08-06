@@ -39,6 +39,8 @@ internal static class NavigationProbes
             CheckDolly(Check);
             CheckWalkSpeed(Check);
             CheckFraming(Check);
+            CheckParallelView(Check);
+            CheckParallelPicking(Check);
             CheckPrecision(Check);
             CheckModalLifecycle(Check);
             CheckModalDrawsUnderAnyTool(Check);
@@ -76,11 +78,34 @@ internal static class NavigationProbes
         check("orbit keeps the standoff", MathF.Abs((cam.Position - pivotAfter).Length() - distance) < 1e-2f,
             $"{(cam.Position - pivotAfter).Length():F3}");
 
-        // Straight up is where a Z-up camera's basis falls apart, so the pitch has to stop short of it.
+        // Straight up is the one direction that used to blow the basis apart, so it is the one to stop at
+        // exactly rather than short of: a top view a degree off vertical is a top view you cannot align in.
         for (int i = 0; i < 40; i++) CameraNavigator.Orbit(cam, distance, 0f, 0.2f);
         check("orbit cannot be tipped past vertical", MathF.Abs(cam.Pitch) <= Camera.MaxPitch + 1e-4f,
             $"pitch={cam.Pitch:F3}");
         check("a tipped-over orbit is still a valid basis", !float.IsNaN(cam.Right.X), cam.Right.ToString());
+        check("straight up is a direction the camera actually reaches",
+            MathF.Abs(MathF.Abs(cam.Forward.Z) - 1f) < 1e-5f, $"forward={cam.Forward}");
+        check("the basis stays orthonormal at the pole",
+            MathF.Abs(cam.Right.Length() - 1f) < 1e-5f
+                && MathF.Abs(Vector3.Dot(cam.Right, cam.Forward)) < 1e-5f
+                && !float.IsNaN(cam.View.M11), $"right={cam.Right}");
+
+        // Everywhere the library look-at IS defined, the hand-built view matrix has to put the world in the
+        // same place — this is what says the fix at the pole changed nothing anywhere else. Measured in metres
+        // of view-space displacement rather than in matrix entries, which is the error that would be visible.
+        Camera plain = NewCameraAt();
+        plain.AddLook(0.7f, -0.4f);
+        Matrix4x4 byLookAt = Matrix4x4.CreateLookAt(plain.Position, plain.Position + plain.Forward,
+            new Vector3(0f, 0f, 1f));
+        float worst = 0f;
+        foreach (Vector3 p in new[] { Vector3.Zero, new Vector3(120f, -40f, 15f), new Vector3(-8f, 60f, -3f) })
+        {
+            worst = MathF.Max(worst,
+                (Vector3.Transform(p, plain.View) - Vector3.Transform(p, byLookAt)).Length());
+        }
+        check("the view matrix still puts the world where the library look-at does away from the pole",
+            worst < 1e-3f, $"worst {worst:E2} m");
     }
 
     // Panning slides the view sideways without turning it, and has to keep pace with the scene at any zoom.
@@ -196,6 +221,145 @@ internal static class NavigationProbes
         (_, float pointDistance) = CameraNavigator.FrameOn(NewCamera(), center, 0f);
         check("a sizeless target still gets a standoff", pointDistance >= CameraNavigator.MinPivotDistance,
             $"{pointDistance:F3}");
+    }
+
+    // The parallel projection an axis snap leaves the view in. Two things make it worth having and both are
+    // asserted here: it draws everything at one scale whatever its depth, and switching in or out of it does
+    // not move the picture.
+    private static void CheckParallelView(Action<string, bool, string> check)
+    {
+        var near = new Vector3(0f, -10f, 0f);   // two points the camera looks straight at, 40 m apart in depth
+        var far = new Vector3(0f, 30f, 0f);
+
+        Camera cam = NewCameraAt();
+        const float distance = 70f;                        // the pivot sits at the origin
+
+        // A corner of whatever is being looked at, out at the pivot's own depth: the one place both projections
+        // have to agree, and the reason the swap is invisible.
+        var pivotEdge = new Vector3(12f, 0f, 9f);
+        Vector2 edgeBefore = Ndc(cam, pivotEdge);
+        CameraNavigator.EnterParallel(cam, distance);
+
+        check("the parallel view is the one the projection reports", cam.Orthographic, "");
+        check("switching to parallel leaves the pivot's own depth drawn exactly as it was",
+            (Ndc(cam, pivotEdge) - edgeBefore).Length() < 1e-4f,
+            $"{edgeBefore} → {Ndc(cam, pivotEdge)}");
+
+        // The whole point: depth stops mattering. The same offset from the view axis has to project to the same
+        // place on screen whether it is ten metres away or fifty.
+        float offset = 4f;
+        Vector2 nearOff = Ndc(cam, near + Vector3.UnitZ * offset);
+        Vector2 farOff = Ndc(cam, far + Vector3.UnitZ * offset);
+        check("a parallel view draws near and far at the same scale",
+            MathF.Abs((nearOff.Y - Ndc(cam, near).Y) - (farOff.Y - Ndc(cam, far).Y)) < 1e-4f,
+            $"near={nearOff.Y - Ndc(cam, near).Y:F5} far={farOff.Y - Ndc(cam, far).Y:F5}");
+
+        // ...and the perspective one it came from has to disagree, or the check above proves nothing.
+        Camera persp = NewCameraAt();
+        Vector2 pNearOff = Ndc(persp, near + Vector3.UnitZ * offset);
+        Vector2 pFarOff = Ndc(persp, far + Vector3.UnitZ * offset);
+        check("a perspective view does not",
+            MathF.Abs((pNearOff.Y - Ndc(persp, near).Y) - (pFarOff.Y - Ndc(persp, far).Y)) > 1e-2f, "");
+
+        // Zoom is the extent, not the standoff: rolling the wheel changes the size, walking the camera does not.
+        float sizeBefore = Ndc(cam, near + Vector3.UnitZ * offset).Y - Ndc(cam, near).Y;
+        cam.Position += cam.Forward * 20f;
+        check("moving a parallel camera forward changes nothing on screen",
+            MathF.Abs((Ndc(cam, near + Vector3.UnitZ * offset).Y - Ndc(cam, near).Y) - sizeBefore) < 1e-5f, "");
+
+        cam.Position -= cam.Forward * 20f;
+        float zoomed = CameraNavigator.DollyParallel(cam, distance, 4f);
+        check("the wheel does zoom a parallel view",
+            Ndc(cam, near + Vector3.UnitZ * offset).Y - Ndc(cam, near).Y > sizeBefore * 1.5f, "");
+        check("zooming in never pushes the camera into what it is looking at", zoomed <= distance + 1e-3f,
+            $"{distance:F2} → {zoomed:F2}");
+
+        // Zooming out has to walk the camera back with it, or the near plane starts eating the scene.
+        float outward = CameraNavigator.DollyParallel(cam, zoomed, -40f);
+        check("zooming out backs the camera off to keep the extent in front of it",
+            outward >= CameraNavigator.DistanceForOrthoHeight(cam, cam.OrthoHeight) - 1e-2f,
+            $"distance={outward:F2} extent={cam.OrthoHeight:F2}");
+
+        // Panning is measured in what is on screen, which for a parallel view is its extent and nothing else.
+        Camera panA = NewCameraAt();
+        CameraNavigator.EnterParallel(panA, distance);
+        Camera panB = NewCameraAt();
+        CameraNavigator.EnterParallel(panB, distance);
+        CameraNavigator.Pan(panA, distance, 100f, 0f, 600);
+        CameraNavigator.Pan(panB, distance * 3f, 100f, 0f, 600);   // a standoff it must now ignore
+        check("a parallel pan follows the extent, not the standoff",
+            (panA.Position - panB.Position).Length() < 1e-3f, "");
+
+        // Coming back out is the same swap in reverse and has to be just as invisible.
+        Camera round = NewCameraAt();
+        Vector2 cornerBefore = Ndc(round, new Vector3(12f, 0f, 9f));
+        CameraNavigator.EnterParallel(round, distance);
+        round.OrthoHeight *= 0.4f;                                  // zoom in, so the standoff has to follow
+        float back = CameraNavigator.LeaveParallel(round, distance);
+        check("leaving the parallel view puts the perspective back", !round.Orthographic, "");
+        check("leaving it keeps the framing it was zoomed to",
+            (Ndc(round, new Vector3(12f, 0f, 9f)) - cornerBefore * 2.5f).Length() < 0.05f,
+            $"{cornerBefore * 2.5f} vs {Ndc(round, new Vector3(12f, 0f, 9f))}");
+        check("leaving it hands back the standoff that spans the same height",
+            MathF.Abs(back - CameraNavigator.DistanceForOrthoHeight(round, round.OrthoHeight)) < 1e-3f,
+            $"{back:F3}");
+        check("the extent and the standoff are exact inverses",
+            MathF.Abs(CameraNavigator.DistanceForOrthoHeight(round,
+                CameraNavigator.OrthoHeightFor(round, 37f)) - 37f) < 1e-3f, "");
+    }
+
+    // Under a parallel projection the rays no longer meet at the camera: the direction is shared and it is the
+    // ORIGIN that differs per pixel. A ray built the other way round picks the same line for the whole screen.
+    private static void CheckParallelPicking(Action<string, bool, string> check)
+    {
+        Camera cam = NewCameraAt();
+        CameraNavigator.EnterParallel(cam, 70f);
+        Matrix4x4 vp = cam.ViewProjection;
+        const double w = 800, h = 600;
+
+        (Vector3 Origin, Vector3 Dir) left = Picking.BuildRay(vp, cam.Position, w * 0.25, h / 2.0, w, h);
+        (Vector3 Origin, Vector3 Dir) right = Picking.BuildRay(vp, cam.Position, w * 0.75, h / 2.0, w, h);
+
+        check("a parallel view gives every pixel its own ray",
+            (left.Origin - right.Origin).Length() > 1f, $"{(left.Origin - right.Origin).Length():F3} m apart");
+        check("a parallel view gives them all one direction",
+            (left.Dir - right.Dir).Length() < 1e-5f, "");
+        check("the rays run down the view axis", Vector3.Dot(left.Dir, cam.Forward) > 0.999f, "");
+
+        // The failure a camera-anchored origin would produce, stated as the property that catches it: a click on
+        // the left half of the screen must hit what is drawn on the left half and miss what is drawn on the right.
+        Vector3 leftHit = left.Origin + left.Dir * 70f;
+        Vector3 rightHit = right.Origin + right.Dir * 70f;
+        check("a ray lands where its own pixel is aimed",
+            Vector3.Dot(leftHit - rightHit, cam.Right) < -1f,
+            $"{Vector3.Dot(leftHit - rightHit, cam.Right):F2}");
+
+        var box = new Vector3(1.5f);
+        check("a click on the left half hits the object drawn there",
+            Picking.IntersectAabb(left.Origin, left.Dir, leftHit - box, leftHit + box, out _), "");
+        check("and misses the one drawn on the other side",
+            !Picking.IntersectAabb(left.Origin, left.Dir, rightHit - box, rightHit + box, out _), "");
+
+        // The glyph click allowance turns from an angle into a length for the same reason.
+        check("the glyph allowance stops opening up with distance under a parallel view",
+            ActorPicking.ParallelSlack(cam) > 0f, ActorPicking.ParallelSlack(cam).ToString("F3"));
+        check("and is still an angle under a perspective one",
+            ActorPicking.ParallelSlack(NewCameraAt()) < 0f, "");
+    }
+
+    // The probe's standard camera, placed 70 m out on -Y looking at the origin — the view every parallel check
+    // is measured against.
+    private static Camera NewCameraAt()
+    {
+        var cam = new Camera { AspectRatio = 16f / 9f };
+        cam.LookAt(new Vector3(0f, -70f, 0f), Vector3.Zero);
+        return cam;
+    }
+
+    private static Vector2 Ndc(Camera cam, Vector3 world)
+    {
+        Vector4 clip = Vector4.Transform(new Vector4(world, 1f), cam.ViewProjection);
+        return MathF.Abs(clip.W) < 1e-6f ? Vector2.Zero : new Vector2(clip.X / clip.W, clip.Y / clip.W);
     }
 
     private static bool InView(Camera cam, Vector3 world)

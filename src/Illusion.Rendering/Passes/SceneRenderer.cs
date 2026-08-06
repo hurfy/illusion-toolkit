@@ -495,8 +495,10 @@ public sealed unsafe class SceneRenderer : IDisposable
         Matrix4x4 viewProj = Camera.ViewProjection;
         Frustum frustum = Frustum.FromMatrix(viewProj);
         Vector3 lightDir = LightDirection;
-        // Lighting is identical for every mesh this frame — build it once, fill only the camera eye.
-        var lighting = Lighting with { CameraPos = new Vector4(Camera.Position, 0f) };
+        // Lighting is identical for every mesh this frame — build it once, fill only the camera eye. The eye is
+        // read for one thing (the view vector the specular and the rim are shaped by), so it is the SHADING eye:
+        // under a parallel projection the highlight is a uniform band, not a glare fanning out of a point.
+        var lighting = Lighting with { CameraPos = new Vector4(Camera.ShadingEye, 0f) };
 
         int drawn = 0;
         DrawCalls = 0;
@@ -538,7 +540,8 @@ public sealed unsafe class SceneRenderer : IDisposable
         var overlayFrame = new OverlayFrame(
             viewProj,
             new Vector2(target.Width * 0.5f, target.Height * 0.5f),
-            target.Height > 0 ? 2f / (Camera.Projection.M22 * target.Height) : 0f);
+            target.Height > 0 ? 2f / (Camera.Projection.M22 * target.Height) : 0f,
+            OverlayDepthBiasScale());
 
         // .nov overlay, one toggle: the road graph (green lines) plus its AI-mesh boxes (amber wireframe).
         if (ShowNov)
@@ -612,6 +615,22 @@ public sealed unsafe class SceneRenderer : IDisposable
 
     private static OverlayLineStyle HelperStyle() =>
         RigStyle(Vector4.One, 1.5f) with { MinGlyphPixels = 11f };
+
+    /// <summary>
+    /// What to multiply an overlay's depth nudge by so it stays the same nudge IN METRES under either projection.
+    /// The nudge is written in clip depth, and the two projections spread clip depth over the scene in
+    /// completely different ways: a perspective one is hyperbolic, so a fixed step is a centimetre up close and
+    /// metres away; a parallel one is exactly linear, so the SAME step is that fraction of the WHOLE near-to-far
+    /// slab — three metres everywhere, enough to lift every glyph clean out of the geometry it is drawn to hug
+    /// and to stop the hidden/visible split telling inside from in front. Rescaling by the distance the parallel
+    /// view is framed at reproduces precisely the nudge a perspective view got there.
+    /// </summary>
+    private float OverlayDepthBiasScale()
+    {
+        if (!Camera.Orthographic) return 1f;
+        float framedAt = CameraNavigator.DistanceForOrthoHeight(Camera, Camera.OrthoHeight);
+        return framedAt * framedAt / MathF.Max(1e-3f, Camera.Far * Camera.Near);
+    }
 
     // One pass over the regular (non-instanced) meshes matching the ghost filter.
     private int DrawMeshPass(ComPtr<ID3D11DeviceContext> ctx, Matrix4x4 viewProj, in Frustum frustum,

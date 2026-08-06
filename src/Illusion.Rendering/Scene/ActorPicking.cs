@@ -15,11 +15,25 @@ public static class ActorPicking
     private const float AngularRadius = 0.011f;
 
     /// <summary>
+    /// The allowance a PARALLEL view wants instead: one fixed world radius rather than one that opens up with
+    /// distance, because that is the whole difference — a glyph two hundred metres back is drawn exactly as
+    /// large as one under your nose, so growing its clickable sphere only lets it steal clicks from what is
+    /// actually under the cursor. Sized to the same few pixels the angular allowance gives a perspective view
+    /// framed the same way. A perspective camera answers -1, which the pick reads as "grow it with distance" —
+    /// so a caller hands this straight through instead of asking which projection it is looking through.
+    /// </summary>
+    public static float ParallelSlack(Camera cam) => cam.Orthographic
+        ? AngularRadius * cam.OrthoHeight / (2f * MathF.Tan(cam.Fov * 0.5f))
+        : -1f;
+
+    /// <summary>
     /// Nearest glyph under the ray, or -1 when it misses everything. <paramref name="worldRadius"/> is the
-    /// glyph's own size — the test uses whichever is larger, that or the angular allowance.
+    /// glyph's own size — the test uses whichever is larger, that or the allowance.
+    /// <paramref name="parallelSlack"/> is <see cref="ParallelSlack"/>; below zero the allowance grows with
+    /// distance, which is right for a perspective view and only for one.
     /// </summary>
     public static int Pick(IReadOnlyList<Vector3> markers, Vector3 origin, Vector3 dir, float worldRadius,
-        out float bestT)
+        out float bestT, float parallelSlack = -1f)
     {
         int best = -1;
         bestT = float.MaxValue;
@@ -30,7 +44,8 @@ public static class ActorPicking
             float along = Vector3.Dot(toCentre, dir);
             if (along <= 0f) continue; // behind the camera
 
-            float radius = MathF.Max(worldRadius, along * AngularRadius);
+            float allowance = parallelSlack >= 0f ? parallelSlack : along * AngularRadius;
+            float radius = MathF.Max(worldRadius, allowance);
             float perpSq = toCentre.LengthSquared() - along * along;
             if (perpSq > radius * radius) continue;
 
@@ -55,7 +70,7 @@ public static class ActorPicking
     /// with <paramref name="markers"/>; a shorter list treats the rest as sizeless (angular allowance only).
     /// </summary>
     public static int Pick(IReadOnlyList<Vector3> markers, IReadOnlyList<float> radii, Vector3 origin,
-        Vector3 dir, out float bestT)
+        Vector3 dir, out float bestT, float parallelSlack = -1f)
     {
         int best = -1;
         bestT = float.MaxValue;
@@ -63,7 +78,7 @@ public static class ActorPicking
         for (int i = 0; i < markers.Count; i++)
         {
             float own = i < radii.Count ? radii[i] : 0f;
-            int hit = Pick([markers[i]], origin, dir, own, out float t);
+            int hit = Pick([markers[i]], origin, dir, own, out float t, parallelSlack);
             if (hit < 0 || t >= bestT) continue;
             bestT = t;
             best = i;
