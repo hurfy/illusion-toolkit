@@ -4,6 +4,7 @@ using System.IO;
 using System.Numerics;
 using System.Windows.Data;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Effects;
 using Illusion.Assets.EntityData;
 using Illusion.Assets.Prefabs;
 using Illusion.Domain;
@@ -576,6 +577,189 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     {
         _tuningArchive = null;      // defeat the same-archive cache — the file really did change
         BuildTuning();
+    }
+
+    // ── Effects (archive root only) ──
+    //
+    // The archive's OWN effects — for a car, its fire and its rain, and nothing else: every other effect a
+    // car names (the exhaust smoke, the explosion, the sparks, the breaking glass) lives in the shared
+    // particle library, where an edit would change every car in the game at once. Same shape as Tuning
+    // above: the archive rather than the selection, a write that lands in the working copy immediately, and
+    // an undo entry handed to the host.
+
+    private CarEffects? _effects;
+    private string? _effectsArchive;
+    private int _effectsToken;
+    private IReadOnlyList<EffectRowsViewModel> _effectRows = [];
+    private int _effectIndex;
+
+    /// <summary>Whether the open archive carries effects of its own — the Effects tab's visibility.</summary>
+    public bool HasEffects => _effects != null && _effectRows.Count > 0;
+
+    /// <summary>The effects as rows the panel can bind.</summary>
+    public IReadOnlyList<EffectRowsViewModel> EffectList => _effectRows;
+
+    /// <summary>The effect on screen. One at a time: a car's fire alone is eight emitters of cards.</summary>
+    public EffectRowsViewModel? SelectedEffect
+    {
+        get => _effectIndex < _effectRows.Count ? _effectRows[_effectIndex] : null;
+        set
+        {
+            int index = value == null ? 0 : IndexOfEffect(value);
+            if (index < 0 || index == _effectIndex) return;
+            _effectIndex = index;
+            Raise(nameof(SelectedEffect));
+        }
+    }
+
+    /// <summary>Whether there is anything to switch between — one effect needs no picker.</summary>
+    public bool HasManyEffects => _effectRows.Count > 1;
+
+    /// <summary>The headline: how many effects the archive owns, and how much of them can be set.</summary>
+    public string EffectsSummary => _effects == null
+        ? ""
+        : $"{_effectRows.Count} of this archive's own · {_effects.ValueCount} values";
+
+    /// <summary>Raised when an effect edit lands, so the host can record it and say so.</summary>
+    public event Action<FileInfo, string, IEditAction>? EffectEdited;
+
+    /// <summary>Re-reads the staged archive's effects. Called when the SCENE changes, like the tabs beside
+    /// it, and defeats the same-archive cache — a restored backup is a different file under one name.</summary>
+    public void RefreshEffects()
+    {
+        _effectsArchive = null;
+        BuildEffects();
+    }
+
+    private int IndexOfEffect(EffectRowsViewModel effect)
+    {
+        for (int i = 0; i < _effectRows.Count; i++)
+        {
+            if (ReferenceEquals(_effectRows[i], effect)) return i;
+        }
+        return -1;
+    }
+
+    private async void BuildEffects()
+    {
+        FileInfo? archive = ContextArchive();
+        if (archive != null && _effectsArchive != null
+            && string.Equals(archive.FullName, _effectsArchive, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        int token = ++_effectsToken;
+        _effects = null;
+        _effectsArchive = archive?.FullName;
+        RaiseEffects();
+        if (archive == null) return;
+
+        CarEffects? read = null;
+        try { read = await Task.Run(() => CarEffects.Read(archive)); }
+        catch (Exception) { /* an archive whose effects will not open is a tab that does not appear */ }
+
+        if (token != _effectsToken) return;
+        _effects = read;
+        BuildEffectRows();
+        RaiseEffects();
+    }
+
+    private void BuildEffectRows()
+    {
+        var wasOpen = _effectRows
+            .SelectMany(e => e.Generations)
+            .Where(g => g.IsExpanded)
+            .Select(g => g.Title)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (_effects == null || _effectsArchive == null) { _effectRows = []; return; }
+
+        var archive = new FileInfo(_effectsArchive);
+        string path = _effects.Path;
+        var built = new List<EffectRowsViewModel>();
+
+        foreach (EffectView effect in _effects.Effects)
+        {
+            var generations = new List<EffectGenerationRowsViewModel>();
+            foreach (EffectGenerationView generation in effect.Generations)
+            {
+                var operators = new List<EffectOperatorRowsViewModel>();
+                foreach (EffectOperatorView op in generation.Operators)
+                {
+                    var rows = op.Parameters
+                        .SelectMany(p => p.Rows)
+                        .Select(r => new EffectValueRowViewModel(
+                            r, (row, value) => CommitEffectValue(archive, path, row.Offset, value, row.Label)))
+                        .ToList();
+                    operators.Add(new EffectOperatorRowsViewModel(
+                        op, rows,
+                        (offset, on) => CommitEffectValue(
+                            archive, path, offset, on ? 1f : 0f, $"{op.Title} switch", isFlag: true)));
+                }
+                var band = new EffectGenerationRowsViewModel(
+                    generation, operators, EffectRowsViewModel.AccentFor(effect.Role));
+                band.IsExpanded = wasOpen.Contains(band.Title);
+                generations.Add(band);
+            }
+            built.Add(new EffectRowsViewModel(effect, generations));
+        }
+
+        _effectRows = built;
+        _effectIndex = Math.Clamp(_effectIndex, 0, Math.Max(0, built.Count - 1));
+    }
+
+    // One number typed into an effect. Does NOT rebuild the rows: replacing them under the caret is how a
+    // box loses what is being typed into it.
+    private bool CommitEffectValue(
+        FileInfo archive, string path, int offset, float value, string label, bool isFlag = false)
+    {
+        EffectEditing.Change? change = EffectEditing.Set(path, offset, value, isFlag, label);
+        if (change == null) return false;
+
+        EffectEdited?.Invoke(
+            archive, $"{label} set.", new EffectValueEdit(change, RefreshEffectsAfterUndo));
+        return true;
+    }
+
+    /// <summary>
+    /// Adds a copy of the effect on screen, under the lowest free id. Copying rather than minting: an
+    /// effect is a tree of emitters, operators and curves that has to be coherent to render at all, and the
+    /// only coherent one to hand is one that already works.
+    /// </summary>
+    public void AddEffectCopy()
+    {
+        if (_effects == null || _effectsArchive == null || SelectedEffect is not { } selected) return;
+
+        var archive = new FileInfo(_effectsArchive);
+        uint? fresh = EffectEditing.AddCopy(_effects.Path, selected.Id, out byte[]? before);
+        if (fresh == null || before == null) return;
+
+        byte[] after;
+        try { after = File.ReadAllBytes(_effects.Path); }
+        catch (IOException) { return; }
+
+        var edit = new EffectAddEdit(_effects.Path, before, after, RefreshEffectsAfterUndo);
+        EffectEdited?.Invoke(
+            archive,
+            $"Effect {selected.Id} copied as {fresh}. Point a field at {fresh} for the game to use it.",
+            edit);
+        RefreshEffectsAfterUndo();
+    }
+
+    private void RefreshEffectsAfterUndo()
+    {
+        _effectsArchive = null;     // defeat the same-archive cache — the file really did change
+        BuildEffects();
+    }
+
+    private void RaiseEffects()
+    {
+        Raise(nameof(HasEffects));
+        Raise(nameof(EffectList));
+        Raise(nameof(SelectedEffect));
+        Raise(nameof(HasManyEffects));
+        Raise(nameof(EffectsSummary));
     }
 
     /// <summary>The headline over the tables: how many, and how much of them is named.</summary>

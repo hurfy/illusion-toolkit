@@ -1,7 +1,14 @@
 using System.IO;
 using System.Text;
 using Illusion.Assets;
+using Illusion.Assets.Effects;
 using Illusion.Assets.EntityData;
+using Illusion.Assets.Sds;
+using Illusion.Domain;
+using Illusion.Formats.Effects;
+using Illusion.Scene;
+using Illusion.ViewModels;
+using Illusion.Viewport;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
 namespace Illusion.Diagnostics.Probes;
@@ -73,6 +80,8 @@ internal static class EffectProbes
             Dictionary<uint, List<(string Archive, string Folder)>> owners = Corpus(sb, Check);
             OneCar(sb, focus, Check);
             Wiring(sb, owners, Check);
+            Editing(sb, focus, Check);
+            Tab(sb, focus, Check);
 
             sb.Insert(0, $"EFFECTS PROBE ({focus}): {pass} passed, {fail} failed\n\n");
         }
@@ -336,6 +345,213 @@ internal static class EffectProbes
         int outside = elsewhere.Values.Sum(v => v.Library + v.Nowhere);
         check("most of a car's effect ids are NOT in its own file — the file holds two of them", outside > inOwn,
             $"{inOwn} answered by the car's own file, {outside} not");
+    }
+
+    // ── what the tab will do with it ──
+
+    /// <summary>
+    /// The editing layer, exercised without touching the player's install: every car's effects read into
+    /// rows, one value written and read back, and one effect copied — with the copy handed to the core's
+    /// own reader, which is the thing that has to keep accepting the file.
+    /// </summary>
+    private static void Editing(StringBuilder sb, string focus, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ reading a car's effects as editable rows ════");
+
+        int cars = 0, read = 0, values = 0, roles = 0;
+        CarEffects? sample = null;
+
+        foreach (FileInfo sds in new DirectoryInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars"))
+            .GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+            cars++;
+
+            CarEffects? effects;
+            try { effects = CarEffects.ReadFrom(extracted, sds); }
+            catch (Exception) { continue; }
+            if (effects == null) continue;
+
+            read++;
+            values += effects.ValueCount;
+            roles += effects.Effects.Count(e => e.Role.Length > 0);
+            if (sds.Name.StartsWith(focus, StringComparison.OrdinalIgnoreCase)) sample = effects;
+        }
+
+        sb.AppendLine($"  {read} of {cars} extracted cars carry effects; {values} editable values in all, "
+            + $"{roles} effect(s) their own tuning names");
+        check("every car's effects file opens as rows the panel can bind", cars > 0 && read > 0 && values > 0,
+            $"{read}/{cars} cars, {values} values");
+
+        if (sample == null) { sb.AppendLine($"  {focus}: not extracted, nothing to exercise"); return; }
+
+        sb.AppendLine($"\n── {focus} ──");
+        foreach (EffectView effect in sample.Effects)
+        {
+            sb.AppendLine($"  {effect.Title} — {effect.Summary}, {effect.ValueCount} value(s)");
+            foreach (EffectGenerationView generation in effect.Generations)
+            {
+                sb.AppendLine($"      {generation.Title}: {generation.OperatorList}");
+                foreach (EffectOperatorView op in generation.Operators.Take(3))
+                {
+                    foreach (EffectParamView param in op.Parameters.Take(3))
+                    {
+                        string shown = param.Summary.Length > 0
+                            ? param.Summary
+                            : string.Join(", ", param.Rows.Select(r => r.Value.ToString("0.###")));
+                        sb.AppendLine($"          {op.Title} · {param.Title}: {shown}");
+                    }
+                }
+            }
+        }
+
+        // A write is four bytes and nothing else. Measured against a copy of the buffer, because a rule
+        // that only holds in principle is the kind that quietly stops holding.
+        EffectValueRow? row = sample.Effects
+            .SelectMany(e => e.Generations).SelectMany(g => g.Operators)
+            .SelectMany(o => o.Parameters).SelectMany(p => p.Rows)
+            .FirstOrDefault();
+        if (row == null) { check("a value can be written back", false, "no value row to write"); return; }
+
+        byte[] before = [.. sample.Tree.Bytes];
+        sample.Tree.WriteFloat(row.Offset, row.Value + 12.5f);
+        int differing = 0, outside = 0;
+        for (int i = 0; i < before.Length; i++)
+        {
+            if (before[i] == sample.Tree.Bytes[i]) continue;
+            differing++;
+            if (i < row.Offset || i >= row.Offset + 4) outside++;
+        }
+        float readBack = sample.Tree.ReadFloat(row.Offset);
+        sample.Tree.WriteFloat(row.Offset, row.Value);
+
+        // Fewer than four is normal and not a weaker result: a float that shares a byte with the one it
+        // replaces leaves that byte alone. What matters is that nothing OUTSIDE the four moved.
+        check("writing one value moves nothing outside its own four bytes",
+            differing is > 0 and <= 4 && outside == 0, $"{differing} byte(s) changed, {outside} of them elsewhere");
+        check("the value reads back as it was written", Math.Abs(readBack - (row.Value + 12.5f)) < 1e-4f,
+            $"{readBack} vs {row.Value + 12.5f}");
+        check("putting it back leaves the file as it was found", sample.Tree.Bytes.SequenceEqual(before),
+            "byte for byte");
+
+        // Adding an effect: a copy under a free id. What has to survive is everything else in the file, and
+        // the core's own reader — which carries the .eff byte-exact and would be the first to notice a
+        // size the splice failed to correct.
+        uint fresh = sample.NextFreeId();
+        byte[] grown;
+        try { grown = sample.BytesWithCopyOf(sample.Effects[0].Id); }
+        catch (Exception ex) { check("an effect can be copied", false, ex.Message); return; }
+
+        EffectsTree? reread = EffectsTree.Read(grown);
+        sb.AppendLine($"\n  copy of effect {sample.Effects[0].Id} as {fresh}: "
+            + $"{sample.Tree.Bytes.Length:N0} → {grown.Length:N0} bytes, "
+            + $"{sample.Effects.Count} → {reread?.Effects.Count ?? 0} effects");
+
+        check("a copy leaves a file that still walks", reread != null, reread == null ? "will not parse" : "");
+        check("a copy adds exactly one effect, under the free id",
+            reread != null && reread.Effects.Count == sample.Effects.Count + 1
+            && reread.IdOf(reread.Effects[^1]) == fresh,
+            reread == null ? "no tree" : $"{reread.Effects.Count} effects, last id {reread.IdOf(reread.Effects[^1])}");
+        check("the effects that were already there keep their ids",
+            reread != null && reread.Effects.Take(sample.Effects.Count)
+                .Select(reread.IdOf).SequenceEqual(sample.Effects.Select(e => e.Id)),
+            "unchanged");
+
+        bool coreKeeps;
+        try
+        {
+            using var stream = new MemoryStream(grown, writable: false);
+            coreKeeps = Formats.Effects.EffectsFile.Read(stream).ToBytes().SequenceEqual(grown);
+        }
+        catch (Exception) { coreKeeps = false; }
+        check("the core still carries the grown file byte for byte", coreKeeps,
+            coreKeeps ? "round-trips" : "the core rejects or rewrites it");
+    }
+
+    // ── the tab ──
+
+    /// <summary>
+    /// The panel side, read-only on purpose: the tab exists, it appears for a car with nothing selected,
+    /// and it builds the rows. Nothing here commits a value — that would write the player's extracted copy,
+    /// and the write path is already exercised above against a buffer.
+    /// </summary>
+    private static void Tab(StringBuilder sb, string focus, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ the Effects tab ════");
+
+        var panel = new Views.ScenePanel();
+        System.Windows.Controls.TabItem? tab = panel.PropertyTabs.Items
+            .OfType<System.Windows.Controls.TabItem>()
+            .FirstOrDefault(t => (t.Header as string) == "Effects");
+        check("the panel carries an Effects tab", tab != null, tab == null ? "no tab named Effects" : "");
+
+        var car = new FileInfo(Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars", focus + ".sds"));
+        if (!car.Exists) { sb.AppendLine($"  {focus}: not installed"); return; }
+
+        (List<SdsFrameNode> roots, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(car);
+        if (document == null || roots.Count == 0)
+        {
+            check("the car loads a scene document to hang the tab on", false, "no document");
+            return;
+        }
+
+        var host = new D3DImageHost();
+        SceneNode folder = host.Tree.GetOrCreateFolder("probe");
+        var sdsNode = new SceneNode(car.Name, "Sds", true);
+        var frNode = new SceneNode("FrameResource", "FrameResource", true) { Source = document };
+        var leaves = new List<SceneNode>();
+        foreach (SdsFrameNode root in roots) frNode.AddChild(SceneTree.BuildSceneTree(root, leaves));
+        sdsNode.AddChild(frNode);
+        folder.AddChild(sdsNode);
+        host.Tree.RebuildStageRoots();
+
+        var vm = new SelectionViewModel(host);
+        vm.RefreshEffects();
+        Pump(() => vm.HasEffects);
+
+        check("the tab is reachable with nothing selected", vm.HasEffects, vm.EffectsSummary);
+        if (!vm.HasEffects) return;
+
+        check("the picker offers every effect the archive owns",
+            vm.EffectList.Count == 2 && vm.HasManyEffects, $"{vm.EffectList.Count} effect(s)");
+        check("one effect is on screen, not all of them",
+            vm.SelectedEffect != null && ReferenceEquals(vm.SelectedEffect, vm.EffectList[0]),
+            vm.SelectedEffect?.Title ?? "(none)");
+        // The file numbers its effects and says nothing else about them. A tab reading "Effect 384" twice
+        // would be two rows of nothing, so the role from the car's own tuning is what makes the picker
+        // usable at all.
+        check("the effects are named by what the car calls them, not just numbered",
+            vm.EffectList.Any(e => e.Title.Contains("Fire", StringComparison.Ordinal))
+            && vm.EffectList.Any(e => e.Title.Contains("Rain", StringComparison.Ordinal)),
+            string.Join(" | ", vm.EffectList.Select(e => e.Title)));
+
+        EffectRowsViewModel first = vm.EffectList[0];
+        sb.AppendLine($"  {first.Title}: {first.Summary} — {first.Status}");
+        foreach (EffectGenerationRowsViewModel band in first.Generations)
+        {
+            sb.AppendLine($"    {band.Title}: {band.Operators.Count} operator card(s), "
+                + $"{band.Operators.Sum(o => o.Rows.Count)} value(s)");
+        }
+
+        check("every emitter starts folded, since a car's fire is eight of them",
+            first.Generations.All(g => !g.IsExpanded), $"{first.Generations.Count} band(s)");
+        check("the bands hold operator cards with editable numbers",
+            first.Generations.Sum(g => g.Operators.Count) > 0
+            && first.Generations.Sum(g => g.Operators.Sum(o => o.Rows.Count)) > 0,
+            $"{first.Generations.Sum(g => g.Operators.Count)} cards, "
+            + $"{first.Generations.Sum(g => g.Operators.Sum(o => o.Rows.Count))} values");
+    }
+
+    private static void Pump(Func<bool> until)
+    {
+        DateTime end = DateTime.UtcNow.AddSeconds(10);
+        while (!until() && DateTime.UtcNow < end)
+        {
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                () => { }, System.Windows.Threading.DispatcherPriority.Background);
+            Thread.Sleep(10);
+        }
     }
 
     // ── the container ──

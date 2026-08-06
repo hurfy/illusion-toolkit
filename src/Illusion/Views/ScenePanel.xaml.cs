@@ -181,6 +181,14 @@ public partial class ScenePanel : UserControl
             viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
         };
 
+        // And an effect edit — a birth rate, a colour key, a whole effect copied.
+        _selection.EffectEdited += (archive, message, edit) =>
+        {
+            viewport.History.Push(edit);
+            viewport.MarkArchiveModified(archive);
+            viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
+        };
+
         viewport.SceneChanged += () => Dispatcher.Invoke(() =>
         {
             UpdateSceneStats();
@@ -191,6 +199,7 @@ public partial class ScenePanel : UserControl
             // shows nothing at all.
             _selection.RefreshPrefab();
             _selection.RefreshTuning();
+            _selection.RefreshEffects();
         });
         UpdateEmptyState();
 
@@ -331,6 +340,8 @@ public partial class ScenePanel : UserControl
     private void DuplicateMenuItem_Click(object sender, RoutedEventArgs e) => _viewport.DuplicateSelected();
 
     private void RemoveUnusedHulls_Click(object sender, RoutedEventArgs e) => _viewport.RemoveUnusedHulls();
+
+    private void AddEffectCopy_Click(object sender, RoutedEventArgs e) => _selection.AddEffectCopy();
 
     private void TreeRestoreBackup_Click(object sender, RoutedEventArgs e) =>
         RestoreBackupRequested?.Invoke(ArchiveOf(_viewport.SelectedNode));

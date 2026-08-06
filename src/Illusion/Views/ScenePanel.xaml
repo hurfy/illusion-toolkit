@@ -1087,6 +1087,161 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+<!-- Effects tab: the archive's OWN effects, and deliberately nothing else. For a car that is two —
+                 its fire and its rain — and the file names them only by number, so what the tab calls them
+                 comes from the car's own tuning, the one place the meaning is written down. Every other
+                 effect a car names (the exhaust smoke, the explosion, the sparks, the breaking glass) lives
+                 in the shared particle library, where an edit would change every car in the game at once.
+
+                 One effect at a time, its emitters as folding bands: a car's fire is eight of them and
+                 sixty operator cards between them. -->
+            <TabItem x:Name="EffectsTab" Header="Effects" Tag="&#xE945;"
+                     ToolTip="Effects — the effects this archive carries of its own"
+                     Style="{StaticResource VerticalTab}"
+                     Visibility="{Binding HasEffects, Converter={StaticResource BoolToVis}}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="10,10,10,4">
+                        <Border Style="{StaticResource PropCard}">
+                            <StackPanel>
+                                <TextBlock Text="Effects" Style="{StaticResource PropTitle}" />
+                                <TextBlock Text="{Binding EffectsSummary}" Style="{StaticResource PropSubtitle}" />
+
+                                <!-- The picker carries the effect's ID, because that is what the rest of the
+                                     archive calls it; what it DOES rides on the card below. -->
+                                <StackPanel Margin="0,9,0,0"
+                                            Visibility="{Binding HasManyEffects, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="Effect" Style="{StaticResource MetaLabel}" Margin="0,0,0,4" />
+                                    <ListBox Style="{StaticResource NumberStrip}"
+                                             ItemContainerStyle="{StaticResource NumberStripItem}"
+                                             ItemsSource="{Binding EffectList}"
+                                             SelectedItem="{Binding SelectedEffect, Mode=TwoWay}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Number}" FontSize="11.5"
+                                                           ToolTip="{Binding Title}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+
+                                <ContentControl Content="{Binding SelectedEffect}" Margin="0,9,0,0">
+                                    <ContentControl.ContentTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Title}" Style="{StaticResource PropCaption}" />
+                                                <TextBlock Text="{Binding Summary}" Style="{StaticResource MetaLabel}"
+                                                           Margin="0,3,0,0" />
+                                                <TextBlock Text="{Binding Status}" Style="{StaticResource MetaLabel}"
+                                                           Margin="0,3,0,0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ContentControl.ContentTemplate>
+                                </ContentControl>
+
+                                <!-- Adding one is a COPY of the effect on screen: an effect is a tree of
+                                     emitters and curves that has to be coherent to render at all. The copy
+                                     does nothing until a field names its number, which is what the notice
+                                     after the click says. -->
+                                <Button Content="Add a copy of this effect" Margin="0,9,0,0"
+                                        HorizontalAlignment="Stretch"
+                                        ToolTip="Duplicates the effect under the lowest free id. Point FireID or RainID at that id for the game to use it."
+                                        Click="AddEffectCopy_Click" />
+                            </StackPanel>
+                        </Border>
+
+                        <ContentControl Content="{Binding SelectedEffect}">
+                            <ContentControl.ContentTemplate>
+                                <DataTemplate>
+                                    <ItemsControl ItemsSource="{Binding Generations}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,0,0,6">
+                                                    <Border Style="{StaticResource GroupHeaderCard}" Margin="0,0,0,6">
+                                                        <Grid MinHeight="24">
+                                                            <ToggleButton Style="{StaticResource GroupHeaderToggle}"
+                                                                          ToolTip="Open or close this emitter"
+                                                                          IsChecked="{Binding IsExpanded, Mode=TwoWay}">
+                                                                <Grid Background="Transparent">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <Border Grid.Column="0" Width="3" Height="13"
+                                                                            CornerRadius="1.5" Margin="0,0,8,0"
+                                                                            VerticalAlignment="Center"
+                                                                            Background="{Binding Accent}" />
+                                                                    <TextBlock Grid.Column="1" Text="{Binding Title}"
+                                                                               Style="{StaticResource PropCaption}"
+                                                                               FontSize="12.5" Margin="0"
+                                                                               VerticalAlignment="Center" />
+                                                                    <TextBlock Grid.Column="2" Text="{Binding Badge}"
+                                                                               FontSize="10.5" Margin="7,0,0,0"
+                                                                               VerticalAlignment="Center"
+                                                                               TextTrimming="CharacterEllipsis"
+                                                                               Foreground="{StaticResource TextFaint}" />
+                                                                </Grid>
+                                                            </ToggleButton>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <!-- One card per operator: its switch, what it sets, and
+                                                         its numbers. -->
+                                                    <ItemsControl ItemsSource="{Binding Operators}"
+                                                                  Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Style="{StaticResource PropCard}">
+                                                                    <StackPanel>
+                                                                        <Grid Margin="0,0,0,6">
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="*" />
+                                                                                <ColumnDefinition Width="Auto" />
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <TextBlock Grid.Column="0" Text="{Binding Title}"
+                                                                                       Style="{StaticResource PropCaption}"
+                                                                                       Margin="0" VerticalAlignment="Center" />
+                                                                            <ToggleButton Grid.Column="1"
+                                                                                          Style="{StaticResource ToggleSwitch}"
+                                                                                          Margin="8,0,0,0"
+                                                                                          ToolTip="Whether the game runs this operator at all"
+                                                                                          IsChecked="{Binding Enabled, Mode=TwoWay}" />
+                                                                        </Grid>
+                                                                        <TextBlock Text="{Binding Detail}"
+                                                                                   Style="{StaticResource MetaLabel}"
+                                                                                   TextWrapping="Wrap" Margin="0,0,0,8" />
+                                                                        <ItemsControl ItemsSource="{Binding Rows}">
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate>
+                                                                                    <StackPanel Margin="0,0,0,10">
+                                                                                        <TextBlock Text="{Binding Label}"
+                                                                                                   ToolTip="{Binding Where}"
+                                                                                                   Style="{StaticResource MetaLabel}"
+                                                                                                   Margin="0,0,0,4"
+                                                                                                   TextTrimming="CharacterEllipsis" />
+                                                                                        <TextBox Style="{StaticResource InputField}"
+                                                                                                 HorizontalAlignment="Stretch"
+                                                                                                 Text="{Binding Number, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                                                                                    </StackPanel>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </DataTemplate>
+                            </ContentControl.ContentTemplate>
+                        </ContentControl>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
             <!-- Object tab (transformable frame object): local Position / Rotation / Scale. -->
             <TabItem x:Name="ObjectTab" Header="Object" Tag="&#xE759;" ToolTip="Object"
                      Foreground="{x:Static v:PaletteInk.Orange}"
