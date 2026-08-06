@@ -7,6 +7,7 @@ using Illusion.Domain;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Archive;
+using Illusion.Formats.Geometry;
 using Illusion.Formats.Prefab;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
@@ -58,6 +59,10 @@ internal static class BulletProbes
             OneCar(sb, cars, focus, Check);
             Calibrate(sb, cars, Check);
             Census(sb, cars, Check);
+            PieceNames(sb, cars, focus, Check);
+            BlendIndexReading(sb, cars, Check);
+            BoxRotation(sb, cars, Check);
+            VertexChannels(sb, cars, focus, Check);
             Characters(sb, Check);
             Parts(sb, cars, Check);
             BlendPools(sb, cars, Check);
@@ -93,6 +98,26 @@ internal static class BulletProbes
         string[] bones = BoneNames(model!);
         List<Piece> pieces = PiecesOf(model!, bones);
         sb.AppendLine($"════ {focus} ════");
+
+        // Every mesh in the archive, not just the one the rest of this probe reads. A car can carry more
+        // than one, and a part that lives on a second mesh has no split, no piece and no hit box of the
+        // first one — so measuring the first mesh and talking about "the car" would be silently wrong.
+        sb.AppendLine("── meshes in this archive ──");
+        foreach (FrameObjectSingleMesh any in fr!.FrameObjects!.Values.OfType<FrameObjectSingleMesh>())
+        {
+            Formats.Frames.Resources.MaterialStruct[] table =
+                any.Material?.Materials is { Count: > 0 } list ? list[0] : [];
+            var used = new List<string>();
+            foreach (Formats.Frames.Resources.MaterialStruct slot in table)
+            {
+                used.Add(MafiaMaterials.GetMaterialName(slot.MaterialHash) ?? $"0x{slot.MaterialHash:X16}");
+            }
+            int slots = table.Length;
+            sb.AppendLine($"    {(any is FrameObjectModel ? "skinned" : "static "),-8} "
+                + $"{Trim(any.Name?.ToString() ?? "?", 28),-28} {slots} materials: "
+                + Trim(string.Join(", ", used), 70));
+        }
+        sb.AppendLine();
         sb.AppendLine($"{pieces.Count} split pieces, {model!.HitBoxes?.Length ?? 0} hit boxes, "
             + $"{bones.Length} bones");
 
@@ -115,6 +140,29 @@ internal static class BulletProbes
             sb.AppendLine($"    {p.Index,3}  {Trim(p.Bone, 16),-16} "
                 + $"{p.Box?.Unk.ToString() ?? "-",10} {(p.Box == null ? "-" : "0x" + p.Box.Unk.ToString("X8")),10}  "
                 + $"{Trim(mats, 40),-40} {faces}");
+        }
+
+        // Where each piece actually sits. With no per-piece selection in the UI, this is the only way to say
+        // WHICH piece is the rag hanging off a truck's board and which is the board — same bone, same
+        // material, so nothing but geometry tells them apart.
+        DecodedMesh? geo = SdsMeshLoader.DecodeLod0(model);
+        if (geo != null)
+        {
+            sb.AppendLine($"\n── where each piece sits ({focus}) ──");
+            sb.AppendLine($"    {"#",3}  {"bone",-16} {"unk",10}  {"centre",-24} {"size",-22} faces");
+            foreach (Piece p in pieces)
+            {
+                Vector3[] verts = VerticesOf(geo, p);
+                if (verts.Length == 0) continue;
+                Vector3 lo = verts[0], hi = verts[0];
+                foreach (Vector3 v in verts) { lo = Vector3.Min(lo, v); hi = Vector3.Max(hi, v); }
+                Vector3 size = hi - lo, mid = (hi + lo) * 0.5f;
+                sb.AppendLine($"    {p.Index,3}  {Trim(p.Bone, 16),-16} "
+                    + $"{(p.Box == null ? "-" : "0x" + p.Box.Unk.ToString("X8")),10}  "
+                    + $"{mid.X,7:F2}{mid.Y,7:F2}{mid.Z,7:F2}   "
+                    + $"{size.X,6:F2}{size.Y,6:F2}{size.Z,6:F2}  "
+                    + $"{p.Bursts.Sum(b => b.Ranges.Sum(r => r.Count))}");
+            }
         }
 
         Spaces(sb, model, pieces, check);
@@ -537,6 +585,683 @@ internal static class BulletProbes
         int inTable = byValue.Keys.Count(v => v < (uint)CollisionMaterialCatalog.All.Count);
         sb.AppendLine($"    {inTable} of {byValue.Count} values fall inside the physics-surface table "
             + $"(0..{CollisionMaterialCatalog.All.Count - 1})");
+    }
+
+    /// <summary>
+    /// The per-VERTEX channels nothing in this toolkit has ever looked at: <c>Color0</c>, <c>Color1</c> and
+    /// <c>DamageGroup</c>.
+    ///
+    /// <para>
+    /// Every candidate keyed to a material, a bone, a piece or a prefab part is dead: a truck's boards and its
+    /// bumper share one material and give wood and metal, and its rag shares a material with the cab and gives
+    /// cloth. Whatever names the surface has to have per-vertex resolution, and these are the only per-vertex
+    /// channels in the format. The bridge copies them from the donor vertex on a weld, which would also
+    /// explain a cube that changed its decal when it changed bones while keeping its material.
+    /// </para>
+    /// </summary>
+    private static void VertexChannels(
+        StringBuilder sb, string folder, string focus, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ per-vertex channels: Color0 / Color1 / DamageGroup ════");
+
+        if (!TryOpen(folder, focus, out FrameResource? _, out FrameObjectModel? model, out string why))
+        {
+            sb.AppendLine($"    {focus}: {why}");
+            return;
+        }
+
+        DecodedMesh? decoded = SdsMeshLoader.DecodeLod0(model!);
+        if (decoded?.RawVertexData == null) { sb.AppendLine("    no raw vertex data"); return; }
+
+        VertexFlags declaration = decoded.Declaration;
+        sb.AppendLine($"    declaration: Color={declaration.HasFlag(VertexFlags.Color)} "
+            + $"Color1={declaration.HasFlag(VertexFlags.Color1)} "
+            + $"DamageGroup={declaration.HasFlag(VertexFlags.DamageGroup)}");
+
+        Vertex[] verts = VertexTranslator.DecompressBuffer(
+            decoded.RawVertexData, decoded.NumVerts, declaration,
+            decoded.DecompressionOffset, decoded.DecompressionFactor);
+
+        var damageValues = new Dictionary<int, int>();
+        var colour0Values = new Dictionary<string, int>();
+        foreach (Vertex v in verts)
+        {
+            damageValues[v.DamageGroup] = damageValues.GetValueOrDefault(v.DamageGroup) + 1;
+            string key = $"{v.Color0[0]:X2}{v.Color0[1]:X2}{v.Color0[2]:X2}{v.Color0[3]:X2}";
+            colour0Values[key] = colour0Values.GetValueOrDefault(key) + 1;
+        }
+        sb.AppendLine($"    DamageGroup: {damageValues.Count} distinct — " + string.Join(", ",
+            damageValues.OrderByDescending(p => p.Value).Take(10).Select(p => $"{p.Key}×{p.Value}")));
+        sb.AppendLine($"    Color0: {colour0Values.Count} distinct — " + string.Join(", ",
+            colour0Values.OrderByDescending(p => p.Value).Take(8).Select(p => $"{p.Key}×{p.Value}")));
+
+        // Per piece, so a board can be told from the rag hanging beside it.
+        sb.AppendLine($"\n    {"#",3}  {"bone",-16}  {"DamageGroup",-22} Color0");
+        foreach (Piece p in PiecesOf(model!, BoneNames(model!)))
+        {
+            var dmg = new SortedSet<int>();
+            var col = new SortedSet<string>(StringComparer.Ordinal);
+            foreach ((_, IReadOnlyList<(int Start, int Count)> ranges) in p.Bursts)
+            {
+                foreach ((int start, int count) in ranges)
+                {
+                    int first = start / 3;
+                    for (int face = first; face < first + count; face++)
+                    {
+                        for (int corner = 0; corner < 3; corner++)
+                        {
+                            int slot = (face * 3) + corner;
+                            if (slot < 0 || slot >= decoded.Indices.Length) continue;
+                            uint vertex = decoded.Indices[slot];
+                            if (vertex >= verts.Length) continue;
+                            dmg.Add(verts[vertex].DamageGroup);
+                            col.Add($"{verts[vertex].Color0[0]:X2}{verts[vertex].Color0[1]:X2}"
+                                + $"{verts[vertex].Color0[2]:X2}{verts[vertex].Color0[3]:X2}");
+                        }
+                    }
+                }
+            }
+            if (dmg.Count == 0) continue;
+            sb.AppendLine($"    {p.Index,3}  {Trim(p.Bone, 16),-16}  "
+                + $"{Trim(string.Join(",", dmg), 22),-22} {Trim(string.Join(",", col), 60)}");
+        }
+
+        check("the mesh carries a per-vertex channel that is not constant",
+            damageValues.Count > 1 || colour0Values.Count > 1,
+            $"{damageValues.Count} damage groups, {colour0Values.Count} colours");
+    }
+
+    /// <summary>
+    /// Is the <c>uint</c> beside a hit box a packed ROTATION?
+    ///
+    /// <para>
+    /// Now that the centre and the half-size read exactly (signed shorts at 10/32768), the box still fails to
+    /// contain a third of its own vertices — which is what an ORIENTED box read as an axis-aligned one looks
+    /// like. 32 bits is the usual home of a packed quaternion (three components at 10 bits plus 2 bits naming
+    /// the one left out), so the candidate is scored the only way that settles it: rotate the box and count
+    /// how many of the piece's own vertices fall inside. A reading that is not the rotation cannot raise the
+    /// count; the true one should take it to nearly all.
+    /// </para>
+    /// </summary>
+    private static void BoxRotation(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ is the piece's unk a packed rotation? ════");
+
+        const float quantum = 10f / 32768f;
+        string[] names =
+        [
+            "no rotation — the box as an AABB",
+            "smallest-three, dropped index in the HIGH 2 bits",
+            "smallest-three, dropped index in the LOW 2 bits",
+            "three 10-bit Euler angles (Z·Y·X)",
+        ];
+        var inside = new long[names.Length];
+        long total = 0, ownTotal = 0, ownInside = 0;
+        int cars = 0;
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            if (cars >= 20) break;
+            if (!TryOpen(folder, Path.GetFileNameWithoutExtension(sds.Name),
+                    out FrameResource? fr, out FrameObjectModel? model, out string _))
+            {
+                continue;
+            }
+            cars++;
+
+            DecodedMesh? decoded = SdsMeshLoader.DecodeLod0(model!);
+            if (decoded == null) continue;
+            byte[]? owners = SdsMeshLoader.GlobalBoneIds(model!, 0);
+            float[]? weights = decoded.BoneWeights;
+            foreach (Piece p in PiecesOf(model!, BoneNames(model!)))
+            {
+                if (p.Box == null) continue;
+                Vector3[] verts = VerticesOf(decoded, p);
+                if (verts.Length == 0) continue;
+
+                // Vertices of the piece that are weighted to the piece's OWN bone. A face at the seam
+                // between two panels has corners belonging to the neighbour, and a box that guards this
+                // piece has no reason to reach them.
+                Vector3[] ownVerts = OwnVertices(decoded, p, owners, weights);
+                ownTotal += ownVerts.Length;
+                foreach (Vector3 v in ownVerts)
+                {
+                    Vector3 local = v - centreOf(p);
+                    if (Math.Abs(local.X) <= halfOf(p).X + 1e-3f && Math.Abs(local.Y) <= halfOf(p).Y + 1e-3f
+                        && Math.Abs(local.Z) <= halfOf(p).Z + 1e-3f)
+                    {
+                        ownInside++;
+                    }
+                }
+
+                Vector3 centreOf(Piece piece) => new(
+                    (short)piece.Box!.Position.S1 * quantum,
+                    (short)piece.Box.Position.S2 * quantum,
+                    (short)piece.Box.Position.S3 * quantum);
+                Vector3 halfOf(Piece piece) => new(
+                    piece.Box!.Size.S1 * quantum, piece.Box.Size.S2 * quantum, piece.Box.Size.S3 * quantum);
+
+                var centre = new Vector3(
+                    (short)p.Box.Position.S1 * quantum,
+                    (short)p.Box.Position.S2 * quantum,
+                    (short)p.Box.Position.S3 * quantum);
+                var half = new Vector3(
+                    p.Box.Size.S1 * quantum, p.Box.Size.S2 * quantum, p.Box.Size.S3 * quantum);
+                Quaternion[] rotations =
+                [
+                    Quaternion.Identity,
+                    SmallestThree(p.Box.Unk, indexHigh: true),
+                    SmallestThree(p.Box.Unk, indexHigh: false),
+                    PackedEuler(p.Box.Unk),
+                ];
+
+                foreach (Vector3 v in verts)
+                {
+                    total++;
+                    for (int r = 0; r < rotations.Length; r++)
+                    {
+                        Vector3 local = Vector3.Transform(v - centre, Quaternion.Conjugate(rotations[r]));
+                        if (Math.Abs(local.X) <= half.X + 1e-3f && Math.Abs(local.Y) <= half.Y + 1e-3f
+                            && Math.Abs(local.Z) <= half.Z + 1e-3f)
+                        {
+                            inside[r]++;
+                        }
+                    }
+                }
+            }
+        }
+
+        sb.AppendLine($"    counting only vertices weighted to the piece's OWN bone: "
+            + $"{(ownTotal == 0 ? 0 : (double)ownInside / ownTotal),7:P1} of {ownTotal} are inside "
+            + "(no rotation)");
+        sb.AppendLine($"    {total} vertices over {cars} cars, counted inside their own piece's box");
+        for (int r = 0; r < names.Length; r++)
+        {
+            sb.AppendLine($"    {(total == 0 ? 0 : (double)inside[r] / total),7:P1}  {names[r]}");
+        }
+
+        int best = 0;
+        for (int r = 1; r < names.Length; r++)
+        {
+            if (inside[r] > inside[best]) best = r;
+        }
+        check("a rotation reading of unk beats the plain AABB",
+            total > 0 && best != 0,
+            best == 0 ? "no reading beats the AABB — unk is not the box's rotation"
+                : $"best is \"{names[best]}\"");
+    }
+
+    /// <summary>The piece's vertices that are weighted to the piece's own bone, rather than a neighbour's.</summary>
+    private static Vector3[] OwnVertices(DecodedMesh decoded, Piece piece, byte[]? owners, float[]? weights)
+    {
+        if (owners == null || weights == null) return VerticesOf(decoded, piece);
+
+        var kept = new List<Vector3>();
+        var seen = new HashSet<uint>();
+        foreach ((_, IReadOnlyList<(int Start, int Count)> ranges) in piece.Bursts)
+        {
+            foreach ((int start, int count) in ranges)
+            {
+                int first = start / 3;
+                for (int face = first; face < first + count; face++)
+                {
+                    for (int corner = 0; corner < 3; corner++)
+                    {
+                        int slot = (face * 3) + corner;
+                        if (slot < 0 || slot >= decoded.Indices.Length) continue;
+                        uint vertex = decoded.Indices[slot];
+                        if (vertex >= decoded.Positions.Length || !seen.Add(vertex)) continue;
+
+                        int best = -1;
+                        float most = 0f;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            int at = ((int)vertex * 4) + k;
+                            if (at >= owners.Length || at >= weights.Length) break;
+                            if (weights[at] > most) (most, best) = (weights[at], owners[at]);
+                        }
+                        if (best == piece.BlendIndex) kept.Add(decoded.Positions[vertex]);
+                    }
+                }
+            }
+        }
+        return [.. kept];
+    }
+
+    /// <summary>A quaternion packed as three 10-bit components plus 2 bits naming the one left out.</summary>
+    private static Quaternion SmallestThree(uint packed, bool indexHigh)
+    {
+        int dropped = indexHigh ? (int)(packed >> 30) & 3 : (int)(packed & 3);
+        uint body = indexHigh ? packed : packed >> 2;
+        float scale = 1f / MathF.Sqrt(2f);
+        float a = (((body & 0x3FF) / 1023f * 2f) - 1f) * scale;
+        float b = ((((body >> 10) & 0x3FF) / 1023f * 2f) - 1f) * scale;
+        float c = ((((body >> 20) & 0x3FF) / 1023f * 2f) - 1f) * scale;
+        float rest = MathF.Sqrt(Math.Max(0f, 1f - (a * a) - (b * b) - (c * c)));
+        return dropped switch
+        {
+            0 => new Quaternion(rest, a, b, c),
+            1 => new Quaternion(a, rest, b, c),
+            2 => new Quaternion(a, b, rest, c),
+            _ => new Quaternion(a, b, c, rest),
+        };
+    }
+
+    /// <summary>Three 10-bit angles over a full turn, applied Z then Y then X.</summary>
+    private static Quaternion PackedEuler(uint packed)
+    {
+        float turn = MathF.PI * 2f / 1024f;
+        float x = (packed & 0x3FF) * turn;
+        float y = ((packed >> 10) & 0x3FF) * turn;
+        float z = ((packed >> 20) & 0x3FF) * turn;
+        return Quaternion.CreateFromYawPitchRoll(y, x, z);
+    }
+
+    // ── is the bone we hang on a piece the right one? ──
+
+    /// <summary>
+    /// Whether a split piece names the bone its own geometry is weighted to.
+    ///
+    /// <para>
+    /// Everything read off a piece goes through this name — its materials, its box, which panel a shot on it
+    /// belongs to. The name is one lookup, <c>BoneRemapIDs[BlendIndex]</c>, and the only check it ever had is
+    /// that the index fits the table, which cannot fail on a table long enough to hold it. The oracle here is
+    /// the geometry: the vertices of a piece carry bone weights, and the bone carrying most of them IS the
+    /// bone that piece belongs to. A name that disagrees with the weights is wrong.
+    /// </para>
+    /// <para>
+    /// The rival reading — <c>BlendIndex</c> straight as a bone id — is scored beside it, because that is what
+    /// this toolkit did before and what the reference toolkit still does.
+    /// </para>
+    /// </summary>
+    private static void PieceNames(
+        StringBuilder sb, string folder, string focus, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ does a piece name the bone its geometry belongs to? ════");
+
+        int pieces = 0, agree = 0, rival = 0, cars = 0;
+        var offBy = new Dictionary<int, int>();
+        var examples = new List<string>();
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            if (!TryOpen(folder, Path.GetFileNameWithoutExtension(sds.Name),
+                    out FrameResource? fr, out FrameObjectModel? _, out string _))
+            {
+                continue;
+            }
+            cars++;
+            string car = Path.GetFileNameWithoutExtension(sds.Name);
+
+            foreach (FrameObjectModel model in fr!.FrameObjects!.Values.OfType<FrameObjectModel>())
+            {
+                string[] bones = BoneNames(model);
+                if (bones.Length == 0) continue;
+
+                DecodedMesh? decoded = SdsMeshLoader.DecodeLod(model, 0);
+                byte[]? ids = SdsMeshLoader.GlobalBoneIds(model, 0);
+                if (decoded?.BoneWeights is not { } weights || ids == null) continue;
+
+                byte[] flat = [];
+                try
+                {
+                    Illusion.Formats.Frames.Resources.FrameBlendInfo.BoneIndexInfo[] lods =
+                        model.GetBlendInfoObject().BoneIndexInfos ?? [];
+                    if (lods.Length > 0) flat = lods[0].BoneRemapIDs ?? [];
+                }
+                catch (Exception) { continue; }
+
+                bool showCar = string.Equals(car, focus, StringComparison.OrdinalIgnoreCase);
+                if (showCar)
+                {
+                    sb.AppendLine($"\n── {car}: piece → named bone vs the bone its weights say ──");
+                    sb.AppendLine($"    {"#",3}  {"named",-18} {"weights say",-18} {"share",6}  materials");
+                }
+
+                int index = 0;
+                foreach (FrameObjectModel.WeightedByMeshSplit split in model.BlendMeshSplits ?? [])
+                {
+                    int named = split.BlendIndex < flat.Length ? flat[split.BlendIndex] : -1;
+                    int asBoneId = split.BlendIndex < bones.Length ? split.BlendIndex : -1;
+
+                    foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+                    {
+                        var weightOf = new Dictionary<int, float>(8);
+                        var mats = new SortedSet<string>(StringComparer.Ordinal);
+                        foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                        {
+                            mats.Add(MaterialName(model, burst.MaterialIndex));
+                            foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                            {
+                                int from = range.StartIndex / 3;
+                                for (int f = from; f < from + range.NumFaces; f++)
+                                {
+                                    for (int corner = 0; corner < 3; corner++)
+                                    {
+                                        int at = (f * 3) + corner;
+                                        if (at < 0 || at >= decoded.Indices.Length) continue;
+                                        int vertex = (int)decoded.Indices[at];
+                                        for (int k = 0; k < 4; k++)
+                                        {
+                                            int slot = (vertex * 4) + k;
+                                            if (slot >= ids.Length || slot >= weights.Length) break;
+                                            if (weights[slot] <= 0f) continue;
+                                            weightOf[ids[slot]] = weightOf.GetValueOrDefault(ids[slot])
+                                                + weights[slot];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        index++;
+                        if (weightOf.Count == 0) continue; // a piece with no faces has nothing to say
+
+                        float total = weightOf.Values.Sum();
+                        (int Bone, float Weight) top = (-1, 0f);
+                        foreach ((int bone, float weight) in weightOf)
+                        {
+                            if (weight > top.Weight) top = (bone, weight);
+                        }
+
+                        pieces++;
+                        if (top.Bone == named) agree++;
+                        if (top.Bone == asBoneId) rival++;
+                        if (top.Bone != named)
+                        {
+                            offBy[named - top.Bone] = offBy.GetValueOrDefault(named - top.Bone) + 1;
+                            if (examples.Count < 12)
+                            {
+                                examples.Add($"{car} piece {index - 1}: named "
+                                    + $"{Name(bones, named)} but weighted to {Name(bones, top.Bone)} "
+                                    + $"({top.Weight / total:P0})");
+                            }
+                        }
+
+                        if (showCar)
+                        {
+                            // Materials by SLOT and HASH, not just by name: two slots can resolve to the
+                            // same display name while being different materials, and a surface lookup keyed
+                            // by material would then look identical here while behaving differently in game.
+                            var slots = new List<string>();
+                            foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                            {
+                                if ((burst.Data?.Sum(r => r.NumFaces) ?? 0) == 0) continue;
+                                ulong hash = 0;
+                                Formats.Frames.Resources.MaterialStruct[]? table =
+                                    model.Material?.Materials is { Count: > 0 } list ? list[0] : null;
+                                if (table != null && burst.MaterialIndex < table.Length)
+                                {
+                                    hash = table[burst.MaterialIndex].MaterialHash;
+                                }
+                                slots.Add($"[{burst.MaterialIndex}] {MaterialName(model, burst.MaterialIndex)}"
+                                    + $" 0x{hash:X16}");
+                            }
+                            sb.AppendLine($"    {index - 1,3}  {Trim(Name(bones, named), 18),-18} "
+                                + $"{Trim(Name(bones, top.Bone), 18),-18} {top.Weight / total,6:P0}  "
+                                + $"{string.Join("  ", slots)}");
+                        }
+                    }
+                }
+            }
+        }
+
+        sb.AppendLine($"\n    {pieces} pieces with geometry across {cars} archives");
+        sb.AppendLine($"    BoneRemapIDs[BlendIndex] agrees with the weights: {agree} "
+            + $"({(pieces == 0 ? 0 : (double)agree / pieces):P1})");
+        sb.AppendLine($"    BlendIndex read straight as a bone id:            {rival} "
+            + $"({(pieces == 0 ? 0 : (double)rival / pieces):P1})");
+        if (offBy.Count > 0)
+        {
+            sb.AppendLine("    when it disagrees, named minus actual: " + string.Join(", ",
+                offBy.OrderByDescending(p => p.Value).Take(8).Select(p => $"{p.Key:+0;-0;0}×{p.Value}")));
+        }
+        foreach (string line in examples) sb.AppendLine("      " + line);
+
+        // No assert here on purpose. The oracle cannot judge a split named after a deform bone — that bone
+        // carries no weight in the bind pose — so "every piece agrees" is not an invariant this measurement
+        // can hold. The invariant lives in BlendIndexReading, which sets those splits aside first. This
+        // section stays as the diagnostic that shows WHICH pieces disagree and on which car.
+        sb.AppendLine("    (no assert: deform-bone splits cannot be judged by weights — see the next section)");
+    }
+
+    private static string Name(string[] bones, int bone) =>
+        bone >= 0 && bone < bones.Length ? bones[bone] : $"#{bone}";
+
+    /// <summary>
+    /// WHICH reading of <c>WeightedByMeshSplit.BlendIndex</c> names the bone the split's geometry actually
+    /// rides.
+    ///
+    /// <para>
+    /// A vertex's bone id is POOL-LOCAL — it indexes the remap pool assigned to the face group drawing it
+    /// (<c>SkinnedMaterialInfo.AssignedPoolIndex</c> → <c>BonesPerRemapPool</c> → a slice of
+    /// <c>BoneRemapIDs</c>). A split's <c>BlendIndex</c> is the same kind of number and there is no reason it
+    /// would be read flat, yet that is what this toolkit does. Each candidate below is scored against the
+    /// weights of the split's own vertices, counting only pieces whose geometry sits on ONE bone by 80 % or
+    /// more — a piece shared 50/50 between two deform bones cannot judge anything.
+    /// </para>
+    /// <para>
+    /// The pool is tried through both fields of <c>SkinnedMaterialInfo</c>: the struct's own comments
+    /// describe them the wrong way round, so which of the two carries the pool is a question the data has to
+    /// answer rather than the reference toolkit.
+    /// </para>
+    /// </summary>
+    private static void BlendIndexReading(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ which reading of BlendIndex names the split's bone? ════");
+
+        string[] names =
+        [
+            "BoneRemapIDs[BlendIndex] — flat (what we do today)",
+            "BlendIndex straight as a bone id",
+            "pool of the FIRST burst's material, via AssignedPoolIndex",
+            "pool of the BIGGEST burst's material, via AssignedPoolIndex",
+            "pool of the FIRST burst's material, via NumWeightsPerVertex",
+            "pool of the BIGGEST burst's material, via NumWeightsPerVertex",
+            "RefToUsageArray[BlendIndex]",
+            "the bone whose RefToUsageArray entry IS BlendIndex",
+        ];
+        var hits = new int[names.Length];
+        int judged = 0, skipped = 0;
+        var perCar = new Dictionary<string, (int Judged, int Flat)>(StringComparer.Ordinal);
+        var hard = new List<string>();
+        var plainMisses = new Dictionary<string, int>(StringComparer.Ordinal);
+        int plainJudged = 0, plainHits = 0;
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            if (!TryOpen(folder, Path.GetFileNameWithoutExtension(sds.Name),
+                    out FrameResource? fr, out FrameObjectModel? _, out string _))
+            {
+                continue;
+            }
+
+            foreach (FrameObjectModel model in fr!.FrameObjects!.Values.OfType<FrameObjectModel>())
+            {
+                DecodedMesh? decoded = SdsMeshLoader.DecodeLod(model, 0);
+                byte[]? ids = SdsMeshLoader.GlobalBoneIds(model, 0);
+                if (decoded?.BoneWeights is not { } weights || ids == null) continue;
+
+                Illusion.Formats.Frames.Resources.FrameBlendInfo.BoneIndexInfo info;
+                try
+                {
+                    Illusion.Formats.Frames.Resources.FrameBlendInfo.BoneIndexInfo[] lods =
+                        model.GetBlendInfoObject().BoneIndexInfos ?? [];
+                    if (lods.Length == 0) continue;
+                    info = lods[0];
+                }
+                catch (Exception) { continue; }
+
+                byte[] pools = info.BonesPerRemapPool ?? [];
+                byte[] remap = info.BoneRemapIDs ?? [];
+                Illusion.Formats.Frames.Resources.FrameBlendInfo.SkinnedMaterialInfo[] groups =
+                    info.SkinnedMaterialInfo ?? [];
+                if (pools.Length == 0 || remap.Length == 0) continue;
+
+                byte[] refToUsage = [];
+                try
+                {
+                    Illusion.Formats.Frames.Resources.FrameSkeleton.MappingForBlendingInfo[] maps =
+                        model.GetSkeletonObject().MappingForBlendingInfos ?? [];
+                    if (maps.Length > 0) refToUsage = maps[0].RefToUsageArray ?? [];
+                }
+                catch (Exception) { /* the two skeleton candidates simply score zero */ }
+
+                var poolStart = new int[pools.Length];
+                for (int p = 1; p < pools.Length; p++) poolStart[p] = poolStart[p - 1] + pools[p - 1];
+
+                foreach (FrameObjectModel.WeightedByMeshSplit split in model.BlendMeshSplits ?? [])
+                {
+                    int blend = split.BlendIndex;
+                    foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+                    {
+                        var weightOf = new Dictionary<int, float>(8);
+                        int firstMaterial = -1, biggestMaterial = -1, biggestFaces = 0;
+                        foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                        {
+                            int faces = burst.Data?.Sum(r => r.NumFaces) ?? 0;
+                            if (faces == 0) continue;
+                            if (firstMaterial < 0) firstMaterial = burst.MaterialIndex;
+                            if (faces > biggestFaces) (biggestFaces, biggestMaterial) = (faces, burst.MaterialIndex);
+                            foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                            {
+                                int from = range.StartIndex / 3;
+                                for (int f = from; f < from + range.NumFaces; f++)
+                                {
+                                    for (int corner = 0; corner < 3; corner++)
+                                    {
+                                        int at = (f * 3) + corner;
+                                        if (at < 0 || at >= decoded.Indices.Length) continue;
+                                        int vertex = (int)decoded.Indices[at];
+                                        for (int k = 0; k < 4; k++)
+                                        {
+                                            int slot = (vertex * 4) + k;
+                                            if (slot >= ids.Length || slot >= weights.Length) break;
+                                            if (weights[slot] <= 0f) continue;
+                                            weightOf[ids[slot]] = weightOf.GetValueOrDefault(ids[slot])
+                                                + weights[slot];
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (weightOf.Count == 0) continue;
+
+                        float total = weightOf.Values.Sum();
+                        (int Bone, float Weight) top = (-1, 0f);
+                        foreach ((int bone, float weight) in weightOf)
+                        {
+                            if (weight > top.Weight) top = (bone, weight);
+                        }
+
+                        // A piece split evenly between deform bones has no single right answer; judging on it
+                        // would score noise. Only pieces that clearly belong to one bone get a vote.
+                        if (top.Weight / total < 0.8f) { skipped++; continue; }
+                        judged++;
+
+                        int[] candidates =
+                        [
+                            blend < remap.Length ? remap[blend] : -1,
+                            blend,
+                            ByPool(firstMaterial, viaAssigned: true),
+                            ByPool(biggestMaterial, viaAssigned: true),
+                            ByPool(firstMaterial, viaAssigned: false),
+                            ByPool(biggestMaterial, viaAssigned: false),
+                            blend < refToUsage.Length ? refToUsage[blend] : -1,
+                            Array.IndexOf(refToUsage, (byte)Math.Clamp(blend, 0, 255)),
+                        ];
+                        for (int c = 0; c < candidates.Length; c++)
+                        {
+                            if (candidates[c] == top.Bone) hits[c]++;
+                        }
+
+                        string car = Path.GetFileNameWithoutExtension(sds.Name);
+                        (int Judged, int Flat) tally = perCar.GetValueOrDefault(car);
+                        perCar[car] = (tally.Judged + 1, tally.Flat + (candidates[0] == top.Bone ? 1 : 0));
+
+                        // A deform bone carries no weight in the bind pose — its geometry is weighted to the
+                        // panel it deforms, or to the root. The weights therefore cannot judge a split named
+                        // after one, and counting them as failures blames the lookup for the oracle's limit.
+                        string[] named = BoneNames(model);
+                        bool deform = Name(named, candidates[0])
+                            .StartsWith("deform", StringComparison.OrdinalIgnoreCase);
+                        if (!deform)
+                        {
+                            plainJudged++;
+                            if (candidates[0] == top.Bone) plainHits++;
+                            else plainMisses[car] = plainMisses.GetValueOrDefault(car) + 1;
+                        }
+
+                        // The hardest cases: geometry that sits on one bone almost entirely, named as
+                        // another. A piece shared with its own deform bone would show up as a related pair;
+                        // unrelated names mean the lookup itself is wrong.
+                        // One example per car, so a single heavily-edited archive cannot fill the list and
+                        // hide what the untouched ones do.
+                        if (candidates[0] != top.Bone && top.Weight / total >= 0.95f
+                            && hard.Count < 18 && !hard.Exists(h => h.StartsWith(car + ":", StringComparison.Ordinal)))
+                        {
+                            string[] boneNames = BoneNames(model);
+                            hard.Add($"{car}: BlendIndex {blend} → named {Name(boneNames, candidates[0])}, "
+                                + $"weighted {top.Weight / total:P0} to {Name(boneNames, top.Bone)}");
+                        }
+
+                        int ByPool(int material, bool viaAssigned)
+                        {
+                            if (material < 0 || material >= groups.Length) return -1;
+                            int pool = viaAssigned
+                                ? groups[material].AssignedPoolIndex
+                                : groups[material].NumWeightsPerVertex;
+                            if (pool < 0 || pool >= pools.Length) return -1;
+                            int at = poolStart[pool] + blend;
+                            return at >= 0 && at < remap.Length ? remap[at] : -1;
+                        }
+                    }
+                }
+            }
+        }
+
+        sb.AppendLine($"    {judged} pieces sit on one bone by 80 % or more and can judge "
+            + $"({skipped} too evenly shared to judge)");
+        for (int c = 0; c < names.Length; c++)
+        {
+            sb.AppendLine($"    {(judged == 0 ? 0 : (double)hits[c] / judged),7:P1}  {hits[c],6}  {names[c]}");
+        }
+
+        // Is the flat reading wrong EVERYWHERE a little, or right on most cars and broken on a few? The two
+        // mean different repairs: a wrong formula versus a car-shaped precondition we do not model.
+        int clean = perCar.Count(kv => kv.Value.Judged > 0 && kv.Value.Flat == kv.Value.Judged);
+        sb.AppendLine($"\n    the flat reading is perfect on {clean} of {perCar.Count} cars");
+        sb.AppendLine("    worst cars: " + string.Join(", ", perCar
+            .Where(kv => kv.Value.Judged > 0)
+            .OrderBy(kv => (double)kv.Value.Flat / kv.Value.Judged)
+            .Take(6)
+            .Select(kv => $"{kv.Key} {kv.Value.Flat}/{kv.Value.Judged}")));
+
+        sb.AppendLine("\n    hardest disagreements (geometry 95 %+ on one bone, named as another):");
+        foreach (string line in hard) sb.AppendLine("      " + line);
+
+        sb.AppendLine($"\n    leaving out splits named after a deform bone, the flat reading is right on "
+            + $"{plainHits} of {plainJudged} ({(plainJudged == 0 ? 0 : (double)plainHits / plainJudged):P2})");
+        sb.AppendLine("    the cars that still miss: " + (plainMisses.Count == 0 ? "none" : string.Join(", ",
+            plainMisses.OrderByDescending(p => p.Value).Take(8).Select(p => $"{p.Key} ×{p.Value}"))));
+        // The measured invariant, not the ideal: 12359 of 12498 (98.89 %) on the shipped corpus, where the
+        // remainder is one edited archive plus a scatter of pieces the weights cannot call. A reading that
+        // drops below this is a broken lookup, not a corpus quirk.
+        check("outside deform bones, BoneRemapIDs[BlendIndex] names the split's bone on 98 %+ of pieces",
+            plainJudged > 0 && (double)plainHits / plainJudged >= 0.98,
+            $"{plainHits} of {plainJudged} ({(plainJudged == 0 ? 0 : (double)plainHits / plainJudged):P2})");
+
+        int best = 0;
+        for (int c = 1; c < names.Length; c++)
+        {
+            if (hits[c] > hits[best]) best = c;
+        }
+        // Which reading WINS is the finding, and it has to keep winning: the pool-local readings are the
+        // plausible-looking rivals (a vertex's id really is pool-local), and picking one of them would
+        // silently move every piece to a different bone.
+        check("the flat BoneRemapIDs[BlendIndex] reading beats every rival",
+            judged > 0 && best == 0,
+            $"best is \"{names[best]}\" at {hits[best]} of {judged}");
     }
 
     // ── the control group: characters carry hit boxes too ──
@@ -1523,7 +2248,12 @@ internal static class BulletProbes
         {
             foreach ((int start, int count) in ranges)
             {
-                for (int face = start; face < start + count; face++)
+                // StartIndex is an offset into the INDEX buffer, not a face number: three indices to a face.
+                // Read raw, this walked off into other pieces' triangles (and off the end for anything past a
+                // third of the buffer), which is what every "the hit box does not contain its own vertices"
+                // measurement was built on.
+                int first = start / 3;
+                for (int face = first; face < first + count; face++)
                 {
                     for (int corner = 0; corner < 3; corner++)
                     {
