@@ -383,6 +383,12 @@ public sealed class PrefabAssembly
                 CarValueSlot.DeformPartType, i, "F0")));
             parts.Add(Sub(Number("Flags", file.GetCarValue(CarValueSlot.DeformPartFlags, i),
                 CarValueSlot.DeformPartFlags, i, "F0")));
+            // What a shot on this part draws. Parts sharing the number share the effect — see the slot.
+            parts.Add(Sub(Number("Effect group", file.GetCarValue(CarValueSlot.DeformPartEffectGroup, i),
+                CarValueSlot.DeformPartEffectGroup, i, "F0") with
+            {
+                Detail = "what a hit on this part draws — parts with the same number behave alike",
+            }));
             parts.Add(Sub(Vector("Centre of mass", new Vector3(
                 file.GetCarValue(CarValueSlot.DeformCentreOfMass, i, 0),
                 file.GetCarValue(CarValueSlot.DeformCentreOfMass, i, 1),

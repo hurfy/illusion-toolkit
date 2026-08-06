@@ -700,6 +700,10 @@ internal static class ProbeRunner
                 return true;
             // DESTRUCTIVE, and on purpose: grows every per-piece hit box of a car in its extracted working
             // copy so the next pack can be shot at. Undone by re-extracting. See HitBoxProbes.
+            // The game.s own impact-effect tables (car_particles_keys, materials_shots), dumped in full.
+            case "--probe-effect-tables":
+                EffectTableProbes.RunEffectTablesProbe();
+                return true;
             case "--probe-hitbox-blowup":
                 HitBoxProbes.RunHitBoxBlowupProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha",

@@ -84,6 +84,29 @@ public enum CarValueSlot
     /// <summary>The damage model: one deformable part of the body, and how much it takes to move it.</summary>
     DeformPartType,
     DeformPartFlags,
+
+    /// <summary>
+    /// Which EFFECT GROUP a deformable part belongs to — what a shot on it draws.
+    /// <para>
+    /// Measured, then confirmed in game three times over. Parts sharing this number share their impact
+    /// effect: on berkley_kingfisher a door and both its windows are 3, the bonnet and the patch that hangs
+    /// on it are both 4, the boot lid is 5, and the body, the roof, the engine bay and the rear glass are
+    /// all 0. Geometry welded onto the bonnet drew the bonnet's effect, onto the roof the body's, onto the
+    /// boot lid a third — and onto the PATCH the bonnet's again, which is the reading that settled it:
+    /// patch is a different part from the bonnet and shares only this number.
+    /// </para>
+    /// <para>
+    /// It is neither the part kind nor the parent chain. The bonnet and the boot lid are both kind
+    /// <c>cover</c> and draw different effects; the boot lid and the roof hang off the same parent and draw
+    /// different ones. Across 85 cars it takes fourteen values on covers and fifteen on windows, and is
+    /// constant only on the body and the engine bay.
+    /// </para>
+    /// <para>
+    /// What decides which effect a GROUP gets is not known — only that the grouping is what selects it. So
+    /// it is offered as "behave like that panel", which is the question a modder actually has.
+    /// </para>
+    /// </summary>
+    DeformPartEffectGroup,
     DeformCentreOfMass,
     DeformSpeedMin,
     DeformSpeedMax,
@@ -433,6 +456,7 @@ public sealed partial class PrefabFile
 
             CarValueSlot.DeformPartType when Deform(car) is { } d && In(index, d.Count) => d[index].PartType,
             CarValueSlot.DeformPartFlags when Deform(car) is { } d && In(index, d.Count) => d[index].Flags,
+            CarValueSlot.DeformPartEffectGroup when Deform(car) is { } d && In(index, d.Count) => d[index].Unk19,
             CarValueSlot.DeformCentreOfMass when Deform(car) is { } d && In(index, d.Count)
                 => Axis(d[index].CentreOfMass, axis),
             CarValueSlot.DeformSpeedMin when Tuning(car, index) is { } t => t.SpeedMin,
@@ -525,6 +549,8 @@ public sealed partial class PrefabFile
                 d[index].PartType = (uint)Math.Max(0, value); return true;
             case CarValueSlot.DeformPartFlags when Deform(car) is { } d && In(index, d.Count):
                 d[index].Flags = (uint)Math.Max(0, value); return true;
+            case CarValueSlot.DeformPartEffectGroup when Deform(car) is { } d && In(index, d.Count):
+                d[index].Unk19 = (byte)Math.Clamp(value, 0, byte.MaxValue); return true;
             case CarValueSlot.DeformCentreOfMass when Deform(car) is { } d && In(index, d.Count):
                 d[index].CentreOfMass = With(d[index].CentreOfMass, axis, value); return true;
             case CarValueSlot.DeformSpeedMin when Tuning(car, index) is { } t: t.SpeedMin = value; return true;

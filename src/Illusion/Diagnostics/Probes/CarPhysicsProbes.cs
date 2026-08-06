@@ -55,7 +55,7 @@ internal static class CarPhysicsProbes
             RoundTrip(sb, folder, focus, Check);
             SecondInfluence(sb, folder, focus, Check);
             CapsuleAxis(sb, folder, Check);
-            Census(sb, folder, Check);
+            Census(sb, folder, Check, focus);
             Handles(sb, folder, Check);
             Stubless(sb, folder, Check);
             Facing(sb, folder, Check);
@@ -1685,7 +1685,8 @@ internal static class CarPhysicsProbes
 
     // ── every car, counted ──
 
-    private static void Census(StringBuilder sb, string folder, Action<string, bool, string> check)
+    private static void Census(StringBuilder sb, string folder, Action<string, bool, string> check,
+        string focus = "berkley_kingfisher_pha")
     {
         sb.AppendLine("\n\n════ every extracted car ════");
         FileInfo[] archives = new DirectoryInfo(folder).GetFiles("*.sds");
@@ -1713,7 +1714,14 @@ internal static class CarPhysicsProbes
         var indexLen = new Dictionary<(string List, string Of), int>();
         var indexFits = new Dictionary<(string List, string Of), int>();
         var indexSamples = new List<string>();
-        int effectParts = 0, effectCars = 0, effectVariesWithinCar = 0;
+        int effectParts = 0, effectCars = 0, effectVariesWithinCar = 0, partsWithString = 0;
+        var partStrings = new Dictionary<string, int>(StringComparer.Ordinal);
+        var partSmall = new Dictionary<string, Dictionary<short, int>>(StringComparer.Ordinal)
+        {
+            ["Unk17"] = [], ["Unk18"] = [], ["Unk19"] = [],
+        };
+        var smallByKind = new Dictionary<(uint Kind, short Value), int>();
+        var focusParts = new List<string>();
         var effectFields = new Dictionary<string, Dictionary<short, int>>(StringComparer.Ordinal)
         {
             ["ParticleBreakID"] = [],
@@ -1830,7 +1838,31 @@ internal static class CarPhysicsProbes
                 // Two unnamed lists of ushorts sit on every deformable part. If either of them is an index
                 // INTO the volume list, a volume added without one would be a volume the game never walks —
                 // which is exactly the symptom to explain.
-                // The effects block, one per part, inside the part's common tail.
+                // The per-part STRING. materials_shots.tbl is keyed by a NAME (plech, kov, sklo…), and this is
+                // the only string a deformable part carries — so if a part names its surface anywhere, here.
+                foreach (PrefabDeformPartCommonW named in part.Common)
+                {
+                    foreach (string s in named.Unk6Value)
+                    {
+                        partStrings[s] = partStrings.GetValueOrDefault(s) + 1;
+                    }
+                    if (named.Unk6Value.Count > 0) partsWithString++;
+                }
+                // Three small unmeasured numbers on the part itself. A surface index would fit any of them,
+                // and materials_shots has 190 rows.
+                Bump(partSmall["Unk17"], (short)part.Unk17);
+                Bump(partSmall["Unk18"], part.Unk18);
+                Bump(partSmall["Unk19"], part.Unk19);
+                smallByKind[(part.PartType, (short)part.Unk19)] =
+                    smallByKind.GetValueOrDefault((part.PartType, (short)part.Unk19)) + 1;
+                if (string.Equals(Path.GetFileNameWithoutExtension(sds.Name), focus, StringComparison.OrdinalIgnoreCase))
+                {
+                    focusParts.Add($"{(names.TryGetValue(part.Unk3.FirstOrDefault(), out string? pn) ? pn : "?"),-16}"
+                        + $" kind {PartTypeNames.GetValueOrDefault(part.PartType, "?"),-8}"
+                        + $" Unk17 {(short)part.Unk17,4}  Unk19 {part.Unk19,3}  Unk23 {part.Unk23,3}  Unk24 {part.Unk24,3}");
+                }
+
+                // The effects block, one per part, inside the part.s common tail.
                 foreach (PrefabDeformPartCommonW common in part.Common)
                 {
                     foreach (PrefabDeformPartEffectsW fx in common.PartEffects)
@@ -2065,6 +2097,44 @@ internal static class CarPhysicsProbes
         //
         // This asks the first question that has to be true for that story: do those ids actually DIFFER
         // between parts of one car? A field that is one constant everywhere cannot be selecting anything.
+        // The one STRING a deformable part carries. materials_shots.tbl — the game's own catalogue of what a
+        // shot draws — is keyed by a NAME (silnice, plech, kov, sklo…), so if a part names its surface
+        // anywhere, this is the only field in it that could.
+        sb.AppendLine($"\n  the string a deformable part carries ({partsWithString} of {parts} carry one):");
+        foreach ((string text, int count) in partStrings.OrderByDescending(p => p.Value).Take(24))
+        {
+            sb.AppendLine($"    \"{text}\" ×{count}");
+        }
+        foreach ((string field, Dictionary<short, int> values) in partSmall)
+        {
+            sb.AppendLine($"    {field,-8} {values.Count,4} distinct   " + string.Join("  ",
+                values.OrderByDescending(p => p.Value).Take(8).Select(p => $"{p.Key}×{p.Value}")));
+        }
+
+        // Does the field vary WITHIN a kind? That is the whole question. If every "cover" carried the same
+        // value it would only be restating the kind, and the bonnet and the boot lid — both covers — could
+        // not draw different effects. In game they do.
+        sb.AppendLine("\n  Unk19 by part kind (a kind with more than one value is telling parts apart):");
+        foreach (uint kind in smallByKind.Keys.Select(k => k.Kind).Distinct().OrderBy(k => k))
+        {
+            List<KeyValuePair<(uint Kind, short Value), int>> row =
+                [.. smallByKind.Where(p => p.Key.Kind == kind).OrderByDescending(p => p.Value)];
+            sb.AppendLine($"    {kind,2} {PartTypeNames.GetValueOrDefault(kind, "?"),-8} {row.Count,3} values   "
+                + string.Join("  ", row.Take(10).Select(p => $"{p.Key.Value}×{p.Value}")));
+        }
+
+        // Confirmed in game: parts sharing this number share the effect a shot on them draws. For that to be
+        // able to tell a bonnet from a boot lid, it has to vary WITHIN a kind — and it does, everywhere except
+        // the body and the engine bay, which are one group each.
+        int kindsThatVary = smallByKind.Keys.Select(k => k.Kind).Distinct()
+            .Count(kind => smallByKind.Count(p => p.Key.Kind == kind) > 1);
+        int kindsTotal = smallByKind.Keys.Select(k => k.Kind).Distinct().Count();
+        check("a part's effect group varies within its kind, so it can tell one panel from another",
+            kindsThatVary >= kindsTotal - 3, $"{kindsThatVary} of {kindsTotal} kinds carry more than one value");
+
+        sb.AppendLine($"\n  every part of {focus}:");
+        foreach (string line in focusParts) sb.AppendLine("    " + line);
+
         sb.AppendLine($"\n  the effects block on a deformable part ({effectParts} parts carrying one):");
         foreach ((string name, Dictionary<short, int> values) in effectFields)
         {
