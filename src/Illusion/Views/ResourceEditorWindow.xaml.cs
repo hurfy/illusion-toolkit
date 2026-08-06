@@ -604,6 +604,17 @@ public partial class ResourceEditorWindow : Window
 
     private void Multiplayer_Click(object sender, RoutedEventArgs e) => GameLauncher.Multiplayer(this);
 
+    // The item carries the live model count and disables at zero, so a selection that holds nothing skinned
+    // says so in the menu instead of failing on the click.
+    private void EditMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        int models = Stage.HitBoxRebuildTargetCount();
+        RebuildHitBoxesItem.Header = models > 0 ? $"Rebuild hit boxes ({models})" : "Rebuild hit boxes";
+        RebuildHitBoxesItem.IsEnabled = models > 0;
+    }
+
+    private void RebuildHitBoxes_Click(object sender, RoutedEventArgs e) => Stage.RebuildHitBoxes();
+
     private void RenderMode_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsInitialized || Stage == null) return;

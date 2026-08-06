@@ -64,6 +64,7 @@ internal static class BulletProbes
             BoneBoxes(sb, cars, Check);
             StaleBounds(sb, cars, focus, Check);
             RebuildBounds(sb, cars, Check);
+            RebuildUndo(sb, cars, Check);
             RoundTrips(sb, cars, Check);
             BodyHulls(sb, cars, Check);
             SurfaceReaches(sb, cars, focus, Check);
@@ -1016,6 +1017,62 @@ internal static class BulletProbes
     /// ones? The answer decides what an editor writes after a geometry change — and getting it wrong is not
     /// cosmetic: a box too small stops registering hits on real bodywork.
     /// </summary>
+    /// <summary>
+    /// What "Rebuild hit boxes" in the Edit menu does, and whether Ctrl+Z takes it back exactly.
+    ///
+    /// <para>
+    /// Undo has to restore the ARRAY, not recompute: a shipped box is turned, the turn lives in a word no
+    /// reading has cracked, and the builder replaces it with a sphere on purpose. So a rebuild that could
+    /// not be undone byte for byte would quietly cost every car its authored boxes the first time someone
+    /// clicked the item to see what it did.
+    /// </para>
+    /// </summary>
+    private static void RebuildUndo(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n════ rebuild hit boxes, then undo ════");
+
+        int cars = 0, changed = 0, exact = 0, drifted = 0, countKept = 0;
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            FrameObjectModel? model = fr?.FrameObjects?.Values.OfType<FrameObjectModel>()
+                .FirstOrDefault(m => m.HitBoxes is { Length: > 0 });
+            if (model == null) continue;
+
+            FrameObjectModel.HitBoxInfo[] before = model.HitBoxes!;
+            (ushort P1, ushort P2, ushort P3, ushort S1, ushort S2, ushort S3, uint Unk)[] words =
+                [.. before.Select(Words)];
+
+            FrameObjectModel.HitBoxInfo[]? built = Assets.Frames.HitBoxBuilder.Compute(model);
+            if (built == null) continue;
+            cars++;
+            if (built.Length == before.Length) countKept++;
+
+            var edit = new Viewport.HitBoxRebuildEdit(model, before, built);
+            edit.Redo();
+            if (!model.HitBoxes!.Select(Words).SequenceEqual(words)) changed++;
+            edit.Undo();
+
+            if (model.HitBoxes!.Select(Words).SequenceEqual(words)) exact++; else drifted++;
+        }
+
+        check("a rebuild keeps one box per piece", cars > 0 && countKept == cars,
+            $"{countKept}/{cars} cars kept their box count");
+        check("a rebuild actually rewrites the boxes", changed > 0,
+            $"{changed}/{cars} cars came out different from what shipped");
+        check("undo puts the shipped boxes back word for word", cars > 0 && drifted == 0,
+            $"{exact}/{cars} exact, {drifted} drifted");
+    }
+
+    private static (ushort, ushort, ushort, ushort, ushort, ushort, uint) Words(FrameObjectModel.HitBoxInfo b) =>
+        (b.Position.S1, b.Position.S2, b.Position.S3, b.Size.S1, b.Size.S2, b.Size.S3, b.Unk);
+
     private static void RebuildBounds(StringBuilder sb, string folder, Action<string, bool, string> check)
     {
         sb.AppendLine("\n════ can the per-bone boxes be rebuilt from the geometry? ════");

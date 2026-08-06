@@ -48,6 +48,11 @@
                      .col's state can be read off the menu instead of guessed. -->
                 <MenuItem x:Name="RemoveUnusedHullsItem" Header="Remove unused hulls"
                           Click="RemoveUnusedHulls_Click" />
+                <!-- A geometry push rebuilds these by itself; the item is here for everything that does not
+                     go through one, and for a model whose boxes were already stale when it was opened. -->
+                <MenuItem x:Name="RebuildHitBoxesItem" Header="Rebuild hit boxes"
+                          Click="RebuildHitBoxes_Click"
+                          ToolTip="Recompute the selected model's per-piece hit boxes from its geometry, so new geometry can be shot" />
             </MenuItem>
         </Menu>
 

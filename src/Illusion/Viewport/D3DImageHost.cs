@@ -431,6 +431,12 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// <inheritdoc cref="CollisionEditController.RemoveUnusedHulls"/>
     public void RemoveUnusedHulls() => CollisionEditing.RemoveUnusedHulls();
 
+    /// <inheritdoc cref="HitBoxController.RebuildTargetCount"/>
+    public int HitBoxRebuildTargetCount() => HitBoxes.RebuildTargetCount();
+
+    /// <inheritdoc cref="HitBoxController.RebuildSelected"/>
+    public void RebuildHitBoxes() => HitBoxes.RebuildSelected();
+
     /// <inheritdoc cref="TransformEditController.Reparent"/>
     public void Reparent(SceneNode node, SceneNode newParent) => Editing.Reparent(node, newParent);
 

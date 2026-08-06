@@ -250,7 +250,15 @@ public partial class MainWindow : Window
         ToolShelf.SetBridgeState(Viewport.BridgeEditedCount > 0, Viewport.SelectedNodes.Count > 0);
     }
 
-    private void EditMenu_SubmenuOpened(object sender, RoutedEventArgs e) => RefreshUnusedHullsItem();
+    private void EditMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        RefreshUnusedHullsItem();
+        int models = Viewport.HitBoxRebuildTargetCount();
+        RebuildHitBoxesItem.Header = models > 0 ? $"Rebuild hit boxes ({models})" : "Rebuild hit boxes";
+        RebuildHitBoxesItem.IsEnabled = models > 0;
+    }
+
+    private void RebuildHitBoxes_Click(object sender, RoutedEventArgs e) => Viewport.RebuildHitBoxes();
 
     // The item shows the live count and disables at zero: sweeping is never automatic (an orphaned hull may be
     // wanted back), so the menu is where a modder finds out there is anything to sweep. The scene tree's own

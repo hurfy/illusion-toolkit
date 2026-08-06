@@ -1,14 +1,16 @@
 using System.Numerics;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Frames;
 using Illusion.Assets.Sds;
+using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Scene;
 
 namespace Illusion.Viewport;
 
 /// <summary>
-/// Draws the per-piece hit boxes of every skinned model on the stage — the volumes that decide whether a
-/// bullet is tested against a piece's triangles at all.
+/// The per-piece hit boxes of the skinned models on the stage — the volumes that decide whether a bullet is
+/// tested against a piece's triangles at all. Draws them, and rebuilds them on demand.
 ///
 /// <para>
 /// <b>Why these are drawn as SPHERES.</b> The box on disk is turned, and the turn lives in a word no reading
@@ -94,6 +96,84 @@ internal sealed class HitBoxController
     internal void Forget()
     {
         if (_host.Rnd is { } renderer) renderer.ClearHitBoxes();
+    }
+
+    /// <summary>
+    /// How many skinned models the selection reaches — what "Rebuild hit boxes" would recompute. Zero
+    /// disables the command, so a selection that holds no model says so in the menu instead of failing on
+    /// the click.
+    /// </summary>
+    internal int RebuildTargetCount() => SelectedModels().Count;
+
+    /// <summary>
+    /// Recomputes the selected models' hit boxes from their own LOD 0 geometry, as one undoable edit.
+    ///
+    /// <para>
+    /// A geometry push does this by itself, so this exists for the paths that do not go through one — a
+    /// mesh imported, deleted or scaled by other means, and any car whose boxes were already stale when it
+    /// was opened. Rebuilding a model that needed nothing is harmless: the result is the boxes its geometry
+    /// implies either way.
+    /// </para>
+    /// </summary>
+    internal void RebuildSelected()
+    {
+        List<(SceneNode Node, FrameObjectModel Model)> targets = SelectedModels();
+        if (targets.Count == 0)
+        {
+            _host.RaiseNotice("select a skinned model first — hit boxes belong to the pieces of one");
+            return;
+        }
+
+        var edits = new List<IEditAction>();
+        int failed = 0;
+        foreach ((SceneNode node, FrameObjectModel model) in targets)
+        {
+            FrameObjectModel.HitBoxInfo[] before = model.HitBoxes ?? [];
+            FrameObjectModel.HitBoxInfo[]? built = HitBoxBuilder.Compute(model);
+            // The count is an invariant of the file — one box per piece. A walk that disagrees is a walk
+            // this model does not answer to, and writing it would mispair every piece after the first
+            // difference. Same refusal HitBoxBuilder.Rebuild makes.
+            if (built == null || built.Length != before.Length) { failed++; continue; }
+
+            var edit = new HitBoxRebuildEdit(model, before, built);
+            edit.Redo();
+            edits.Add(edit);
+            _host.Persistence.MarkFrameModified(node);
+        }
+
+        if (edits.Count == 0)
+        {
+            _host.RaiseNotice("hit boxes not rebuilt — this model's geometry would not decode", isError: true);
+            return;
+        }
+
+        _host.Editing.History.Push(edits.Count == 1 ? edits[0] : new CompositeEdit([.. edits]));
+        Redraw();
+        _host.RaiseNotice(failed == 0
+            ? $"rebuilt hit boxes on {edits.Count} model(s) — Ctrl+Z restores the originals"
+            : $"rebuilt hit boxes on {edits.Count} model(s); {failed} would not decode");
+    }
+
+    // The models the selection reaches: the one on a selected node, plus every one beneath it, so selecting
+    // a car's holder covers the car without hunting for the skinned row. Only models that already carry
+    // boxes — nothing here mints a box array a model never had.
+    private List<(SceneNode Node, FrameObjectModel Model)> SelectedModels()
+    {
+        var found = new List<(SceneNode, FrameObjectModel)>();
+        var seen = new HashSet<FrameObjectModel>();
+        foreach (SceneNode node in _host.Selection.Selected) Collect(node, seen, found);
+        return found;
+    }
+
+    private static void Collect(
+        SceneNode node, HashSet<FrameObjectModel> seen, List<(SceneNode, FrameObjectModel)> found)
+    {
+        if (node.Source is FrameNodeAdapter { Frame: FrameObjectModel model }
+            && model.HitBoxes is { Length: > 0 } && seen.Add(model))
+        {
+            found.Add((node, model));
+        }
+        foreach (SceneNode child in node.Children) Collect(child, seen, found);
     }
 
     // Every skinned model on the stage, with the matrix that puts its geometry into the world. Walked from
