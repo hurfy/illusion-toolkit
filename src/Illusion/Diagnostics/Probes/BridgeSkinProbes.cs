@@ -701,13 +701,21 @@ internal static class BridgeSkinProbes
 
                     // Which piece took the new face, and where the nearest one was. Both read off the model
                     // itself, so this cannot pass by agreeing with the code that wrote it.
-                    (int piece, float ownDistance, float nearestDistance, int claimed) =
-                        WeldedFaceOwner(fresh, far);
+                    (int piece, float ownDistance, float nearestDistance, int claimed, int splitBone,
+                        int faceBone) = WeldedFaceOwner(fresh, far);
                     Check("a welded face is claimed by a piece rather than left out of every range",
                         claimed == 1, $"claimed by {claimed} pieces");
                     Check("…and by the piece NEAREST to it, so its box grows as little as it can",
                         piece >= 0 && ownDistance <= nearestDistance + 1e-3f,
                         $"landed {ownDistance:F2} m from its piece, nearest was {nearestDistance:F2} m");
+
+                    // …and by a piece of the RIGHT BONE. The split table is keyed by a pool-local index, so
+                    // looking a bone up in it directly finds whichever split happens to carry that number —
+                    // right about one time in fifty. A face that lands on the wrong bone still passes every
+                    // check above: it is claimed, and it is claimed by the nearest piece OF THE WRONG SPLIT.
+                    Check("…and by a piece of the bone the face's own weights name",
+                        splitBone >= 0 && splitBone == faceBone,
+                        $"the piece speaks for bone {splitBone}, the face is weighted to {faceBone}");
 
                     // The point of all of it: after the push, every piece still holds its own geometry.
                     int outside = PiecesEscaping(fresh);
@@ -1010,11 +1018,11 @@ internal static class BridgeSkinProbes
     /// it, and how far the nearest piece OF THE SAME SPLIT was. Read off the model rather than from the code
     /// that assigned it, so the check cannot pass by agreeing with itself.
     /// </summary>
-    private static (int Piece, float Own, float Nearest, int Claimed) WeldedFaceOwner(
-        FrameObjectModel model, System.Numerics.Vector3 at)
+    private static (int Piece, float Own, float Nearest, int Claimed, int SplitBone, int FaceBone)
+        WeldedFaceOwner(FrameObjectModel model, System.Numerics.Vector3 at)
     {
         DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
-        if (mesh?.Indices is not { Length: > 0 } indices) return (-1, 0, 0, 0);
+        if (mesh?.Indices is not { Length: > 0 } indices) return (-1, 0, 0, 0, -1, -1);
 
         // The welded triangle is the one whose corners sit at the position it was welded at.
         int face = -1;
@@ -1023,7 +1031,30 @@ internal static class BridgeSkinProbes
             uint v = indices[f * 3];
             if (v < mesh.Positions.Length && (mesh.Positions[v] - at).Length() < 0.02f) face = f;
         }
-        if (face < 0) return (-1, 0, 0, 0);
+        if (face < 0) return (-1, 0, 0, 0, -1, -1);
+
+        // The bone the face's own weights name — the answer the piece that takes it has to agree with.
+        int faceBone = -1;
+        if (SdsMeshLoader.GlobalBoneIds(model, 0) is { } globalIds && mesh.BoneWeights is { } faceWeights)
+        {
+            var weightOf = new Dictionary<int, float>(8);
+            for (int corner = 0; corner < 3; corner++)
+            {
+                int vertex = (int)indices[(face * 3) + corner];
+                for (int k = 0; k < 4; k++)
+                {
+                    int slot = (vertex * 4) + k;
+                    if (slot >= globalIds.Length || slot >= faceWeights.Length) break;
+                    if (faceWeights[slot] <= 0f) continue;
+                    weightOf[globalIds[slot]] = weightOf.GetValueOrDefault(globalIds[slot]) + faceWeights[slot];
+                }
+            }
+            float best = 0f;
+            foreach ((int bone, float weight) in weightOf)
+            {
+                if (weight > best) (best, faceBone) = (weight, bone);
+            }
+        }
 
         int ordinal = 0, owner = -1, ownerSplit = -1, claimed = 0;
         foreach ((int split, FrameObjectModel.BlendMeshSplitInfo piece) in PiecesOf(model))
@@ -1043,7 +1074,24 @@ internal static class BridgeSkinProbes
             }
             ordinal++;
         }
-        if (owner < 0) return (-1, 0, 0, claimed);
+        if (owner < 0) return (-1, 0, 0, claimed, -1, faceBone);
+
+        // Which bone the owning SPLIT speaks for. BlendIndex is pool-local, so it only becomes a bone id
+        // through the remap table — reading it raw is the bug this assert exists to catch.
+        int splitBone = -1;
+        FrameObjectModel.WeightedByMeshSplit[] allSplits = model.BlendMeshSplits ?? [];
+        if (ownerSplit >= 0 && ownerSplit < allSplits.Length)
+        {
+            splitBone = allSplits[ownerSplit].BlendIndex;
+            try
+            {
+                Illusion.Formats.Frames.Resources.FrameBlendInfo.BoneIndexInfo[] lods =
+                    model.GetBlendInfoObject().BoneIndexInfos ?? [];
+                byte[] remap = lods.Length > 0 ? lods[0].BoneRemapIDs ?? [] : [];
+                if (splitBone < remap.Length) splitBone = remap[splitBone];
+            }
+            catch (Exception) { /* no blend info: the raw index is all there is */ }
+        }
 
         FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
         float own = owner < boxes.Length ? (BoxCentre(boxes[owner]) - at).Length() : 0f;
@@ -1060,7 +1108,7 @@ internal static class BridgeSkinProbes
             }
             seen++;
         }
-        return (owner, own, nearest == float.MaxValue ? own : nearest, claimed);
+        return (owner, own, nearest == float.MaxValue ? own : nearest, claimed, splitBone, faceBone);
     }
 
     /// <summary>How many pieces hold geometry outside their own box — the invariant the rebuild exists for.</summary>

@@ -1212,7 +1212,8 @@ public static class BridgeMeshApplier
     /// faces the game deforms as one piece. Stale ranges are what smear a repacked car across the horizon:
     /// they name faces the mesh no longer has.
     /// <para>
-    /// Measured on the shipped cars (<c>--probe-skinning</c>): a split is a BONE (BlendIndex is its index),
+    /// Measured on the shipped cars (<c>--probe-skinning</c>): a split is a BONE (<c>BoneRemapIDs</c> turns
+    /// its <c>BlendIndex</c> into the bone id — the index itself is pool-local and names nothing on its own),
     /// a burst's StartIndex is an index-buffer offset and NumFaces a triangle count, and the ranges of all
     /// splits together partition the triangle list — on shubert_38 exactly, on ascot_baileys200_pha not
     /// quite, so nothing here relies on being handed a clean partition.
@@ -1234,8 +1235,28 @@ public static class BridgeMeshApplier
         if (splits.Length == 0) return true; // nothing to keep in step
 
         // Which split (if any) speaks for each bone.
+        //
+        // The key has to be a GLOBAL bone id, because that is what the lookup below hands it (globalOf).
+        // BlendIndex is not one: it indexes the flat remap table, exactly like a vertex's pool-local id, and
+        // matching it straight against a global id — which is what this did — puts a new face on the right
+        // bone 2.2 % of the time. Measured in --probe-bullets ("which reading of BlendIndex names the split's
+        // bone?"): through the remap table it is right on 12359 of 12498 pieces that can judge, and the
+        // remainder are splits named after a deform bone, which carries no weight in the bind pose and so
+        // cannot be judged by weights at all.
+        byte[] remap = [];
+        try
+        {
+            FrameBlendInfo.BoneIndexInfo[] lods = model.GetBlendInfoObject().BoneIndexInfos ?? [];
+            if (lods.Length > 0) remap = lods[0].BoneRemapIDs ?? [];
+        }
+        catch (Exception) { /* no blend info to read: the raw index below is no worse than what it replaces */ }
+
         var splitOfBone = new Dictionary<int, int>(splits.Length);
-        for (int s = 0; s < splits.Length; s++) splitOfBone.TryAdd(splits[s].BlendIndex, s);
+        for (int s = 0; s < splits.Length; s++)
+        {
+            int blend = splits[s].BlendIndex;
+            splitOfBone.TryAdd(blend < remap.Length ? remap[blend] : blend, s);
+        }
 
         // The piece each ORIGINAL face sat in, read off the shipped table before it is rewritten, plus a way
         // to find the original face a new one came from (its three donor vertices, in any order).
