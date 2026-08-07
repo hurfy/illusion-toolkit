@@ -722,6 +722,26 @@ internal static class ProbeRunner
                         ? how
                         : HitBoxProbes.Sabotage.GrowHitBoxes);
                 return true;
+            // Puts back what a push dropped, from a DONOR archive (the stock car): the UV sets past the
+            // first, or the whole split table, or both. For an archive that cannot be rolled back — a live
+            // Blender bridge, finished work in the file. Writes only with a trailing "write".
+            // Args: <car> <donor.sds> [uv|splits|both] [write]. Output: %TEMP%\illusion_car_repair.txt
+            case "--probe-car-repair":
+                CarRepairProbes.RunRepairProbe(
+                    args.Length >= 2 ? args[1] : "shubert_38",
+                    args.Length >= 3 ? args[2] : "",
+                    args.Length >= 4 ? args[3] : "both",
+                    args.Contains("write"));
+                return true;
+            // One-factor experiment on a car: change exactly one channel, repack, and let the game answer
+            // what it controls. uv0/uv1/color0/colorred/colorwhite/bounds. Writes only with "write".
+            // Args: <car> <channel> [write]. Output: %TEMP%\illusion_car_mutate.txt
+            case "--probe-car-mutate":
+                CarRepairProbes.RunMutateProbe(
+                    args.Length >= 2 ? args[1] : "shubert_38",
+                    args.Length >= 3 ? args[2] : "uv0",
+                    args.Contains("write"));
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt
