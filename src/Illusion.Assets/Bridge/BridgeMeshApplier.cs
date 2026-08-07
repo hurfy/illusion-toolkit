@@ -869,10 +869,23 @@ public static class BridgeMeshApplier
                 // was modelled on. Its DAMAGE GROUP comes from there too: the channel is what says which
                 // panel a vertex crumples with (measured on shubert_38 by --probe-damage — 39 groups, each
                 // one a panel and its deform_ bone), and no group at all is not one of the answers.
-                if (isSkinned)
+                // The COLOUR channel goes the same way, and it is the one this fill used to leave behind.
+                // A car writes a mask there — every LOD 0 vertex of a stock berkley_kingfisher carries one
+                // (255,255,255,255 or 255,0,0,255) — and a push where Blender sent no donor for any vertex
+                // left the whole body at 0,0,0,0, which is a value the shipped data never has. Black is no
+                // more a neutral answer here than "no damage group" is below.
+                // The UV SETS PAST THE FIRST go the same way, and they are what made a whole imported body
+                // render as flat bright green in game. Blender only ever sends UV0, so every vertex without
+                // a donor came home with UV1 and UV2 at (0,0) — measured: 7323 of 7323 on an imported body
+                // against 0 of 6882 on the stock car, which carries all three sets on every LOD 0 vertex.
+                // A car's shader samples those sets; collapsing them onto one texel is not a neutral answer.
+                int near = NearestSourceVertex(decoded.Positions, newPositions[v]);
+                if (near >= 0)
                 {
-                    int near = NearestSourceVertex(decoded.Positions, newPositions[v]);
-                    if (near >= 0)
+                    for (int set = 1; set < vert.UVs.Length; set++) vert.UVs[set] = donorAll[near].UVs[set];
+                    donorAll[near].Color0.CopyTo(vert.Color0, 0);
+                    donorAll[near].Color1.CopyTo(vert.Color1, 0);
+                    if (isSkinned)
                     {
                         donorAll[near].BoneWeights.CopyTo(vert.BoneWeights, 0);
                         donorAll[near].BoneIDs.CopyTo(vert.BoneIDs, 0);
@@ -1066,14 +1079,28 @@ public static class BridgeMeshApplier
             return false;
         }
 
+        // Corner ORDER counts, not just the corner set. Reversing a face is what "Recalculate Outside"
+        // does in Blender, and it changes which way the face is lit and whether the game culls its front —
+        // but comparing sorted triples cannot see it, so a push after a recalculate used to come back
+        // "nothing changed" and the mesh stayed inside-out however many times it was pressed. A flip is a
+        // topology change: the rebuild path writes the index buffer and carries it through.
         var originalFaces = new HashSet<(int, int, int)>(exported.LoopOrigIndex.Length / 3);
+        var originalRings = new HashSet<(int, int, int)>(exported.LoopOrigIndex.Length / 3);
         for (int i = 0; i + 2 < exported.LoopOrigIndex.Length; i += 3)
+        {
             originalFaces.Add(Sort3(exported.LoopOrigIndex[i], exported.LoopOrigIndex[i + 1], exported.LoopOrigIndex[i + 2]));
+            originalRings.Add(Ring3(exported.LoopOrigIndex[i], exported.LoopOrigIndex[i + 1], exported.LoopOrigIndex[i + 2]));
+        }
         for (int i = 0; i + 2 < payload.LoopOrigIndex.Length; i += 3)
         {
             if (!originalFaces.Contains(Sort3(payload.LoopOrigIndex[i], payload.LoopOrigIndex[i + 1], payload.LoopOrigIndex[i + 2])))
             {
                 reason = "topology changed (faces were reshaped)";
+                return false;
+            }
+            if (!originalRings.Contains(Ring3(payload.LoopOrigIndex[i], payload.LoopOrigIndex[i + 1], payload.LoopOrigIndex[i + 2])))
+            {
+                reason = "topology changed (face winding was flipped)";
                 return false;
             }
         }
@@ -1139,6 +1166,16 @@ public static class BridgeMeshApplier
         if (a > b) (a, b) = (b, a);
         return (a, b, c);
     }
+
+    /// <summary>
+    /// A face's corners rotated so the smallest comes first — the same triangle read the same way whichever
+    /// corner Blender starts from, but a REVERSED one lands on a different key. That is the difference
+    /// between "the exporter began at another corner" (fine) and "the face was turned inside out" (not).
+    /// </summary>
+    private static (int, int, int) Ring3(int a, int b, int c) =>
+        a <= b && a <= c ? (a, b, c)
+        : b <= a && b <= c ? (b, c, a)
+        : (c, a, b);
 
     // Records a source vertex's GLOBAL bone ids against the new vertex that inherited from it. Kept beside the
     // vertices rather than on them: the ids the FILE wants are the donor's own pool-local ones, and overwriting
@@ -1263,6 +1300,9 @@ public static class BridgeMeshApplier
         int oldFaces = oldIndices.Length / 3;
         var oldOwner = new (int Split, int Piece)[oldFaces];
         Array.Fill(oldOwner, (-1, -1));
+        // How big each piece was, so a piece that has to be re-filled below is given about as much geometry
+        // as it used to hold rather than every face that would qualify.
+        var wasSized = new Dictionary<(int Split, int Piece), int>();
         for (int s = 0; s < splits.Length; s++)
         {
             FrameObjectModel.BlendMeshSplitInfo[] pieces = splits[s].Data ?? [];
@@ -1273,6 +1313,7 @@ public static class BridgeMeshApplier
                     foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
                     {
                         int from = range.StartIndex / 3;
+                        wasSized[(s, p)] = wasSized.GetValueOrDefault((s, p)) + range.NumFaces;
                         for (int f = from; f < from + range.NumFaces && f < oldFaces; f++)
                             if (oldOwner[f].Split < 0) oldOwner[f] = (s, p);
                     }
@@ -1341,33 +1382,55 @@ public static class BridgeMeshApplier
                     piece = split >= 0 ? NearestPiece(splits[split], model, Centroid(vertices, indices, f)) : 0;
                 }
 
-                // A face whose bones all lack a split still has to land somewhere: the shipped shubert_38
-                // covers every triangle exactly once, and leaving holes in the table is untested territory.
-                // The first split takes them.
-                if (split < 0) (split, piece) = (0, 0);
+                // A face whose bones all lack a split still has to land somewhere — leaving it in no range at
+                // all is a face the game does not draw. Taking the FIRST split is what it used to do, and on
+                // a re-bodied car that put 152 faces of the bonnet and both doors into the rear axle's piece:
+                // split 0 is whatever bone happens to sort first, usually a wheel. The nearest piece by
+                // geometry is the only answer here that keeps the face near the thing it belongs to.
+                if (split < 0) (split, piece) = NearestSplit(splits, model, Centroid(vertices, indices, f));
                 if (piece < 0 || piece >= (splits[split].Data?.Length ?? 0)) piece = 0;
                 owner[f] = (split, piece, slot);
             }
         }
 
+        // A face belongs to one piece by the rule above — and may belong to MORE. That is not a liberty: over
+        // the shipped cars a face's pieces are always a subset of the bones its corners are weighted to
+        // (180402 of 180402 faces, no exceptions), and 27 of 88 cars do put the same face in two pieces at
+        // once. What the shipped data never has is a piece with NO faces: 0 of 87 stock car archives carry
+        // one. A rebuild that leaves pieces empty writes a shape the game never reads, and the car spawns
+        // torn into spikes while the editor — which draws material slots and never looks at this table —
+        // shows it whole. So every piece is given its faces back before the table is written.
+        var membership = new List<(int Split, int Piece)>[faces];
+        for (int f = 0; f < faces; f++) membership[f] = [(owner[f].Split, owner[f].Piece)];
+        RefillEmptyPieces(model, splits, vertices, globalOf, indices, faces, remap, wasSized, membership);
+
         // Runs of consecutive faces sharing a split, a piece and a slot become one burst.
         var runs = new Dictionary<(int Split, int Piece, int Slot), List<(int First, int Count)>>();
-        for (int f = 0; f < faces;)
+        for (int f = 0; f < faces; f++)
         {
-            int end = f;
-            while (end + 1 < faces && owner[end + 1] == owner[f]) end++;
-            if (((long)f * 3) + ((end - f + 1) * 3) > ushort.MaxValue)
+            if (((long)f * 3) + 3 > ushort.MaxValue)
             {
                 reason = "the mesh has more triangles than a face range can address (65535 indices)";
                 return false;
             }
-            if (!runs.TryGetValue(owner[f], out List<(int, int)>? list)) runs[owner[f]] = list = [];
-            list.Add((f, end - f + 1));
-            f = end + 1;
+            foreach ((int Split, int Piece) at in membership[f])
+            {
+                (int Split, int Piece, int Slot) key = (at.Split, at.Piece, owner[f].Slot);
+                if (!runs.TryGetValue(key, out List<(int First, int Count)>? list)) runs[key] = list = [];
+                if (list.Count > 0 && list[^1].First + list[^1].Count == f)
+                {
+                    list[^1] = (list[^1].First, list[^1].Count + 1);
+                }
+                else
+                {
+                    list.Add((f, 1));
+                }
+            }
         }
 
-        // Write them back, piece by piece — a piece with no faces left is emptied rather than left pointing
-        // at triangles that are gone.
+        // Write them back, piece by piece. A piece left with nothing is emptied rather than left pointing at
+        // triangles that are gone — and then dropped outright below, because empty is not a shape the game
+        // reads.
         for (int s = 0; s < splits.Length; s++)
         {
             FrameObjectModel.BlendMeshSplitInfo[] pieces = splits[s].Data ?? [];
@@ -1390,6 +1453,8 @@ public static class BridgeMeshApplier
                 pieces[p].Data = [.. bursts];
             }
         }
+
+        DropEmptyPieces(model);
 
         // The stored size of the block we just rewrote. Everything the file holds after it is found by
         // walking past it, so a size left at the old table's makes the whole model unreadable — the car
@@ -1514,7 +1579,22 @@ public static class BridgeMeshApplier
             // than refusing: the editor reads the pools directly and shows the part in its right place while
             // the game reads through the skeleton's mapping and puts it somewhere else. That was reported
             // twice, and the second time it was this code that caused it.
-            reason = "the pushed mesh weights a material to bones no single remap pool of the model covers. "
+            // A model has dozens of groups and the refusal is about ONE material, so saying only that a pool
+            // cannot cover it leaves the modeller hunting blind. Name the material, its bones, and the pool
+            // each bone does sit in — that is the whole fix: drop the bones that sit apart, or split the
+            // faces onto a material whose bones share a pool.
+            string material = MafiaMaterials.GetMaterialName(newMats[slot].MaterialHash)
+                ?? $"0x{newMats[slot].MaterialHash:X16}";
+            string[] boneNames = BoneNamesOf(model);
+            IEnumerable<string> told = set.Order().Select(b =>
+            {
+                string name = b < boneNames.Length ? boneNames[b] : $"bone{b}";
+                string pools = string.Join("/", Enumerable.Range(0, poolCount)
+                    .Where(p => localOf[p].ContainsKey(b)));
+                return pools.Length == 0 ? $"{name} (in no pool)" : $"{name} (pool {pools})";
+            });
+            reason = $"material '{material}' is weighted to bones that no single remap pool of the model "
+                + "covers: " + string.Join(", ", told) + ". "
                 + "A pool CAN be made longer — no shipped pool exceeds " + MaxBonesPerPool + " and the "
                 + "totals run past a hundred — but the rig stores that same total in its own blend-id count "
                 + "and usage array, and what goes in the new entries has not been measured yet. Growing one "
@@ -1601,6 +1681,225 @@ public static class BridgeMeshApplier
     }
 
     /// <summary>
+    /// Hands every split piece the rebuild left with no faces some geometry back, as an EXTRA membership on
+    /// faces that already belong elsewhere.
+    /// <para>
+    /// What may be added is bounded by what the shipped cars do: a face's pieces are always a subset of the
+    /// bones its corners are weighted to (measured over 25 stock archives — 180402 of 180402 faces, no
+    /// exceptions), so a piece only ever takes faces that carry its own bone. How MUCH it takes is bounded by
+    /// what it used to hold, so a re-filled piece stays about the size of the thing its hit box guards.
+    /// </para>
+    /// </summary>
+    private static void RefillEmptyPieces(
+        FrameObjectModel model, FrameObjectModel.WeightedByMeshSplit[] splits, Vertex[] vertices,
+        byte[] globalOf, uint[] indices, int faces, byte[] remap,
+        Dictionary<(int Split, int Piece), int> wasSized, List<(int Split, int Piece)>[] membership)
+    {
+        var held = new Dictionary<(int Split, int Piece), int>();
+        for (int f = 0; f < faces; f++)
+        {
+            foreach ((int Split, int Piece) at in membership[f]) held[at] = held.GetValueOrDefault(at) + 1;
+        }
+
+        string[] boneNames = BoneNamesOf(model);
+        for (int s = 0; s < splits.Length; s++)
+        {
+            int pieces = splits[s].Data?.Length ?? 0;
+            var empty = new List<int>();
+            for (int p = 0; p < pieces; p++)
+            {
+                if (held.GetValueOrDefault((s, p)) == 0) empty.Add(p);
+            }
+            if (empty.Count == 0) continue;
+
+            int blend = splits[s].BlendIndex;
+            int bone = blend < remap.Length ? remap[blend] : blend;
+            List<(int Face, float Weight)> candidates =
+                FacesWeightedTo(vertices, globalOf, indices, faces, bone);
+
+            // NOT by name. A deform bone with no weights on it used to be handed the geometry of the part
+            // its name says it deforms — deform_doorFL taking the door's faces. Measured in game: those
+            // faces come back as flat bright green, the colour of geometry the renderer has no material
+            // for, and a stock car never does this. Every face in a shipped piece carries that piece's own
+            // bone (180402 of 180402 faces over 25 archives), so a piece nothing is weighted to gets
+            // nothing — it is dropped below instead.
+            if (candidates.Count == 0) continue; // nothing on the rig answers for it — the write drops it
+
+            // Which of those faces belong to THIS piece: the ones inside its own hit box. An empty piece
+            // still carries the box it shipped with (the builder leaves a box alone when its piece has no
+            // geometry to derive one from), and that box is the part it guards. Taking every face of the
+            // bone instead would hand a deform piece the whole panel and double the table's face count.
+            int first = 0;
+            foreach (FrameObjectModel.WeightedByMeshSplit before in splits)
+            {
+                if (ReferenceEquals(before, splits[s])) break;
+                first += before.Data?.Length ?? 0;
+            }
+            FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
+
+            foreach (int p in empty)
+            {
+                // Nearest to this piece's own box first. An empty piece still carries the box it shipped
+                // with — the builder leaves a box alone when its piece has no geometry to derive one from —
+                // and that box is the part the piece guards.
+                int ordinal = first + p;
+                Vector3 centre = ordinal < boxes.Length ? BoxPoint(boxes[ordinal].Position) : Vector3.Zero;
+                List<(int Face, float Distance)> wanted =
+                [
+                    .. candidates.Select(c =>
+                        (c.Face, (Centroid(vertices, indices, c.Face) - centre).Length()))
+                        .OrderBy(x => x.Item2),
+                ];
+
+                // A face is ADDED here, never moved. That distinction is the whole thing: a deform piece in
+                // the shipped data holds faces that also sit in the panel's own piece — 167 of 6484 faces on
+                // a stock kingfisher are in two pieces at once — and a face taken OUT of its panel piece
+                // stops being drawn with it. Moving them is what made the door and the rear pillar render as
+                // flat untextured green in game while the editor, which draws material slots, showed them
+                // fine. So: same face, one more piece.
+                int budget = Math.Max(wasSized.GetValueOrDefault((s, p)), 1);
+                int taken = 0;
+                foreach ((int Face, float _) want in wanted)
+                {
+                    if (taken >= budget) break;
+                    if (membership[want.Face].Contains((s, p))) continue;
+                    membership[want.Face].Add((s, p));
+                    held[(s, p)] = held.GetValueOrDefault((s, p)) + 1;
+                    taken++;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The (split, piece) whose hit box sits closest to <paramref name="at"/>. The fallback for a face no
+    /// bone speaks for: geometry is the only thing left to go on, and it beats taking whichever split the
+    /// table happens to list first.
+    /// </summary>
+    private static (int Split, int Piece) NearestSplit(
+        FrameObjectModel.WeightedByMeshSplit[] splits, FrameObjectModel model, Vector3 at)
+    {
+        FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
+        (int Split, int Piece) best = (0, 0);
+        float bestDistance = float.MaxValue;
+        int ordinal = 0;
+        for (int s = 0; s < splits.Length; s++)
+        {
+            int pieces = splits[s].Data?.Length ?? 0;
+            for (int p = 0; p < pieces; p++, ordinal++)
+            {
+                if (ordinal >= boxes.Length) return best;
+                float distance = (BoxPoint(boxes[ordinal].Position) - at).LengthSquared();
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                best = (s, p);
+            }
+        }
+        return best;
+    }
+
+    /// <summary>A hit box's centre or half-extent in metres — int16 units of 10/32768 m, signed.</summary>
+    private static Vector3 BoxPoint(Short3 raw) => new(
+        (raw.S1 >= 32768 ? raw.S1 - 65536 : raw.S1) * (10f / 32768f),
+        (raw.S2 >= 32768 ? raw.S2 - 65536 : raw.S2) * (10f / 32768f),
+        (raw.S3 >= 32768 ? raw.S3 - 65536 : raw.S3) * (10f / 32768f));
+
+    /// <summary>Faces carrying any weight on <paramref name="bone"/>, paired with how much they carry.</summary>
+    private static List<(int Face, float Weight)> FacesWeightedTo(
+        Vertex[] vertices, byte[] globalOf, uint[] indices, int faces, int bone)
+    {
+        var found = new List<(int Face, float Weight)>();
+        for (int f = 0; f < faces; f++)
+        {
+            float total = 0f;
+            for (int corner = 0; corner < 3; corner++)
+            {
+                int at = (f * 3) + corner;
+                if (at >= indices.Length) continue;
+                int vertex = (int)indices[at];
+                if (vertex < 0 || vertex >= vertices.Length) continue;
+                for (int k = 0; k < 4; k++)
+                {
+                    if (vertices[vertex].BoneWeights[k] > 0f && globalOf[(vertex * 4) + k] == bone)
+                    {
+                        total += vertices[vertex].BoneWeights[k];
+                    }
+                }
+            }
+            if (total > 0f) found.Add((f, total));
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// Drops SURPLUS empty split pieces — the ones a split can spare — and their hit boxes with them; the
+    /// boxes are one per piece in flat split-then-piece order, so the two arrays are cut together.
+    /// <para>
+    /// A split itself is never dropped, and neither is its last piece. Dropping them is irreversible in a way
+    /// nothing else here is: the split is a bone's SEAT in the table, and a bone that loses it has nowhere to
+    /// put geometry the modeller weights to it later — those faces then fall through to the fallback and end
+    /// up in some other bone's piece. Measured on a re-bodied kingfisher: 66 of 187 pieces gone over a few
+    /// pushes, and 152 faces of the bonnet and both doors sitting in the rear axle. An empty piece is not a
+    /// shape the shipped cars have either (0 of 87), but it is recoverable — a lost seat is not.
+    /// </para>
+    /// </summary>
+    private static void DropEmptyPieces(FrameObjectModel model)
+    {
+        FrameObjectModel.WeightedByMeshSplit[] splits = model.BlendMeshSplits ?? [];
+        FrameObjectModel.HitBoxInfo[] boxes = model.HitBoxes ?? [];
+        if (splits.Length == 0) return;
+
+        var keptSplits = new List<FrameObjectModel.WeightedByMeshSplit>(splits.Length);
+        var keptBoxes = new List<FrameObjectModel.HitBoxInfo>(boxes.Length);
+        int ordinal = 0;
+        bool changed = false;
+        foreach (FrameObjectModel.WeightedByMeshSplit split in splits)
+        {
+            FrameObjectModel.BlendMeshSplitInfo[] pieces = split.Data ?? [];
+            var keptPieces = new List<FrameObjectModel.BlendMeshSplitInfo>(pieces.Length);
+            var keptHere = new List<FrameObjectModel.HitBoxInfo>(pieces.Length);
+            (FrameObjectModel.BlendMeshSplitInfo Piece, FrameObjectModel.HitBoxInfo? Box)? spare = null;
+            foreach (FrameObjectModel.BlendMeshSplitInfo piece in pieces)
+            {
+                int here = ordinal++;
+                FrameObjectModel.HitBoxInfo? box = here < boxes.Length ? boxes[here] : null;
+                bool any = false;
+                foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        if (range.NumFaces > 0) any = true;
+                    }
+                }
+                if (!any)
+                {
+                    changed = true;
+                    spare ??= (piece, box); // the seat this split keeps if nothing else is left
+                    continue;
+                }
+                keptPieces.Add(piece);
+                if (box != null) keptHere.Add(box);
+            }
+
+            // A split with nothing left keeps ONE empty piece rather than disappearing: the bone must keep
+            // its seat in the table for whatever gets weighted to it next.
+            if (keptPieces.Count == 0 && spare != null)
+            {
+                keptPieces.Add(spare.Value.Piece);
+                if (spare.Value.Box != null) keptHere.Add(spare.Value.Box);
+            }
+            if (keptPieces.Count == 0) continue; // a split that shipped with no pieces at all
+
+            split.Data = [.. keptPieces];
+            keptSplits.Add(split);
+            keptBoxes.AddRange(keptHere);
+        }
+        if (!changed) return;
+        model.BlendMeshSplits = [.. keptSplits];
+        model.HitBoxes = [.. keptBoxes];
+    }
+
+    /// <summary>
     /// The most bones one remap pool may name. Measured over 88 shipped cars (`--probe-bullets`): no single
     /// pool anywhere exceeds 60, while the per-model TOTAL runs to 108 — so the ceiling is on the pool and
     /// not on the sum, and a pool with room may be grown. A vertex addresses its pool with a byte, so the
@@ -1613,6 +1912,13 @@ public static class BridgeMeshApplier
     {
         try { return model.GetSkeletonObject().BoneNames?.Length ?? 0; }
         catch (Exception) { return 0; }
+    }
+
+    /// <summary>The rig's bone names for diagnostics, or an empty list when the skeleton cannot be read.</summary>
+    private static string[] BoneNamesOf(FrameObjectModel model)
+    {
+        try { return [.. (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "")]; }
+        catch (Exception) { return []; }
     }
 
     /// <summary>

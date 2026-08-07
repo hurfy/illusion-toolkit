@@ -22,6 +22,19 @@ namespace Illusion.Diagnostics.Probes;
 /// server, and (optionally) the locally installed Blender.</summary>
 internal static class BridgeProbes
 {
+    /// <summary>
+    /// The archive a probe's focus argument names: a district by default, or a car when the name is one.
+    /// A car is the case these probes could not reach before, and the only one carrying a skinned model
+    /// with a split table — which is what the topology rebuild has to keep in step.
+    /// </summary>
+    private static string ArchiveOf(string name)
+    {
+        string district = Path.Combine(Assets.MafiaEnvironment.CityFolder, name + ".sds");
+        if (File.Exists(district)) return district;
+        string car = Path.Combine(Assets.MafiaEnvironment.PcFolder, "sds", "cars", name + ".sds");
+        return File.Exists(car) ? car : district;
+    }
+
     // Container write→read fidelity + tolerance rules (unknown kinds survive, newer major rejected)
     // + the atomic-rename contract. No game data, no GPU. Output: %TEMP%\illusion_bridge_payload.txt
     internal static void RunPayloadProbe()
@@ -114,7 +127,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            string sds = Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds");
+            string sds = ArchiveOf(district);
             if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
 
             string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
@@ -286,7 +299,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            string sds = Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds");
+            string sds = ArchiveOf(district);
             if (!File.Exists(sds)) { sb.AppendLine("no such district: " + sds); return; }
             string extracted = SdsMeshLoader.EnsureExtracted(new FileInfo(sds));
             string? colPath = Directory.GetFiles(extracted, "*.col", SearchOption.AllDirectories).FirstOrDefault();
@@ -516,7 +529,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
 
             (List<SdsFrameNode> roots, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(sds);
@@ -741,7 +754,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
 
             (List<SdsFrameNode> roots, _, _) = SdsMeshLoader.LoadHierarchy(sds);
@@ -835,7 +848,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
 
             (List<SdsFrameNode> roots, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(sds);
@@ -976,7 +989,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
             string extracted = SdsMeshLoader.EnsureExtracted(sds);
 
@@ -1117,7 +1130,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
 
             (List<SdsFrameNode> roots, _, ISceneDocument? document) = SdsMeshLoader.LoadHierarchy(sds);
@@ -1264,7 +1277,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
             string extracted = SdsMeshLoader.EnsureExtracted(sds);
 
@@ -1474,7 +1487,7 @@ internal static class BridgeProbes
         try
         {
             if (!ProbeAssert.InitEnv(out string? err)) { sb.AppendLine("INIT FAIL: " + err); return; }
-            var sds = new FileInfo(Path.Combine(Assets.MafiaEnvironment.CityFolder, district + ".sds"));
+            var sds = new FileInfo(ArchiveOf(district));
             if (!sds.Exists) { sb.AppendLine("no such district: " + sds.FullName); return; }
             string extracted = SdsMeshLoader.EnsureExtracted(sds);
 

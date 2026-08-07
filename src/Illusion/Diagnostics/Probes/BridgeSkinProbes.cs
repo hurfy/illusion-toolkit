@@ -519,7 +519,11 @@ internal static class BridgeSkinProbes
                 }
                 Check("no face range names a face the mesh no longer has", past == 0,
                     $"{past} of {bursts} bursts past {triangles} triangles");
-                Check("the ranges account for the whole mesh", covered == triangles,
+                // Not equality: the shipped tables put some faces in two pieces at once (167 of 6484 on a
+                // stock kingfisher, 27 of 88 cars have some), so the ranges cover a little MORE than the
+                // mesh. What must not happen is coverage falling short — a face in no range is a face the
+                // game does not draw.
+                Check("the ranges account for the whole mesh", covered >= triangles,
                     $"{covered} faces covered of {triangles}");
                 // The counter that decides whether the model can be read back at all.
                 Check("the stored split-block size matches the table that was written",
@@ -603,7 +607,7 @@ internal static class BridgeSkinProbes
                         }
                     }
                     Check("the grown mesh's face ranges stay inside it", past == 0, $"{past} past {triangles}");
-                    Check("the ranges account for the grown mesh", covered == triangles,
+                    Check("the ranges account for the grown mesh", covered >= triangles,
                         $"{covered} of {triangles}");
                     Check("the split-block size follows the grown table",
                         model3.ComputeSplitBlockSize() == model3.SplitBlockSizeStored,
@@ -694,6 +698,9 @@ internal static class BridgeSkinProbes
                 BridgeMeshApplier.ApplyResult? grew =
                     BridgeMeshApplier.TryApply(model, welded, out string? grewWhy);
                 FrameObjectModel fresh = model2;
+                (int wasEmpty, int wasUnclaimed, int wasForeign) = SplitTableShape(fresh);
+                sb.AppendLine($"    (split table as shipped: {wasEmpty} empty, {wasUnclaimed} unclaimed, "
+                    + $"{wasForeign} foreign faces)");
                 Check("a triangle can be welded onto a skinned body", grew != null, grewWhy ?? "");
                 if (grew != null)
                 {
@@ -718,9 +725,35 @@ internal static class BridgeSkinProbes
                         $"the piece speaks for bone {splitBone}, the face is weighted to {faceBone}");
 
                     // The point of all of it: after the push, every piece still holds its own geometry.
+                    // Every UV SET the model carries, not just the one Blender sends back. A stock car has
+                    // all three on every LOD 0 vertex (0 of 6882 zeroed); an imported body came home with
+                    // UV1 and UV2 at (0,0) on all 7323 of its vertices and rendered as flat bright green in
+                    // game, because the body shader samples them. A vertex Blender invented inherits them
+                    // from its nearest neighbour, exactly like its skin and its damage group.
+                    (int zeroedSets, int carriedSets) = EmptyUvSets(fresh);
+                    Check("welded vertices keep the UV sets past the first",
+                        zeroedSets == 0, $"{zeroedSets} vertices lost one of the {carriedSets} sets");
+
                     int outside = PiecesEscaping(fresh);
                     Check("every piece's hit box still contains its own geometry after the weld",
                         outside == 0, $"{outside} pieces have geometry outside their own box");
+
+                    // The SHAPE of the table, which is what the game walks and the editor never reads.
+                    // Measured over the shipped archives: not one of 87 cars carries a piece with no faces,
+                    // every triangle is claimed, and a piece's faces always carry that piece's bone (180402
+                    // of 180402 faces over 25 archives). A rebuild that leaves a piece empty writes a table
+                    // the game has never seen — and the car spawns torn into spikes while the editor shows
+                    // it whole, which is exactly how this arrived: reported from the game, invisible here.
+                    (int empty, int unclaimed, int foreign) = SplitTableShape(fresh);
+                    sb.AppendLine($"    (split table after the push: {empty} empty, {unclaimed} unclaimed, "
+                        + $"{foreign} foreign faces)");
+                    Check("no split piece is left without faces", empty == 0, $"{empty} empty pieces");
+                    Check("every triangle is claimed by a piece", unclaimed == 0, $"{unclaimed} unclaimed");
+
+                    // Not zero: a shipped car already puts faces in a piece whose bone they do not carry
+                    // (284 of them on shubert_38), so the bar is that a push must not make it worse.
+                    Check("a push does not add faces to pieces whose bone they do not carry",
+                        foreign <= wasForeign, $"{wasForeign} as shipped, {foreign} after the push");
                 }
             }
 
@@ -853,7 +886,8 @@ internal static class BridgeSkinProbes
             }
             int covered = (same.BlendMeshSplits ?? []).Sum(s => (s.Data ?? [])
                 .Sum(p => (p.Data ?? []).Sum(b => (b.Data ?? []).Sum(r => (int)r.NumFaces))));
-            if (covered != faces)
+            // More than the mesh is fine — the shipped tables put some faces in two pieces. Less is not.
+            if (covered < faces)
             {
                 why = $"face ranges came back covering {covered} of {faces} triangles";
                 return false;
@@ -1112,6 +1146,140 @@ internal static class BridgeSkinProbes
     }
 
     /// <summary>How many pieces hold geometry outside their own box — the invariant the rebuild exists for.</summary>
+    /// <summary>
+    /// The three things the shipped split tables always satisfy: no piece without faces, no triangle
+    /// without a piece, and no piece holding a face that carries none of its bone. The last one allows the
+    /// bone a deform bone deforms — <c>deform_doorFL</c> holding the door's faces — because a deform bone
+    /// carries no weight of its own once a modeller leaves it out of the vertex groups.
+    /// </summary>
+    private static (int Empty, int Unclaimed, int Foreign) SplitTableShape(FrameObjectModel model)
+    {
+        DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
+        if (mesh?.Indices is not { Length: > 0 } indices) return (0, 0, 0);
+
+        FrameBlendInfo.BoneIndexInfo[] lods;
+        Formats.Frames.Resources.MaterialStruct[] mats;
+        string[] names;
+        try
+        {
+            lods = model.GetBlendInfoObject().BoneIndexInfos ?? [];
+            mats = model.Material!.Materials![0].ToArray();
+            names = [.. (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "")];
+        }
+        catch (Exception) { return (0, 0, 0); }
+        if (lods.Length == 0) return (0, 0, 0);
+
+        byte[] sizes = lods[0].BonesPerRemapPool ?? [];
+        byte[] remap = lods[0].BoneRemapIDs ?? [];
+        FrameBlendInfo.SkinnedMaterialInfo[] groups = lods[0].SkinnedMaterialInfo ?? [];
+        var poolStart = new int[sizes.Length];
+        int at = 0;
+        for (int p = 0; p < sizes.Length; p++) { poolStart[p] = at; at += sizes[p]; }
+
+        Vertex[] verts = VertexTranslator.DecompressBuffer(
+            mesh.RawVertexData, mesh.NumVerts, mesh.Declaration,
+            mesh.DecompressionOffset, mesh.DecompressionFactor);
+
+        int triCount = indices.Length / 3;
+        var slotOf = new int[triCount];
+        Array.Fill(slotOf, -1);
+        for (int m = 0; m < mats.Length; m++)
+        {
+            int from = mats[m].StartIndex / 3;
+            for (int f = from; f < from + mats[m].NumFaces && f < triCount; f++) slotOf[f] = m;
+        }
+
+        // The bones a face carries, read the way the game does: through the pool its material draws from.
+        HashSet<int> BonesOf(int face)
+        {
+            var set = new HashSet<int>();
+            if (face < 0 || face >= triCount || slotOf[face] < 0) return set;
+            int pool = groups[slotOf[face]].AssignedPoolIndex;
+            if (pool >= sizes.Length) return set;
+            for (int corner = 0; corner < 3; corner++)
+            {
+                int v = (int)indices[(face * 3) + corner];
+                if (v < 0 || v >= verts.Length) continue;
+                for (int k = 0; k < 4; k++)
+                {
+                    if (verts[v].BoneWeights[k] <= 0f) continue;
+                    byte local = verts[v].BoneIDs[k];
+                    if (local < sizes[pool]) set.Add(remap[poolStart[pool] + local]);
+                }
+            }
+            return set;
+        }
+
+        var claimed = new bool[triCount];
+        int empty = 0, foreign = 0;
+        foreach (FrameObjectModel.WeightedByMeshSplit split in model.BlendMeshSplits ?? [])
+        {
+            int blend = split.BlendIndex;
+            int bone = blend < remap.Length ? remap[blend] : blend;
+            string name = bone >= 0 && bone < names.Length ? names[bone] : "";
+            string bare = name.StartsWith("deform_", StringComparison.OrdinalIgnoreCase)
+                ? name["deform_".Length..]
+                : name.EndsWith("_deform", StringComparison.OrdinalIgnoreCase)
+                    ? name[..^"_deform".Length]
+                    : "";
+            int deformed = bare.Length == 0
+                ? -1
+                : Array.FindIndex(names, n => string.Equals(n, bare, StringComparison.OrdinalIgnoreCase));
+
+            foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+            {
+                int held = 0;
+                foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        for (int f = 0; f < range.NumFaces; f++)
+                        {
+                            int tri = (range.StartIndex / 3) + f;
+                            if (tri < 0 || tri >= triCount) continue;
+                            held++;
+                            claimed[tri] = true;
+                            HashSet<int> carries = BonesOf(tri);
+                            if (carries.Count > 0 && !carries.Contains(bone)
+                                && (deformed < 0 || !carries.Contains(deformed)))
+                            {
+                                foreign++;
+                            }
+                        }
+                    }
+                }
+                if (held == 0) empty++;
+            }
+        }
+        return (empty, claimed.Count(c => !c), foreign);
+    }
+
+    /// <summary>
+    /// How many vertices have a UV set at (0,0) that the model otherwise carries everywhere. Returns
+    /// (vertices missing a set, number of sets the declaration carries past the first).
+    /// </summary>
+    private static (int Zeroed, int Sets) EmptyUvSets(FrameObjectModel model)
+    {
+        DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
+        if (mesh == null) return (0, 0);
+        Vertex[] verts = VertexTranslator.DecompressBuffer(
+            mesh.RawVertexData, mesh.NumVerts, mesh.Declaration,
+            mesh.DecompressionOffset, mesh.DecompressionFactor);
+
+        VertexFlags[] flags = [VertexFlags.TexCoords1, VertexFlags.TexCoords2];
+        int sets = 0, zeroed = 0;
+        for (int set = 0; set < flags.Length; set++)
+        {
+            if (!mesh.Declaration.HasFlag(flags[set])) continue;
+            sets++;
+            // A set the SHIPPED data leaves empty everywhere is not one this can judge.
+            int empty = verts.Count(v => (float)v.UVs[set + 1].X == 0f && (float)v.UVs[set + 1].Y == 0f);
+            if (empty == verts.Length) continue;
+            zeroed += empty;
+        }
+        return (zeroed, sets);
+    }
+
     private static int PiecesEscaping(FrameObjectModel model)
     {
         DecodedMesh? mesh = SdsMeshLoader.DecodeLod(model, 0);
