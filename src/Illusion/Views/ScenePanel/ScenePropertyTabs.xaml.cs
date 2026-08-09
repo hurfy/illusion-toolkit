@@ -30,6 +30,7 @@ public partial class ScenePropertyTabs : UserControl
         PropertyTabs.DataContext = selection;
         Render.Attach(viewport);
         Materials.OpenRequested += vm => MaterialEditorRequested?.Invoke(vm);
+        Effects.AddCopyRequested += selection.AddEffectCopy;
     }
 
     /// <summary>

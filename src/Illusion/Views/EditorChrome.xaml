@@ -550,6 +550,7 @@
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Cell" Property="Background" Value="{StaticResource FillActive}" />
+
                                 <Setter TargetName="Glyph" Property="Opacity" Value="1" />
                                 <Setter TargetName="AccentBar" Property="Opacity" Value="1" />
                             </Trigger>

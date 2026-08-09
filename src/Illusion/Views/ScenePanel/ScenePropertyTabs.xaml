@@ -42,7 +42,7 @@
                  ToolTip="Effects — the effects this archive carries of its own"
                  Style="{StaticResource VerticalTab}"
                  Visibility="{Binding HasEffects, Converter={StaticResource BoolToVis}}">
-            <v:EffectsTabView />
+            <v:EffectsTabView x:Name="Effects" />
         </TabItem>
 
         <TabItem x:Name="ObjectTab" Header="Object" Tag="&#xE759;" ToolTip="Object"

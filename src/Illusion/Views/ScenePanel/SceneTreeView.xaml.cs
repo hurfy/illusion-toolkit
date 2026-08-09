@@ -26,7 +26,10 @@ namespace Illusion.Views;
 public partial class SceneTreeView : UserControl
 {
     private D3DImageHost _viewport = null!;
-    private ICollectionView _groupsView = null!;
+
+    // Null until Attach: the tree is a control of its own now, so Refresh / ApplySearch can be reached
+    // before the panel has handed it a viewport, and a filter that does not exist yet is not an error.
+    private ICollectionView? _groupsView;
 
     // What the tree is bound to — the roots themselves, or the flattened stage view. Kept so the empty state
     // can ask whether there is anything to show without caring which of the two it is.
@@ -76,7 +79,7 @@ public partial class SceneTreeView : UserControl
     /// there is anything left to list.</summary>
     public void Refresh()
     {
-        _groupsView.Refresh();
+        _groupsView?.Refresh();
         UpdateEmptyState();
     }
 
