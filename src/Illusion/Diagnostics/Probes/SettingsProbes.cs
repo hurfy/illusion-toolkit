@@ -365,8 +365,8 @@ internal static class SettingsProbes
         check("the editor starts on the shipped keys",
             main.Viewport.CameraKeys.Forward == Key.W
             && main.SaveMenuItem.InputGestureText == "Ctrl+S"
-            && main.Scene.TreeDeleteItem.InputGestureText == "Del",
-            $"save=\"{main.SaveMenuItem.InputGestureText}\", del=\"{main.Scene.TreeDeleteItem.InputGestureText}\"");
+            && main.Scene.Tree.TreeDeleteItem.InputGestureText == "Del",
+            $"save=\"{main.SaveMenuItem.InputGestureText}\", del=\"{main.Scene.Tree.TreeDeleteItem.InputGestureText}\"");
         check("the settings entry advertises its own key",
             main.SettingsMenuItem.InputGestureText == "Ctrl+,",
             main.SettingsMenuItem.InputGestureText);

@@ -1,0 +1,103 @@
+<UserControl x:Class="Illusion.Views.ObjectTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
+
+    <!-- Object tab (transformable frame object): local Position / Rotation / Scale, the properties every
+         frame object carries, and the parent it hangs off. -->
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10,10,10,4">
+            <!-- Header: name + type on the left, the mesh's triangle count on the right. -->
+            <Border Style="{StaticResource PropCard}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                        <TextBlock Text="{Binding ObjectType}" Style="{StaticResource PropSubtitle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <TextBlock Text="{Binding TriangleCountText}" Foreground="White"
+                                   FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                        <TextBlock Text="triangles" Foreground="{StaticResource TextDim}" FontSize="10"
+                                   HorizontalAlignment="Right" Margin="0,1,0,0" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <TextBlock Text="TRANSFORM" Style="{StaticResource PropCaption}" />
+                    <v:Vector3Box Label="Position" Decimals="3" Margin="0,0,0,7"
+                                  X="{Binding PosX}" Y="{Binding PosY}" Z="{Binding PosZ}" />
+                    <v:Vector3Box Label="Rotation" Decimals="2" Margin="0,0,0,7"
+                                  X="{Binding RotX}" Y="{Binding RotY}" Z="{Binding RotZ}" />
+                    <v:Vector3Box Label="Scale" Decimals="3"
+                                  X="{Binding ScaleX}" Y="{Binding ScaleY}" Z="{Binding ScaleZ}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Common properties (identity / frame table) — every frame object has these. -->
+            <v:PropertyList Groups="{Binding CommonGroups}" />
+
+            <!-- Hierarchy: reparent the object (another object, a scene folder, or the root).
+                 Its own subtree is excluded so a cycle can't be chosen. -->
+            <Border Style="{StaticResource PropCard}"
+                    Visibility="{Binding CanReparent, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="HIERARCHY" Style="{StaticResource PropCaption}" />
+                    <TextBlock Text="Parent — pick a new one to reparent" Style="{StaticResource MetaLabel}"
+                               Margin="0,0,0,4" TextWrapping="Wrap" />
+                    <!-- Search box (magnifier + placeholder) filters the candidate list. -->
+                    <Grid Margin="0,0,0,4">
+                        <TextBox Style="{StaticResource InputField}" Padding="24,3,6,3"
+                                 Text="{Binding ParentSearchText, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
+                                   Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
+                                   HorizontalAlignment="Left" VerticalAlignment="Center" IsHitTestVisible="False" />
+                    </Grid>
+                    <!-- IsSynchronizedWithCurrentItem=False is load-bearing: bound to a
+                         CollectionView a ListBox otherwise tracks the view's CURRENT item, so
+                         swapping ItemsSource on every selection change pushes item 0 — "(root)" —
+                         back through this TwoWay binding, and the view-model cannot tell that
+                         from a click. That silently reparented whatever object you selected. -->
+                    <ListBox ItemsSource="{Binding ParentCandidatesView}"
+                             SelectedItem="{Binding SelectedParent, Mode=TwoWay}"
+                             IsSynchronizedWithCurrentItem="False"
+                             MaxHeight="220" Background="{StaticResource SurfaceSunken}" BorderBrush="{StaticResource EdgeInput}" BorderThickness="1"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Foreground" Value="{StaticResource TextStrong}" />
+                                <Setter Property="Padding" Value="6,3" />
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Bd" Background="Transparent" CornerRadius="3"
+                                                    Padding="{TemplateBinding Padding}">
+                                                <TextBlock Text="{Binding Display}" FontSize="11.5"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource FillHover}" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionFill}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

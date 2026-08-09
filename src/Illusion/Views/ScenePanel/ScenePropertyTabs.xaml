@@ -1,0 +1,89 @@
+<UserControl x:Class="Illusion.Views.ScenePropertyTabs"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
+
+    <!-- The settings section of the scene panel (Blender-style): a vertical tab strip whose every tab lives
+         in a file of its own under Tabs\. What is left here is only the RAIL — which tabs there are, in what
+         order, under which icon, and when each one applies. "Render" is always present; the rest appear
+         based on the selected node's type or on what the staged archive carries. -->
+
+    <TabControl x:Name="PropertyTabs" TabStripPlacement="Left"
+                Language="en-US"
+                Style="{StaticResource VerticalTabControl}">
+        <!-- Tag = Segoe MDL2 "Picture" glyph (render output); icon-only cell, Header kept for tooltip/a11y.
+             Always visible — the fallback tab when the selection has no type-specific tab. -->
+        <TabItem x:Name="RenderTab" Header="Render" Tag="&#xE7C5;" ToolTip="Render"
+                 Style="{StaticResource VerticalTab}">
+            <v:RenderTabView x:Name="Render" />
+        </TabItem>
+
+        <TabItem x:Name="TuningTab" Header="Tuning"
+                 ToolTip="Tuning — the entity data this archive carries (for a car, how it drives)"
+                 v:TabIcon.Icon="{x:Static v:TuningTabIcon.Geometry}"
+                 Foreground="{x:Static v:TuningTabIcon.Tint}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding HasTuning, Converter={StaticResource BoolToVis}}">
+            <v:TuningTabView />
+        </TabItem>
+
+        <!-- The browser's own Prefab icon and its own colour, not a Segoe glyph: the tile in the content
+             browser and this tab stand for the very same resource, and two pictures of one thing is what
+             makes a panel confusing. -->
+        <TabItem x:Name="PrefabTab" Header="Prefab" ToolTip="Prefab — how this archive is assembled"
+                 v:TabIcon.Icon="{x:Static v:PrefabTabIcon.Geometry}"
+                 Foreground="{x:Static v:PrefabTabIcon.Tint}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding HasPrefab, Converter={StaticResource BoolToVis}}">
+            <v:PrefabTabView />
+        </TabItem>
+
+        <TabItem x:Name="EffectsTab" Header="Effects" Tag="&#xE945;"
+                 ToolTip="Effects — the effects this archive carries of its own"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding HasEffects, Converter={StaticResource BoolToVis}}">
+            <v:EffectsTabView />
+        </TabItem>
+
+        <TabItem x:Name="ObjectTab" Header="Object" Tag="&#xE759;" ToolTip="Object"
+                 Foreground="{x:Static v:PaletteInk.Orange}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding HasTransform, Converter={StaticResource BoolToVis}}">
+            <v:ObjectTabView />
+        </TabItem>
+
+        <TabItem x:Name="TypeTab" Header="{Binding TypeTabTitle}" Tag="&#xE946;"
+                 ToolTip="{Binding TypeTabTitle}" Foreground="{x:Static v:PaletteInk.Azure}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding HasTypeProperties, Converter={StaticResource BoolToVis}}">
+            <v:TypeTabView />
+        </TabItem>
+
+        <TabItem x:Name="MaterialsTab" Header="Materials" Tag="&#xE790;" ToolTip="Materials"
+                 Foreground="{x:Static v:PaletteInk.Scarlet}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding HasMaterials, Converter={StaticResource BoolToVis}}">
+            <v:MaterialsTabView x:Name="Materials" />
+        </TabItem>
+
+        <TabItem x:Name="SdsTab" Header="SDS" Tag="&#xE8A5;" ToolTip="SDS"
+                 Foreground="{x:Static v:PaletteInk.Azure}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding IsSds, Converter={StaticResource BoolToVis}}">
+            <v:SdsTabView />
+        </TabItem>
+
+        <TabItem x:Name="FrameResourceTab" Header="FrameResource" Tag="&#xE8F1;" ToolTip="FrameResource"
+                 Foreground="{x:Static v:PaletteInk.Azure}"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding IsFrameResource, Converter={StaticResource BoolToVis}}">
+            <v:FrameResourceTabView />
+        </TabItem>
+
+        <TabItem x:Name="SceneTab" Header="Scene" Tag="&#xE8B7;" ToolTip="Scene folder"
+                 Style="{StaticResource VerticalTab}"
+                 Visibility="{Binding IsScene, Converter={StaticResource BoolToVis}}">
+            <v:SceneFolderTabView />
+        </TabItem>
+    </TabControl>
+</UserControl>

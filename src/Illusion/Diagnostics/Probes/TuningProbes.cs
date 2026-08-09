@@ -394,7 +394,7 @@ internal static class TuningProbes
             // Opened on the body: eight rows, one of them a vector — enough to see that a row, a number box
             // and a three-field position all reach the same right edge, which a closed band cannot show.
             vm.SelectedTuningTable!.Bands.First(b => b.Title == "Body").IsExpanded = true;
-            panel.PropertyTabs.SelectedItem = panel.PropertyTabs.Items
+            panel.Tabs.PropertyTabs.SelectedItem = panel.Tabs.PropertyTabs.Items
                 .OfType<System.Windows.Controls.TabItem>()
                 .First(t => (t.Header as string) == "Tuning");
 
@@ -460,7 +460,7 @@ internal static class TuningProbes
             window.UpdateLayout();
         }
 
-        System.Windows.Controls.TabItem? tab = panel.PropertyTabs.Items
+        System.Windows.Controls.TabItem? tab = panel.Tabs.PropertyTabs.Items
             .OfType<System.Windows.Controls.TabItem>()
             .FirstOrDefault(t => (t.Header as string) == header);
         if (tab == null) return null;
@@ -487,7 +487,7 @@ internal static class TuningProbes
     private static void CheckTab(Action<string, bool, string> check)
     {
         var panel = new Views.ScenePanel();
-        System.Windows.Controls.TabItem? tab = panel.PropertyTabs.Items
+        System.Windows.Controls.TabItem? tab = panel.Tabs.PropertyTabs.Items
             .OfType<System.Windows.Controls.TabItem>()
             .FirstOrDefault(t => (t.Header as string) == "Tuning");
         check("the Tuning tab is in the property rail", tab != null, "");
@@ -513,14 +513,14 @@ internal static class TuningProbes
 
         // Both stand under Render rather than appearing with a selection: they describe the whole archive,
         // not whatever happens to be clicked.
-        var top = panel.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
+        var top = panel.Tabs.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
             .Take(3).Select(t => t.Header as string).ToList();
         check("Render, Tuning and Prefab are the standing tabs, in that order",
             top is ["Render", "Tuning", "Prefab"], string.Join(" ", top));
 
         // The tab's own place on the rail. Tuning is what a car IS asked about first — how it drives — so it
         // sits above the assembly tab rather than below it.
-        var headers = panel.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
+        var headers = panel.Tabs.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
             .Select(t => t.Header as string).ToList();
         check("Tuning comes before Prefab on the rail",
             headers.IndexOf("Tuning") >= 0 && headers.IndexOf("Tuning") < headers.IndexOf("Prefab"),

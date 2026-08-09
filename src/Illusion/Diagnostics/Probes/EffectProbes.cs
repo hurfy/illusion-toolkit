@@ -481,7 +481,7 @@ internal static class EffectProbes
         sb.AppendLine("\n════ the Effects tab ════");
 
         var panel = new Views.ScenePanel();
-        System.Windows.Controls.TabItem? tab = panel.PropertyTabs.Items
+        System.Windows.Controls.TabItem? tab = panel.Tabs.PropertyTabs.Items
             .OfType<System.Windows.Controls.TabItem>()
             .FirstOrDefault(t => (t.Header as string) == "Effects");
         check("the panel carries an Effects tab", tab != null, tab == null ? "no tab named Effects" : "");

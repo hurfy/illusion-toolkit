@@ -1,0 +1,20 @@
+<UserControl x:Class="Illusion.Views.MaterialsTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
+
+    <!-- Materials tab (mesh): the object's materials as a 2×N grid of sphere-thumbnail tiles; clicking a
+         tile asks the host to open the material editor on that material/slot. -->
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10,10,10,4">
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                    <TextBlock Text="Materials" Style="{StaticResource PropSubtitle}" />
+                </StackPanel>
+            </Border>
+            <v:MaterialsView x:Name="MaterialsPanel" Materials="{Binding Materials}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

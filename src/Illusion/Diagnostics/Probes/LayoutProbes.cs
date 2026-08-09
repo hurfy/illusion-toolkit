@@ -122,7 +122,7 @@ internal static class LayoutProbes
                 // measured on the shelf's host grid, not on the render surface — that one is an Image whose
                 // rendered size is zero until a D3D source exists, which never happens in a headless pass.
                 var viewportArea = (FrameworkElement)window.ToolShelf.Parent;
-                double panel = window.Scene.PropertyTabs.ActualWidth;
+                double panel = window.Scene.Tabs.PropertyTabs.ActualWidth;
                 Check($"{screen}: scene panel leaves the viewport its share", panel <= width * 0.4,
                     $"panel={panel:F0} of {width:F0} ({panel / width:P0})");
                 Check($"{screen}: tool shelf fits the viewport height",
@@ -238,13 +238,14 @@ internal static class LayoutProbes
 
         // The city-only scene filters are gone: a resource has no neighbouring districts and no winter twin.
         // IsVisible is false in a window that was never shown — the flag to read here is the one the code sets.
+        var filters = window.Scene.Tabs.RenderFilters;
         check("resource editor: the city-only render filters are hidden, the actor one is not",
-            window.Scene.ProxyScenesRow.Visibility == Visibility.Collapsed
-            && window.Scene.ProxyMeshesRow.Visibility == Visibility.Collapsed
-            && window.Scene.SnowScenesRow.Visibility == Visibility.Collapsed
-            && window.Scene.ActorsToggle.Visibility == Visibility.Visible,
-            $"proxy={window.Scene.ProxyScenesRow.Visibility}, snow={window.Scene.SnowScenesRow.Visibility}, " +
-            $"actors={window.Scene.ActorsToggle.Visibility}");
+            filters.ProxyScenesRow.Visibility == Visibility.Collapsed
+            && filters.ProxyMeshesRow.Visibility == Visibility.Collapsed
+            && filters.SnowScenesRow.Visibility == Visibility.Collapsed
+            && filters.ActorsToggle.Visibility == Visibility.Visible,
+            $"proxy={filters.ProxyScenesRow.Visibility}, snow={filters.SnowScenesRow.Visibility}, " +
+            $"actors={filters.ActorsToggle.Visibility}");
     }
 
     /// <summary>

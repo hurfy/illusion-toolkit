@@ -1,0 +1,243 @@
+<UserControl x:Class="Illusion.Views.TuningTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
+
+    <!-- Tuning tab: the entity-data tables the archive carries. For a car that is its whole
+         behaviour — mass, torque curve, gearbox, differential, the ten-slot wheel table, brakes,
+         aerodynamics and a long sound tail — and none of it is in the car a district places: an
+         actor record for a car is a position, and this is where the driving lives.
+
+         Same shape as the Prefab tab beside it, deliberately: one card per band, closed to start
+         with, a search over the lot. A car's table is 771 fields, so it is skimmed, never read.
+
+         The struct is COLUMN-major in the file (all ten wheels' models, then all ten tyres); the
+         rows are put back together per wheel here, which is the tab's whole reason for existing. -->
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10,10,10,4">
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <TextBlock Text="Tuning" Style="{StaticResource PropTitle}" />
+                    <TextBlock Text="{Binding TuningSummary}" Style="{StaticResource PropSubtitle}" />
+                    <!-- A car ships several tables: the same car tuned three ways.
+                         One at a time, chosen here — six of them stacked made the tab four
+                         thousand rows long. The label is what actually differs between them,
+                         because their names are hashes of definitions kept in another
+                         archive. Hidden when there is only one, since a picker with one
+                         entry is a label that looks clickable. -->
+                    <StackPanel Margin="0,9,0,0"
+                                Visibility="{Binding HasManyTuningTables, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Table" Style="{StaticResource MetaLabel}"
+                                   Margin="0,0,0,4" />
+                        <ListBox Style="{StaticResource NumberStrip}"
+                                 ItemContainerStyle="{StaticResource NumberStripItem}"
+                                 ItemsSource="{Binding TuningTables}"
+                                 SelectedItem="{Binding SelectedTuningTable, Mode=TwoWay}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- The number is the button; what the table IS rides in
+                                         the tooltip and on the card below, so a strip of six
+                                         digits is never six digits of nothing. -->
+                                    <TextBlock Text="{Binding Number}" FontSize="11.5"
+                                               ToolTip="{Binding Label}" />
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                    <!-- Matches the row's name, its full name in the struct, and its value —
+                         "camber", "Wheel3.Camber" and "wheel_civ09" are all questions this
+                         tab gets asked. -->
+                    <Grid Margin="0,9,0,0">
+                        <!-- Delayed for the same reason as the prefab box beside it: the tuning tab
+                             is 771 fields, and narrowing it per keystroke is a full rebuild. -->
+                        <TextBox x:Name="TuningSearchBox" Style="{StaticResource InputField}"
+                                 Padding="24,0,6,0"
+                                 Text="{Binding TuningSearch, UpdateSourceTrigger=PropertyChanged, Delay=220}" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE721;" FontSize="11"
+                                   Foreground="{StaticResource TextDim}" Margin="8,0,0,0"
+                                   HorizontalAlignment="Left" VerticalAlignment="Center"
+                                   IsHitTestVisible="False" />
+                        <TextBlock Text="Find a value…" Foreground="{StaticResource TextFaint}"
+                                   FontSize="11.5" Margin="26,0,0,0" VerticalAlignment="Center"
+                                   IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding TuningSearch}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <TextBlock Text="Nothing here matches." Style="{StaticResource MetaLabel}"
+                               Margin="2,8,0,0"
+                               Visibility="{Binding TuningNothingFound, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+            </Border>
+
+            <ContentControl Content="{Binding SelectedTuningTable}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate>
+                        <ItemsControl ItemsSource="{Binding Bands}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,6"
+                                                Visibility="{Binding IsVisible, Converter={StaticResource BoolToVis}}">
+                                        <Border Style="{StaticResource GroupHeaderCard}"
+                                                Margin="0,0,0,6">
+                                            <Grid MinHeight="24">
+                                                <ToggleButton Style="{StaticResource GroupHeaderToggle}"
+                                                              ToolTip="Open or close this group"
+                                                              IsChecked="{Binding IsExpanded, Mode=TwoWay}">
+                                                    <Grid Background="Transparent">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Grid.Column="0" Width="3" Height="13"
+                                                                CornerRadius="1.5" Margin="0,0,8,0"
+                                                                VerticalAlignment="Center"
+                                                                Background="{Binding Accent}" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Title}"
+                                                                   Style="{StaticResource PropCaption}"
+                                                                   FontSize="12.5" Margin="0"
+                                                                   VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="2" Text="{Binding Badge}"
+                                                                   FontSize="10.5" Margin="7,0,0,0"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{StaticResource TextFaint}" />
+                                                    </Grid>
+                                                </ToggleButton>
+                                            </Grid>
+                                        </Border>
+
+                                        <!-- One plate per thing in the band: a wheel and its
+                                             twenty-three fields, a gear and its six. -->
+                                        <ItemsControl ItemsSource="{Binding Elements}"
+                                                      Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}"
+                                                      Opacity="0">
+                                            <ItemsControl.Style>
+                                                <Style TargetType="ItemsControl">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                            <DataTrigger.EnterActions>
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                                         To="1" Duration="0:0:0.14" />
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </DataTrigger.EnterActions>
+                                                            <DataTrigger.ExitActions>
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                                         To="0" Duration="0:0:0.08" />
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </DataTrigger.ExitActions>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ItemsControl.Style>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Style="{StaticResource PropCard}">
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Title}"
+                                                                       Style="{StaticResource PropCaption}"
+                                                                       Margin="0,0,0,8"
+                                                                       Visibility="{Binding HasTitle, Converter={StaticResource BoolToVis}}" />
+                                                            <ItemsControl ItemsSource="{Binding Rows}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <StackPanel Margin="0,0,0,10">
+                                                                            <!-- Name · switch. The
+                                                                                 full name in the
+                                                                                 struct rides in the
+                                                                                 tooltip: the label is
+                                                                                 "Camber", the file
+                                                                                 calls it
+                                                                                 "Wheel3.Camber". -->
+                                                                            <Grid Margin="0,0,0,4"
+                                                                                  Visibility="{Binding HasCaption, Converter={StaticResource BoolToVis}}">
+                                                                                <Grid.ColumnDefinitions>
+                                                                                    <ColumnDefinition Width="*" />
+                                                                                    <ColumnDefinition Width="Auto" />
+                                                                                </Grid.ColumnDefinitions>
+                                                                                <TextBlock Grid.Column="0" Text="{Binding Label}"
+                                                                                           ToolTip="{Binding Name}"
+                                                                                           Style="{StaticResource MetaLabel}"
+                                                                                           TextTrimming="CharacterEllipsis" />
+                                                                                <ToggleButton Grid.Column="1"
+                                                                                              Style="{StaticResource ToggleSwitch}"
+                                                                                              Margin="8,0,0,0"
+                                                                                              IsChecked="{Binding Flag, Mode=TwoWay}"
+                                                                                              Visibility="{Binding IsFlag, Converter={StaticResource BoolToVis}}" />
+                                                                            </Grid>
+
+                                                                            <TextBox Style="{StaticResource InputField}"
+                                                                                     HorizontalAlignment="Stretch"
+                                                                                     Text="{Binding Number, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                                                     Visibility="{Binding IsNumber, Converter={StaticResource BoolToVis}}" />
+                                                                            <TextBox Style="{StaticResource InputField}"
+                                                                                     HorizontalAlignment="Stretch"
+                                                                                     Text="{Binding Integer, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                                                     Visibility="{Binding IsInteger, Converter={StaticResource BoolToVis}}" />
+                                                                            <!-- A name buffer, with the
+                                                                                 slot's own width as its
+                                                                                 limit — the core cuts
+                                                                                 anything longer, and a
+                                                                                 box that silently
+                                                                                 truncates is a box that
+                                                                                 lies. -->
+                                                                            <TextBox Style="{StaticResource InputField}"
+                                                                                     HorizontalAlignment="Stretch"
+                                                                                     MaxLength="{Binding MaxLength}"
+                                                                                     Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                                                     Visibility="{Binding IsText, Converter={StaticResource BoolToVis}}" />
+                                                                            <!-- The wheel prototype: the
+                                                                                 one resource NAME in the
+                                                                                 whole car struct. Picked
+                                                                                 from what cars_universal
+                                                                                 actually carries, never
+                                                                                 typed — a name that is
+                                                                                 not there does not fail,
+                                                                                 the wheels just stop
+                                                                                 appearing. -->
+                                                                            <v:DropDownField HorizontalAlignment="Stretch"
+                                                                                             ItemsSource="{Binding Choices}"
+                                                                                             SelectedItem="{Binding Text, Mode=TwoWay}"
+                                                                                             Visibility="{Binding IsChoiceText, Converter={StaticResource BoolToVis}}" />
+
+                                                                            <v:Vector3Box Label="{Binding Label}"
+                                                                                          Decimals="3"
+                                                                                          HorizontalAlignment="Stretch"
+                                                                                          X="{Binding X, Mode=TwoWay}"
+                                                                                          Y="{Binding Y, Mode=TwoWay}"
+                                                                                          Z="{Binding Z, Mode=TwoWay}"
+                                                                                          Visibility="{Binding IsVector, Converter={StaticResource BoolToVis}}" />
+                                                                        </StackPanel>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

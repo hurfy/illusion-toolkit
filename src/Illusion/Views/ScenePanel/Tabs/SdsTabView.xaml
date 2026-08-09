@@ -1,0 +1,32 @@
+<UserControl x:Class="Illusion.Views.SdsTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
+
+    <!-- SDS tab: archive summary. -->
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10,10,10,4">
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <TextBlock Text="{Binding Title}" Style="{StaticResource PropTitle}" />
+                    <TextBlock Text="SDS archive" Style="{StaticResource PropSubtitle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <Grid Style="{StaticResource MetaRow}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Meshes" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding MeshCountText}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Triangles" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding TriangleCountText}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

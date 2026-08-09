@@ -497,9 +497,9 @@ internal static class LibraryProbes
                         && window.EmptyStage.Visibility == Visibility.Collapsed,
                         $"texture={window.TextureStage.Visibility}, empty={window.EmptyStage.Visibility}");
                     check("a texture on the stage says so in the hierarchy too",
-                        window.Scene.EmptyScene.Visibility == Visibility.Visible
-                        && window.Scene.EmptyTitle.Text.Contains("texture", StringComparison.OrdinalIgnoreCase),
-                        $"{window.Scene.EmptyScene.Visibility}, “{window.Scene.EmptyTitle.Text}”");
+                        window.Scene.Tree.EmptyScene.Visibility == Visibility.Visible
+                        && window.Scene.Tree.EmptyTitle.Text.Contains("texture", StringComparison.OrdinalIgnoreCase),
+                        $"{window.Scene.Tree.EmptyScene.Visibility}, “{window.Scene.Tree.EmptyTitle.Text}”");
 
                     // A resource with nothing to show is not a way out — the stage stays as it was.
                     SdsResource? shape = inside.Find(r => r.Kind == SdsResourceKind.Shape);
@@ -528,8 +528,8 @@ internal static class LibraryProbes
                             && window.EmptyStage.Visibility == Visibility.Collapsed,
                             $"texture={window.TextureStage.Visibility}, empty={window.EmptyStage.Visibility}");
                         check("and the hierarchy goes back to listing the scene",
-                            window.Scene.EmptyScene.Visibility == Visibility.Collapsed,
-                            window.Scene.EmptyScene.Visibility.ToString());
+                            window.Scene.Tree.EmptyScene.Visibility == Visibility.Collapsed,
+                            window.Scene.Tree.EmptyScene.Visibility.ToString());
                     }
                     window.Stage.Tree.Clear();
                 }

@@ -1,0 +1,47 @@
+<UserControl x:Class="Illusion.Views.FrameResourceTabView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:Illusion.Views">
+
+    <!-- FrameResource tab: block counts of the frame resource. -->
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="10,10,10,4">
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <TextBlock Text="FrameResource" Style="{StaticResource PropTitle}" />
+                    <TextBlock Text="Frame hierarchy + resource blocks" Style="{StaticResource PropSubtitle}" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource PropCard}">
+                <StackPanel>
+                    <Grid Style="{StaticResource MetaRow}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Frame objects" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding FrObjects}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                    <Grid Style="{StaticResource MetaRow}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Scenes" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding FrScenes}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                    <Grid Style="{StaticResource MetaRow}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Geometries" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding FrGeometries}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                    <Grid Style="{StaticResource MetaRow}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Materials" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding FrMaterials}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Skeletons" Style="{StaticResource MetaLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding FrSkeletons}" Style="{StaticResource MetaValue}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

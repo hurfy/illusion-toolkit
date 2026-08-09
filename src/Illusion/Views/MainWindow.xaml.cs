@@ -480,7 +480,7 @@ public partial class MainWindow : Window
     private void ShowViewportContextMenu(SceneNode? hit, Point pos)
     {
         if (hit != null && !Viewport.SelectedNodes.Contains(hit)) Viewport.Select(hit);
-        FileInfo? sds = ScenePanel.ArchiveOf(hit);
+        FileInfo? sds = SceneTreeView.ArchiveOf(hit);
 
         var restore = new MenuItem
         {
