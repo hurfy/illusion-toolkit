@@ -3,40 +3,6 @@ using System.Numerics;
 namespace Illusion.Formats.Prefab;
 
 /// <summary>
-/// One deformable part of a car: a bone, everything the damage model knows about it, and the collision
-/// volumes hung off it. This is the layer that actually gives a car its physics — see
-/// <see cref="PrefabFile.CarDeformParts"/>.
-/// </summary>
-/// <param name="Index">Position in the prefab's part list — how every edit addresses it.</param>
-/// <param name="PartType">The engine's own part kind (1 body, 4 door, 6 cover, 5 window, 13 motor, …).</param>
-/// <param name="Kind">That kind in words, or the number when it is one nothing has named yet.</param>
-/// <param name="Frame">FNV64 of the bone this part is; a type-5 volume below is placed in ITS space.</param>
-/// <param name="ParentFrame">FNV64 of the part this one hangs off — and the space a self-describing volume
-/// below is written in, which is not the same thing.</param>
-/// <param name="PartTransform">The part's own placement, as the file writes it (axes already converted).
-/// Read but not used by the editor: what it is relative to has not been measured.</param>
-/// <param name="Effects">The particle ids this part carries — see <see cref="CarPartEffects"/>.</param>
-public sealed record CarDeformPart(
-    int Index, uint PartType, string Kind, uint Flags, ulong Frame, ulong ParentFrame,
-    IReadOnlyList<CarPhysicsVolume> Volumes, Matrix4x4 PartTransform,
-    IReadOnlyList<CarPartEffects> Effects);
-
-/// <summary>
-/// The effects block at the tail of a deformable part — the ids of the particles it plays.
-///
-/// <para>
-/// Read, not written, and surfaced because of a question nothing else in the archive could answer: a shot
-/// at a car plays a different impact for glass than for sheet metal, and neither the shape's own surface
-/// nor the part's kind decides it (both refuted in game). This block sits beside the collision volumes,
-/// carries named particle ids, and had never been opened.
-/// </para>
-/// </summary>
-/// <param name="Packs">Sub-entries the reference toolkit leaves entirely unnamed.</param>
-public sealed record CarPartEffects(
-    int Index, short ParticleBreakId, short ParticleHingeVersionId,
-    short Snow0, short Snow1, short Snow2, short Snow3, float ParticleScale, int Packs);
-
-/// <summary>
 /// One collision volume of a deformable part — the thing a bullet or a bumper actually meets.
 ///
 /// <para>
@@ -70,65 +36,6 @@ public sealed partial class PrefabFile
 {
     /// <summary>The extents a shipped type-5 volume carries — it describes nothing, the shape does.</summary>
     private static readonly Vector3 PlacedShapeExtents = new(0.01f, 0.01f, 0.01f);
-
-    /// <summary>
-    /// The car's deformable parts and the collision volumes on them, in file order.
-    ///
-    /// <para>
-    /// This — not the <c>FrameObjectCollision</c> stubs in the frame graph — is where a car's physics lives.
-    /// Both copies of a placement are in shipped archives and they agree (1060 of 1097 pairs, the rest
-    /// already edited), but only this one is read: moving a stub changes nothing in game, which is what sent
-    /// the search here in the first place.
-    /// </para>
-    /// </summary>
-    public IReadOnlyList<CarDeformPart> CarDeformParts
-    {
-        get
-        {
-            List<Native.Model.PrefabDeformPartW>? parts = DeformParts();
-            if (parts == null) return [];
-
-            var result = new List<CarDeformPart>(parts.Count);
-            for (int i = 0; i < parts.Count; i++)
-            {
-                Native.Model.PrefabDeformPartW part = parts[i];
-                var volumes = new List<CarPhysicsVolume>();
-                foreach (Native.Model.PrefabCollVolumeW v in Volumes(part))
-                {
-                    // The matrix is reversed and the EXTENTS ARE NOT, which is the one thing here that looks
-                    // like an oversight and is not. The reversal was measured on the shipped stub/volume
-                    // pairs, and every one of those is a type-5 volume whose extents are the placeholder 1 cm
-                    // on all three axes — so it was verified for the matrix and never once for the numbers,
-                    // and only a self-describing volume has numbers worth reversing.
-                    //
-                    // Measured (`--probe-car-physics`, "are a pane's in-plane extents the right way round"):
-                    // a car window is wider than it is tall, on every car ever made. Taken as written, 373 of
-                    // 415 shipped window panes come out that way; reversed, 69 do. A windscreen read 1.35 m
-                    // TALL by 0.43 m across, and the door glass stood on edge. The file indexes its extents
-                    // against the basis the reversal PRODUCES, not the one it starts from.
-                    volumes.Add(new CarPhysicsVolume(
-                        volumes.Count, v.VolumeType, SwapAxes(ToMatrix(v.Transform)),
-                        v.Extents, v.Unk4Hashes.Count > 1 ? v.Unk4Hashes[1] : 0));
-                }
-                var effects = new List<CarPartEffects>();
-                // Common is an optional block on the wire, so the core models it as a 0-or-1 list.
-                foreach (Native.Model.PrefabDeformPartEffectsW e in
-                         part.Common.SelectMany(c => c.PartEffects))
-                {
-                    effects.Add(new CarPartEffects(
-                        effects.Count, e.ParticleBreakId, e.ParticleHingeVersionId,
-                        e.SnowParticleId0, e.SnowParticleId1, e.SnowParticleId2, e.SnowParticleId3,
-                        e.ParticleScale, e.Packs.Count));
-                }
-
-                result.Add(new CarDeformPart(
-                    i, part.PartType, PartKindName(part.PartType), part.Flags,
-                    part.Unk3.Count > 0 ? part.Unk3[0] : 0, part.ParentDeformPartName, volumes,
-                    SwapAxes(ToMatrix(part.PartTransform)), effects));
-            }
-            return result;
-        }
-    }
 
     /// <summary>Moves and resizes an existing volume. False when there is no such part or volume.</summary>
     public bool SetCarVolume(int part, int volume, Matrix4x4 transform, Vector3 size)
@@ -378,15 +285,6 @@ public sealed partial class PrefabFile
         List<Native.Model.PrefabCollVolumeW>? list = VolumeList(part);
         return list != null && volume >= 0 && volume < list.Count ? list[volume] : null;
     }
-
-    /// <summary>The part kinds, as the reference toolkit reads <c>S_InitDeformPart.Unk0</c>.</summary>
-    private static string PartKindName(uint type) => type switch
-    {
-        0 => "normal", 1 => "body", 2 => "wheel", 3 => "lid", 4 => "door", 5 => "window",
-        6 => "cover", 7 => "bumper", 12 => "exhaust", 13 => "motor", 14 => "tyre", 15 => "snow",
-        16 => "plow",
-        _ => type.ToString(System.Globalization.CultureInfo.InvariantCulture),
-    };
 
     /// <summary>
     /// The prefab writes a transform with its axes in the opposite order to the frame graph: the same

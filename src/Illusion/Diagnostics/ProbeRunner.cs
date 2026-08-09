@@ -742,6 +742,14 @@ internal static class ProbeRunner
                     args.Length >= 3 ? args[2] : "uv0",
                     args.Contains("write"));
                 return true;
+            // Whether the component view IS the car: every shipped car stitched through the Car aggregate,
+            // asserted against the counts the census measured — 1698 parts, 2587 bare bones, 1402 handles,
+            // 1081 markers — plus identity across a rename and a component whose bone was renamed out from
+            // under it. Optional arg = the car to focus on. Output: %TEMP%\illusion_car_components.txt
+            case "--probe-car-components":
+                CarComponentProbes.RunCarComponentsProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt
