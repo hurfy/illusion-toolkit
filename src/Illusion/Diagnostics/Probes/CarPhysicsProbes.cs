@@ -56,6 +56,7 @@ internal static class CarPhysicsProbes
             SecondInfluence(sb, folder, focus, Check);
             CapsuleAxis(sb, folder, Check);
             Census(sb, folder, Check, focus);
+            LodCoverage(sb, folder, Check);
             Handles(sb, folder, Check);
             Stubless(sb, folder, Check);
             Facing(sb, folder, Check);
@@ -1736,6 +1737,63 @@ internal static class CarPhysicsProbes
         int inlineTotal = 0, fitsAsFull = 0, fitsAsHalf = 0;
         int stubsClaimed = 0, shapesUnclaimed = 0, shapesTotal = 0;
 
+        // A part's own Unk3 list — length distribution, and whether an entry that does resolve lands on a
+        // BONE specifically (not just any frame of the archive), broken down by which bone name it is.
+        var unk3CountHist = new Dictionary<int, int>();
+        int unk3Entries = 0, unk3Resolved = 0, unk3ResolvedBone = 0;
+        var unk3BoneByPartType = new Dictionary<(uint PartType, string Bone), int>();
+
+        // A part's SmDeformBones list — length distribution, and whether its SmJointName hash resolves to a
+        // frame, and specifically to one following the "deform_*" naming the reference toolkit's type suggests.
+        var smDeformCountHist = new Dictionary<int, int>();
+        int smDeformEntries = 0, smDeformResolved = 0, smDeformResolvedDeformPrefix = 0;
+
+        // ParentDeformPartName: does it name a FRAME like every other reference in the prefab, or something
+        // else (an ItemDesc shape, or nothing at all) — and does Unk17, documented as the parent part's INDEX,
+        // point at a part whose own Unk3[0] is that same hash?
+        int parentNameTotal = 0, parentNameResolvesFrame = 0, parentNameResolvesShape = 0, parentNameUnresolved = 0;
+        int parentIndexTotal = 0, parentIndexAgreesWithName = 0, parentIndexOutOfRange = 0;
+
+        // Follow-up: can a part's own bone (Unk3[0]) serve as a stable, unique identity for it? Is it unique
+        // within its own car, does every bone of the rig belong to some part or is it an orphan, do the
+        // deform-bone joints (SmJointName) ever double as a part's own bone, and where do the helper-frame
+        // markers (seats, climb boxes, fuel tanks, exhaust emitters, wipers, lights) land relative to a part.
+        int carsWithPrefabAndFrames = 0, carsWithNoUnk3Collision = 0, carsWithUnk3Collision = 0;
+        var unk3CollisionExamples = new List<string>();
+        int bonesTotal = 0, bonesOwnedByAPart = 0, bonesOrphan = 0;
+        var orphanCountHist = new Dictionary<int, int>();
+        var orphanBoneNameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        int smDeformOverlapsPartBone = 0;
+        var markerCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var markerOwned = new Dictionary<string, int>(StringComparer.Ordinal);
+        var markerUnownedBone = new Dictionary<string, int>(StringComparer.Ordinal);
+        var markerNoBone = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        // Follow-up: for a marker landing on a bone no part owns, does walking UP FrameSkeletonHierarchy's
+        // ParentIndices reach a bone some part DOES own — and which component is that?
+        int ancestorChecked = 0, ancestorResolved = 0, ancestorHitRoot = 0, ancestorCouldNotWalk = 0;
+        var ancestorHopHist = new Dictionary<int, int>();
+        var ancestorLandsOnBone = new Dictionary<(string Label, string Bone), int>();
+        var ancestorLandsOnKind = new Dictionary<(string Label, uint PartType), int>();
+
+        // Sanity check: for a marker ALREADY on an owned bone, the same walk must find it at 0 hops.
+        int sanityChecked = 0, sanityHopZero = 0, sanityMismatch = 0;
+
+        // The other direction: of the orphan bones (not a part's Unk3[0]), how many are claimed instead
+        // through SmDeformBones' SmJointName, and how many are claimed by NEITHER link.
+        int orphanClaimedBySmDeform = 0, orphanClaimedByNeither = 0;
+        var neitherClaimedNameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        // Follow-up: of the bones claimed by NEITHER link, are they real things — do they carry geometry,
+        // hit boxes, a reference from some other prefab collection, or a helper frame hung off them?
+        int neitherWithGeometry = 0, neitherGeomWithNonZeroBox = 0;
+        var neitherPiecesHist = new Dictionary<int, int>();
+        var neitherWithGeomNameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var neitherNoGeomNameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        int neitherClaimedByOtherRef = 0, neitherClaimedByNothingAtAll = 0;
+        var neitherRefCollectionCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        int neitherWithAttachment = 0;
+
         foreach (FileInfo sds in archives)
         {
             string extracted = MafiaEnvironment.ExtractedDir(sds);
@@ -1761,6 +1819,7 @@ internal static class CarPhysicsProbes
                     .OrderByDescending(v => v)];
 
             var names = new Dictionary<ulong, string>();
+            var boneHashes = new Dictionary<ulong, string>();
             foreach (FrameObjectBase any in fr.FrameObjects.Values)
             {
                 string? n = any.Name?.ToString();
@@ -1771,9 +1830,39 @@ internal static class CarPhysicsProbes
                 foreach (Illusion.Formats.Hashing.HashName bone in m.GetSkeletonObject().BoneNames ?? [])
                 {
                     string n = bone.ToString() ?? "";
-                    if (n.Length > 0) names.TryAdd(Fnv64.Hash(n), n);
+                    if (n.Length > 0)
+                    {
+                        names.TryAdd(Fnv64.Hash(n), n);
+                        boneHashes.TryAdd(Fnv64.Hash(n), n);
+                    }
                 }
             }
+
+            // For the marker-ownership question: which joint each named (non-bone) frame hangs off, and the
+            // rig's bone names in JOINT order (needed to turn a joint index back into the hash Unk3 would use).
+            FrameObjectModel? carModel = fr.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            var jointOf = new Dictionary<FrameObjectBase, int>();
+            foreach (FrameObjectModel.AttachmentReference r in carModel?.AttachmentReferences ?? [])
+            {
+                if (r.Attachment != null) jointOf[r.Attachment] = r.JointIndex;
+            }
+            string[] carBonesByJoint = carModel != null
+                ? (carModel.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray()
+                : [];
+            var frameByHash = new Dictionary<ulong, FrameObjectBase>();
+            foreach (FrameObjectBase f in fr.FrameObjects.Values)
+            {
+                string? n = f.Name?.ToString();
+                if (n != null) frameByHash.TryAdd(Fnv64.Hash(n), f);
+            }
+            // Joint index of each bone, by its OWN name hash — the starting point for walking up
+            // FrameSkeletonHierarchy.ParentIndices from a marker's attachment bone.
+            var boneIndexByHash = new Dictionary<ulong, int>();
+            for (int bi = 0; bi < carBonesByJoint.Length; bi++)
+            {
+                boneIndexByHash.TryAdd(Fnv64.Hash(carBonesByJoint[bi]), bi);
+            }
+            byte[] carParentIndices = carModel?.GetSkeletonHierarchyObject().ParentIndices ?? [];
 
             var stubByShapeHash = new Dictionary<ulong, FrameObjectCollision>();
             foreach (FrameObjectCollision stub in fr.FrameObjects.Values.OfType<FrameObjectCollision>())
@@ -1818,9 +1907,324 @@ internal static class CarPhysicsProbes
             PrefabEntryW? entry = file.Wire.Prefabs.FirstOrDefault(p => p.CarInit.Count > 0);
             if (entry == null || entry.CarInit[0].Deformation.Count == 0) continue;
             prefabCars++;
+            PrefabCarInitW carInit = entry.CarInit[0];
+            List<PrefabDeformPartW> deformParts = carInit.Deformation[0].DeformParts;
+            PrefabOtherInitW? other = carInit.Other.Count > 0 ? carInit.Other[0] : null;
+
+            // ── injectivity: is Unk3[0] unique across the parts of THIS car? ──
+            carsWithPrefabAndFrames++;
+            var partsByFrame = new Dictionary<ulong, List<PrefabDeformPartW>>();
+            foreach (PrefabDeformPartW p in deformParts)
+            {
+                if (p.Unk3.Count == 0) continue;
+                ulong key = p.Unk3[0];
+                if (!partsByFrame.TryGetValue(key, out List<PrefabDeformPartW>? list))
+                {
+                    list = [];
+                    partsByFrame[key] = list;
+                }
+                list.Add(p);
+            }
+            List<KeyValuePair<ulong, List<PrefabDeformPartW>>> collisionsHere =
+                [.. partsByFrame.Where(kv => kv.Value.Count > 1)];
+            if (collisionsHere.Count == 0) carsWithNoUnk3Collision++;
+            else
+            {
+                carsWithUnk3Collision++;
+                foreach ((ulong hash, List<PrefabDeformPartW> list) in collisionsHere)
+                {
+                    string boneName = names.GetValueOrDefault(hash, $"0x{hash:X16}");
+                    string kindsText = string.Join("+",
+                        list.Select(p => PartTypeNames.GetValueOrDefault(p.PartType, p.PartType.ToString())));
+                    unk3CollisionExamples.Add(
+                        $"{Path.GetFileNameWithoutExtension(sds.Name)}: {boneName} <- {kindsText}");
+                }
+            }
+            // The set of bones some deform part of THIS car claims as its own — used for the coverage check
+            // below, for the deform-bone overlap check inside the part loop, and for the marker question.
+            var ownedBoneHashesHere = new HashSet<ulong>(partsByFrame.Keys);
+
+            // The set of bones claimed through the OTHER link — a part's SmDeformBones' SmJointName — used
+            // only for the "claimed by neither link" follow-up below.
+            var smOwnedBoneHashesHere = new HashSet<ulong>();
+            foreach (PrefabDeformPartW p in deformParts)
+            {
+                foreach (PrefabSmDeformBoneW sm in p.SmDeformBones) smOwnedBoneHashesHere.Add(sm.SmJointName);
+            }
+
+            // Are the bones claimed by NEITHER link real things? First, geometry: flatten this car's split
+            // table into (bone hash → absolute piece indices), using the MEASURED reading — a split's bone is
+            // BoneRemapIDs[BlendIndex] (LOD0's flat remap table), right 98.89% of the time; the raw BlendIndex
+            // read as a bone id is right only 2.2% of the time (docs/car-anatomy.md, "Splits and pieces").
+            // Piece index is a running counter across ALL splits in order, which is what HitBoxes is indexed
+            // by — the same reading BulletProbes.PiecesOf uses.
+            byte[] flatRemap = [];
+            try
+            {
+                Illusion.Formats.Frames.Resources.FrameBlendInfo.BoneIndexInfo[] lods =
+                    carModel?.GetBlendInfoObject().BoneIndexInfos ?? [];
+                if (lods.Length > 0) flatRemap = lods[0].BoneRemapIDs ?? [];
+            }
+            catch (Exception) { /* a model with no blend info has no geometry to attribute to a bone */ }
+            var pieceIndicesByBoneHash = new Dictionary<ulong, List<int>>();
+            int pieceIndex = 0;
+            foreach (FrameObjectModel.WeightedByMeshSplit split in carModel?.BlendMeshSplits ?? [])
+            {
+                int boneId = split.BlendIndex < flatRemap.Length ? flatRemap[split.BlendIndex] : -1;
+                ulong splitBoneHash = boneId >= 0 && boneId < carBonesByJoint.Length
+                    ? Fnv64.Hash(carBonesByJoint[boneId]) : 0;
+                int pieces = split.Data?.Length ?? 0;
+                if (splitBoneHash != 0)
+                {
+                    if (!pieceIndicesByBoneHash.TryGetValue(splitBoneHash, out List<int>? list))
+                    {
+                        list = [];
+                        pieceIndicesByBoneHash[splitBoneHash] = list;
+                    }
+                    for (int k = 0; k < pieces; k++) list.Add(pieceIndex + k);
+                }
+                pieceIndex += pieces;
+            }
+            FrameObjectModel.HitBoxInfo[] carHitBoxes = carModel?.HitBoxes ?? [];
+
+            // Attachments: which joints have a helper frame (Dummy/Point) hung off them via
+            // AttachmentReferences — reusing jointOf, which already carries every attached frame of this car.
+            var attachedJoints = new HashSet<int>();
+            foreach ((FrameObjectBase attached, int atJoint) in jointOf)
+            {
+                if (attached is FrameObjectDummy or FrameObjectPoint) attachedJoints.Add(atJoint);
+            }
+
+            // Referenced anywhere else in the prefab — every sibling collection that names a frame besides
+            // a deform part's own Unk3[0] and SmDeformBones.
+            var otherReferenceHashes = new Dictionary<string, HashSet<ulong>>(StringComparer.Ordinal);
+            void AddRef(string collection, ulong hash)
+            {
+                if (hash == 0) return;
+                if (!otherReferenceHashes.TryGetValue(collection, out HashSet<ulong>? set))
+                {
+                    set = [];
+                    otherReferenceHashes[collection] = set;
+                }
+                set.Add(hash);
+            }
+            if (other != null)
+            {
+                AddRef("headlight", other.HeadlightModelName);
+                AddRef("backlight", other.BacklightModelName);
+                AddRef("toplight", other.ToplightModelName);
+                AddRef("snow rest", other.SnowRestName);
+                foreach (ulong h in other.DrivingWheels) AddRef("driving wheel", h);
+                foreach (ulong h in other.FuelTanks) AddRef("fuel tank", h);
+                foreach (ulong h in other.ExhaustEmitters) AddRef("exhaust emitter", h);
+                foreach (PrefabWindowDataW w in other.WindowData) AddRef("window", w.WindowFrameName);
+            }
+            foreach (ulong h in carInit.WipersFrameName) AddRef("wiper", h);
+            foreach (PrefabAxleW axle in carInit.Axles)
+            {
+                AddRef("axle", axle.AxleName);
+                AddRef("axle brake drum", axle.BrakeDrumName);
+                AddRef("axle rot wing", axle.RotWingName);
+            }
+            foreach (PrefabDoorPointsW d in carInit.DoorPoints) AddRef("door points", d.DoorFrameName);
+            foreach (PrefabSeatW s in carInit.Seats)
+            {
+                AddRef("seat", s.FrameName);
+                AddRef("seat's door", s.DoorIndexFrameName);
+            }
+            foreach (PrefabClimbBoxW c in carInit.ClimbBoxes)
+            {
+                AddRef("climb box dummy", c.DummyFrameName);
+                AddRef("climb box bone", c.BoneFrameName);
+            }
+
+            // ── coverage the other way: of the rig's own bones, how many does a deform part actually name? ──
+            bonesTotal += boneHashes.Count;
+            int ownedHere = 0;
+            foreach ((ulong boneHash, string boneName) in boneHashes)
+            {
+                if (ownedBoneHashesHere.Contains(boneHash)) { ownedHere++; continue; }
+                orphanBoneNameCounts[boneName] = orphanBoneNameCounts.GetValueOrDefault(boneName) + 1;
+
+                // Of this orphan (not claimed via Unk3[0]): is it claimed instead via SmDeformBones? If
+                // neither link claims it, note the name so the "true orphan" list can be read off by eye.
+                if (smOwnedBoneHashesHere.Contains(boneHash)) orphanClaimedBySmDeform++;
+                else
+                {
+                    orphanClaimedByNeither++;
+                    neitherClaimedNameCounts[boneName] = neitherClaimedNameCounts.GetValueOrDefault(boneName) + 1;
+
+                    // Is this "claimed by neither link" bone a real thing? Geometry first: is it named as a
+                    // split's bone (BoneRemapIDs[BlendIndex]), and if so, do any of its pieces carry a
+                    // non-placeholder hit box?
+                    if (pieceIndicesByBoneHash.TryGetValue(boneHash, out List<int>? pieceIdx)
+                        && pieceIdx.Count > 0)
+                    {
+                        neitherWithGeometry++;
+                        neitherPiecesHist[pieceIdx.Count] =
+                            neitherPiecesHist.GetValueOrDefault(pieceIdx.Count) + 1;
+                        neitherWithGeomNameCounts[boneName] =
+                            neitherWithGeomNameCounts.GetValueOrDefault(boneName) + 1;
+                        if (pieceIdx.Any(pi => pi < carHitBoxes.Length && IsNonZeroBox(carHitBoxes[pi])))
+                        {
+                            neitherGeomWithNonZeroBox++;
+                        }
+                    }
+                    else
+                    {
+                        neitherNoGeomNameCounts[boneName] =
+                            neitherNoGeomNameCounts.GetValueOrDefault(boneName) + 1;
+                    }
+
+                    // Referenced by some OTHER prefab collection we were not checking?
+                    bool claimedElsewhere = false;
+                    foreach ((string collection, HashSet<ulong> set) in otherReferenceHashes)
+                    {
+                        if (!set.Contains(boneHash)) continue;
+                        neitherRefCollectionCounts[collection] =
+                            neitherRefCollectionCounts.GetValueOrDefault(collection) + 1;
+                        claimedElsewhere = true;
+                    }
+                    if (claimedElsewhere) neitherClaimedByOtherRef++; else neitherClaimedByNothingAtAll++;
+
+                    // Does a helper frame (Dummy/Point) hang off it via AttachmentReferences?
+                    if (boneIndexByHash.TryGetValue(boneHash, out int neitherJoint)
+                        && attachedJoints.Contains(neitherJoint))
+                    {
+                        neitherWithAttachment++;
+                    }
+                }
+            }
+            bonesOwnedByAPart += ownedHere;
+            int orphanHere = boneHashes.Count - ownedHere;
+            bonesOrphan += orphanHere;
+            orphanCountHist[orphanHere] = orphanCountHist.GetValueOrDefault(orphanHere) + 1;
+
+            // ── markers: seats, climb boxes, fuel tanks, exhaust emitters, wipers, lights ──
+            // Each names a frame directly (sometimes a bone itself, sometimes a Dummy/Point hung off one via
+            // AttachmentReferences); resolved here to the bone it actually lands on, so it can be asked
+            // whether that bone is one a deform part owns.
+            // Bone-and-Found logic is UNCHANGED from before (so Owned/Unowned/NoBone totals stay identical);
+            // Joint is best-effort, -1 when a starting joint cannot be pinned down, in which case the
+            // ancestor walk below is skipped and counted separately as "could not walk".
+            (ulong Bone, bool Found, int Joint) ResolveToBone(ulong hash)
+            {
+                if (hash == 0) return (0, false, -1);
+                if (boneHashes.ContainsKey(hash))
+                {
+                    int idx = boneIndexByHash.TryGetValue(hash, out int i) ? i : -1;
+                    return (hash, true, idx);
+                }
+                if (frameByHash.TryGetValue(hash, out FrameObjectBase? f)
+                    && jointOf.TryGetValue(f, out int joint) && joint >= 0 && joint < carBonesByJoint.Length)
+                {
+                    return (Fnv64.Hash(carBonesByJoint[joint]), true, joint);
+                }
+                return (0, false, -1);
+            }
+
+            // Walk up FrameSkeletonHierarchy.ParentIndices from startJoint (checked FIRST, so hop 0 means
+            // "the starting bone itself is owned") until an owned bone is found, the rig root is reached
+            // (root is self-parented, the same convention DumpOneCar's own rig dump uses), or the hierarchy
+            // proves unusable (a cycle, or an index outside the bone table).
+            (bool Found, int Hops, ulong Bone, bool HitRoot, bool Malformed) WalkToOwnedAncestor(int startJoint)
+            {
+                if (startJoint < 0 || startJoint >= carBonesByJoint.Length || carParentIndices.Length == 0)
+                {
+                    return (false, 0, 0, false, true);
+                }
+                var visited = new HashSet<int>();
+                int joint = startJoint;
+                int hops = 0;
+                while (true)
+                {
+                    if (!visited.Add(joint)) return (false, hops, 0, false, true);
+                    ulong hash = Fnv64.Hash(carBonesByJoint[joint]);
+                    if (ownedBoneHashesHere.Contains(hash)) return (true, hops, hash, false, false);
+                    if (joint >= carParentIndices.Length) return (false, hops, 0, false, true);
+                    int parent = carParentIndices[joint];
+                    if (parent < 0 || parent >= carBonesByJoint.Length || parent == joint)
+                    {
+                        return (false, hops, 0, true, false);
+                    }
+                    joint = parent;
+                    hops++;
+                }
+            }
+
+            (string Label, IEnumerable<ulong> Hashes)[] markerSources =
+            [
+                ("seat", carInit.Seats.Select(s => s.FrameName)),
+                ("climb box", carInit.ClimbBoxes.Select(b => b.DummyFrameName)),
+                ("fuel tank", other?.FuelTanks ?? []),
+                ("exhaust emitter", other?.ExhaustEmitters ?? []),
+                ("wiper", carInit.WipersFrameName),
+                ("light", other == null
+                    ? Array.Empty<ulong>()
+                    : new[] { other.HeadlightModelName, other.BacklightModelName, other.ToplightModelName }),
+            ];
+            foreach ((string label, IEnumerable<ulong> hashes) in markerSources)
+            {
+                foreach (ulong hash in hashes)
+                {
+                    if (hash == 0) continue;
+                    markerCounts[label] = markerCounts.GetValueOrDefault(label) + 1;
+                    (ulong boneHash, bool found, int joint) = ResolveToBone(hash);
+                    if (!found) { markerNoBone[label] = markerNoBone.GetValueOrDefault(label) + 1; continue; }
+
+                    bool owned = ownedBoneHashesHere.Contains(boneHash);
+                    if (owned) markerOwned[label] = markerOwned.GetValueOrDefault(label) + 1;
+                    else markerUnownedBone[label] = markerUnownedBone.GetValueOrDefault(label) + 1;
+
+                    if (owned)
+                    {
+                        // Sanity check: the SAME walk, from a marker that is already on an owned bone, must
+                        // land on that owned bone at 0 hops — it should not need to move at all.
+                        sanityChecked++;
+                        if (joint < 0)
+                        {
+                            // No joint to start from, but ownership was already decided directly off the
+                            // bone hash — that IS the owned bone, trivially 0 hops.
+                            sanityHopZero++;
+                        }
+                        else
+                        {
+                            (bool sFound, int sHops, _, _, _) = WalkToOwnedAncestor(joint);
+                            if (sFound && sHops == 0) sanityHopZero++; else sanityMismatch++;
+                        }
+                    }
+                    else
+                    {
+                        // Ancestor fallback: walking up from an unowned marker's attachment bone, does it
+                        // reach a bone some part DOES own — and through which component?
+                        ancestorChecked++;
+                        if (joint < 0) { ancestorCouldNotWalk++; continue; }
+
+                        (bool aFound, int aHops, ulong aBone, bool aHitRoot, bool aMalformed) =
+                            WalkToOwnedAncestor(joint);
+                        if (aMalformed) ancestorCouldNotWalk++;
+                        else if (aFound)
+                        {
+                            ancestorResolved++;
+                            ancestorHopHist[aHops] = ancestorHopHist.GetValueOrDefault(aHops) + 1;
+                            string ownerBone = names.GetValueOrDefault(aBone, $"0x{aBone:X16}");
+                            ancestorLandsOnBone[(label, ownerBone)] =
+                                ancestorLandsOnBone.GetValueOrDefault((label, ownerBone)) + 1;
+                            if (partsByFrame.TryGetValue(aBone, out List<PrefabDeformPartW>? owners)
+                                && owners.Count > 0)
+                            {
+                                ancestorLandsOnKind[(label, owners[0].PartType)] =
+                                    ancestorLandsOnKind.GetValueOrDefault((label, owners[0].PartType)) + 1;
+                            }
+                        }
+                        else if (aHitRoot) ancestorHitRoot++;
+                        else ancestorCouldNotWalk++;
+                    }
+                }
+            }
 
             var breakIdsHere = new HashSet<short>();
-            foreach (PrefabDeformPartW part in entry.CarInit[0].Deformation[0].DeformParts)
+            foreach (PrefabDeformPartW part in deformParts)
             {
                 parts++;
                 partTypes[part.PartType] = partTypes.GetValueOrDefault(part.PartType) + 1;
@@ -1829,6 +2233,69 @@ internal static class CarPhysicsProbes
                     partFrameTotal++;
                     if (names.ContainsKey(h)) partFrameResolved++;
                 }
+
+                // How many frames a part's Unk3 names, and — for the ones that resolve — which BONE, so a
+                // part of kind "door" naming a bone called doorFL can be read straight off the tally.
+                unk3CountHist[part.Unk3.Count] = unk3CountHist.GetValueOrDefault(part.Unk3.Count) + 1;
+                foreach (ulong h in part.Unk3)
+                {
+                    unk3Entries++;
+                    if (names.ContainsKey(h)) unk3Resolved++;
+                    if (boneHashes.TryGetValue(h, out string? boneName))
+                    {
+                        unk3ResolvedBone++;
+                        unk3BoneByPartType[(part.PartType, boneName)] =
+                            unk3BoneByPartType.GetValueOrDefault((part.PartType, boneName)) + 1;
+                    }
+                }
+
+                // How many SmDeformBones a part carries, and whether SmJointName resolves to a frame — and
+                // specifically to one named deform_*.
+                smDeformCountHist[part.SmDeformBones.Count] =
+                    smDeformCountHist.GetValueOrDefault(part.SmDeformBones.Count) + 1;
+                foreach (PrefabSmDeformBoneW smBone in part.SmDeformBones)
+                {
+                    smDeformEntries++;
+                    if (names.TryGetValue(smBone.SmJointName, out string? jointName))
+                    {
+                        smDeformResolved++;
+                        if (jointName.StartsWith("deform_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            smDeformResolvedDeformPrefix++;
+                        }
+                    }
+                    // Does a deform-bone joint ever double as a PART's own bone (Unk3[0]) in the same car?
+                    if (ownedBoneHashesHere.Contains(smBone.SmJointName)) smDeformOverlapsPartBone++;
+                }
+
+                // ParentDeformPartName against Unk17. The name should be a frame hash like every other
+                // reference in the prefab; the index should point at the part whose OWN Unk3[0] is that hash.
+                if (part.ParentDeformPartName != 0)
+                {
+                    parentNameTotal++;
+                    if (names.ContainsKey(part.ParentDeformPartName)) parentNameResolvesFrame++;
+                    else if (shapeByDataHash.ContainsKey(part.ParentDeformPartName)) parentNameResolvesShape++;
+                    else parentNameUnresolved++;
+                }
+                if (part.Unk17 != 65535)
+                {
+                    parentIndexTotal++;
+                    List<PrefabDeformPartW> allParts = deformParts;
+                    if (part.Unk17 >= allParts.Count)
+                    {
+                        parentIndexOutOfRange++;
+                    }
+                    else
+                    {
+                        ulong parentOwnFrame = allParts[part.Unk17].Unk3.Count > 0
+                            ? allParts[part.Unk17].Unk3[0] : 0;
+                        if (parentOwnFrame != 0 && parentOwnFrame == part.ParentDeformPartName)
+                        {
+                            parentIndexAgreesWithName++;
+                        }
+                    }
+                }
+
                 int here = part.CollisionVolumes.Sum(c => c.Volumes.Count);
                 if (here > 0) partsWithVolumes++;
                 volumes += here;
@@ -1894,7 +2361,7 @@ internal static class CarPhysicsProbes
                     ("drain energy", part.DrainEnergy.Count),
                     ("impulses", part.InternalImpulses.Count),
                     ("frames", part.Unk3.Count),
-                    ("parts in the car", entry.CarInit[0].Deformation[0].DeformParts.Count),
+                    ("parts in the car", deformParts.Count),
                 ];
                 foreach ((string listName, IReadOnlyList<ushort> list) in
                          new (string, IReadOnlyList<ushort>)[] { ("Unk14", part.Unk14), ("Unk20", part.Unk20) })
@@ -2020,6 +2487,184 @@ internal static class CarPhysicsProbes
         check("a deform part names frames of its own model",
             partFrameTotal > 0 && partFrameResolved * 2 > partFrameTotal,
             $"{partFrameResolved} of {partFrameTotal}");
+
+        // ── Unk3: how many frames a part names, and which bone it is when it resolves to one ──
+        int unk3Zero = unk3CountHist.GetValueOrDefault(0);
+        int unk3One = unk3CountHist.GetValueOrDefault(1);
+        int unk3TwoPlus = unk3CountHist.Where(p => p.Key >= 2).Sum(p => p.Value);
+        sb.AppendLine($"\n  a part's own Unk3 list, length distribution over {parts} parts:");
+        sb.AppendLine("    " + string.Join(", ", unk3CountHist.OrderBy(p => p.Key)
+            .Select(p => $"{p.Key}×{p.Value}")));
+        sb.AppendLine($"    0 entries: {unk3Zero} of {parts}   1 entry: {unk3One} of {parts}   "
+            + $"2+ entries: {unk3TwoPlus} of {parts}");
+        check("a part's Unk3 is overwhelmingly a single frame reference",
+            parts > 0 && unk3One * 2 > parts, $"{unk3One} of {parts} parts carry exactly one");
+        sb.AppendLine($"    of {unk3Entries} Unk3 hashes: {unk3Resolved} resolve to ANY frame of this car, "
+            + $"{unk3ResolvedBone} resolve specifically to a BONE");
+
+        sb.AppendLine("\n  which bone a part's Unk3 names, by part kind (top names when it resolves to a bone):");
+        foreach (uint partType in unk3BoneByPartType.Keys.Select(k => k.PartType).Distinct().OrderBy(t => t))
+        {
+            var row = unk3BoneByPartType.Where(p => p.Key.PartType == partType)
+                .OrderByDescending(p => p.Value).Take(6);
+            sb.AppendLine($"    {partType,2} {PartTypeNames.GetValueOrDefault(partType, "?"),-8}  "
+                + string.Join("  ", row.Select(p => $"{p.Key.Bone}×{p.Value}")));
+        }
+
+        // ── SmDeformBones: how many a part carries, and whether SmJointName is a deform_* frame ──
+        int smZero = smDeformCountHist.GetValueOrDefault(0);
+        int smOne = smDeformCountHist.GetValueOrDefault(1);
+        int smTwoPlus = smDeformCountHist.Where(p => p.Key >= 2).Sum(p => p.Value);
+        sb.AppendLine($"\n  a part's SmDeformBones list, length distribution over {parts} parts:");
+        sb.AppendLine("    " + string.Join(", ", smDeformCountHist.OrderBy(p => p.Key)
+            .Select(p => $"{p.Key}×{p.Value}")));
+        sb.AppendLine($"    0 entries: {smZero} of {parts}   1 entry: {smOne} of {parts}   "
+            + $"2+ entries: {smTwoPlus} of {parts}");
+        sb.AppendLine($"    of {smDeformEntries} SmJointName hashes: {smDeformResolved} resolve to a frame "
+            + $"of this car, {smDeformResolvedDeformPrefix} of those are named deform_*");
+
+        // ── ParentDeformPartName vs Unk17 ──
+        sb.AppendLine($"\n  ParentDeformPartName, over {parentNameTotal} parts that carry a non-zero one:");
+        sb.AppendLine($"    resolves to a FRAME name        {parentNameResolvesFrame}");
+        sb.AppendLine($"    resolves to a SHAPE's data hash {parentNameResolvesShape}");
+        sb.AppendLine($"    resolves to neither              {parentNameUnresolved}");
+        check("ParentDeformPartName names a FRAME, like every other reference in the prefab",
+            parentNameTotal > 0 && parentNameResolvesFrame == parentNameTotal,
+            $"{parentNameResolvesFrame} of {parentNameTotal}");
+        sb.AppendLine($"    Unk17 (index of the parent part) is set (not 65535) on {parentIndexTotal} parts "
+            + $"({parentIndexOutOfRange} had an out-of-range index); of those, the indexed part's own "
+            + $"Unk3[0] equals THIS part's ParentDeformPartName on {parentIndexAgreesWithName}");
+        check("Unk17's indexed part and ParentDeformPartName's hash agree on who the parent is",
+            parentIndexTotal > 0 && parentIndexAgreesWithName * 20 > parentIndexTotal * 19,
+            $"{parentIndexAgreesWithName} of {parentIndexTotal}");
+
+        // ── follow-up: can a part's own bone (Unk3[0]) serve as a stable, unique component identity? ──
+        sb.AppendLine($"\n  Unk3[0] uniqueness within a car ({carsWithPrefabAndFrames} cars with a prefab):");
+        sb.AppendLine($"    cars where no two parts share a frame        {carsWithNoUnk3Collision}");
+        sb.AppendLine($"    cars where two or more parts DO share one    {carsWithUnk3Collision}");
+        foreach (string e in unk3CollisionExamples) sb.AppendLine("      " + e);
+        check("a part's Unk3[0] is unique within its own car — a stable per-component key",
+            carsWithPrefabAndFrames > 0 && carsWithUnk3Collision == 0,
+            $"{carsWithUnk3Collision} of {carsWithPrefabAndFrames} cars have a collision");
+
+        // ── coverage the other way: of the rig's own bones, how many does a deform part actually name? ──
+        sb.AppendLine($"\n  bone coverage the other way ({bonesTotal} bones over {carsWithPrefabAndFrames} cars):");
+        sb.AppendLine($"    named by a deform part (Unk3[0])   {bonesOwnedByAPart} of {bonesTotal}");
+        sb.AppendLine($"    named by nothing (orphan bone)     {bonesOrphan} of {bonesTotal}");
+        sb.AppendLine("    orphan bones per car: " + string.Join(", ",
+            orphanCountHist.OrderBy(p => p.Key).Select(p => $"{p.Key}×{p.Value} cars")));
+        sb.AppendLine("    most common orphan bone names: " + string.Join(", ",
+            orphanBoneNameCounts.OrderByDescending(p => p.Value).Take(15)
+                .Select(p => $"{p.Key}×{p.Value}")));
+
+        // ── do deform bones (SmJointName) ever double as a part's own bone, in the same car? ──
+        sb.AppendLine($"\n  a deform bone's SmJointName is ALSO some part's own Unk3[0] in the same car: "
+            + $"{smDeformOverlapsPartBone} of {smDeformEntries}");
+
+        // ── markers: seats, climb boxes, fuel tanks, exhaust emitters, wipers, lights ──
+        sb.AppendLine("\n  marker frames, resolved through AttachmentReferences to a bone, against whether a "
+            + "deform part owns that bone:");
+        sb.AppendLine($"    {"",-16} {"markers",8} {"owned bone",11} {"unowned bone",13} {"no bone at all",15}");
+        foreach (string label in markerCounts.Keys)
+        {
+            int total = markerCounts[label];
+            int owned = markerOwned.GetValueOrDefault(label);
+            int unowned = markerUnownedBone.GetValueOrDefault(label);
+            int noBone = markerNoBone.GetValueOrDefault(label);
+            sb.AppendLine($"    {label,-16} {total,8} {owned,11} {unowned,13} {noBone,15}");
+        }
+        int markersTotal = markerCounts.Values.Sum();
+        int markersOwned = markerOwned.Values.Sum();
+        int markersUnowned = markerUnownedBone.Values.Sum();
+        int markersNoBone = markerNoBone.Values.Sum();
+        sb.AppendLine($"    total: {markersOwned} of {markersTotal} land on a bone some part owns, "
+            + $"{markersUnowned} of {markersTotal} on a bone no part owns, "
+            + $"{markersNoBone} of {markersTotal} resolve to no bone at all");
+
+        // ── follow-up: walking UP from an unowned marker's bone, does it reach an owned ancestor? ──
+        sb.AppendLine($"\n  ancestor fallback, for the {ancestorChecked} markers whose own bone is NOT owned:");
+        sb.AppendLine($"    reaches an owned ancestor        {ancestorResolved} of {ancestorChecked}");
+        sb.AppendLine($"    hits the rig root, none found    {ancestorHitRoot} of {ancestorChecked}");
+        sb.AppendLine($"    could not be walked at all       {ancestorCouldNotWalk} of {ancestorChecked}");
+        sb.AppendLine("    hops taken, raw: " + string.Join(", ",
+            ancestorHopHist.OrderBy(p => p.Key).Select(p => $"{p.Key}×{p.Value}")));
+        int hop1 = ancestorHopHist.GetValueOrDefault(1);
+        int hop2 = ancestorHopHist.GetValueOrDefault(2);
+        int hop3Plus = ancestorHopHist.Where(p => p.Key >= 3).Sum(p => p.Value);
+        sb.AppendLine($"    bucketed: 1 hop {hop1} of {ancestorResolved}   2 hops {hop2} of {ancestorResolved}   "
+            + $"3+ hops {hop3Plus} of {ancestorResolved}");
+        check("an unowned marker's own bone is never itself owned at 0 hops (definitional)",
+            !ancestorHopHist.ContainsKey(0), string.Join(",", ancestorHopHist.Keys));
+
+        sb.AppendLine("\n  which component the ancestor walk lands on, by marker label — bone name:");
+        foreach (string label in ancestorLandsOnBone.Keys.Select(k => k.Label).Distinct())
+        {
+            var row = ancestorLandsOnBone.Where(p => p.Key.Label == label)
+                .OrderByDescending(p => p.Value).Take(8);
+            sb.AppendLine($"    {label,-16} " + string.Join("  ", row.Select(p => $"{p.Key.Bone}×{p.Value}")));
+        }
+        sb.AppendLine("\n  which component the ancestor walk lands on, by marker label — part kind:");
+        foreach (string label in ancestorLandsOnKind.Keys.Select(k => k.Label).Distinct())
+        {
+            var row = ancestorLandsOnKind.Where(p => p.Key.Label == label).OrderByDescending(p => p.Value);
+            sb.AppendLine($"    {label,-16} " + string.Join("  ",
+                row.Select(p => $"{PartTypeNames.GetValueOrDefault(p.Key.PartType, p.Key.PartType.ToString())}"
+                    + $"×{p.Value}")));
+        }
+
+        // ── sanity check: the walk must not change any answer that was already "owned" ──
+        sb.AppendLine($"\n  sanity check — an already-owned marker's own bone resolves at 0 hops: "
+            + $"{sanityHopZero} of {sanityChecked} ({sanityMismatch} mismatched)");
+        check("the ancestor walk is a strict generalisation — it never changes an existing owned answer",
+            sanityChecked > 0 && sanityMismatch == 0, $"{sanityHopZero} of {sanityChecked}, {sanityMismatch} mismatched");
+
+        // ── the other direction: of the orphan bones, how many does SmDeformBones claim instead? ──
+        int orphanTotalChecked = orphanClaimedBySmDeform + orphanClaimedByNeither;
+        sb.AppendLine($"\n  of the {orphanTotalChecked} orphan bones (not a part's Unk3[0]):");
+        sb.AppendLine($"    claimed instead via SmDeformBones' SmJointName   {orphanClaimedBySmDeform} "
+            + $"of {orphanTotalChecked}");
+        sb.AppendLine($"    claimed by NEITHER link                          {orphanClaimedByNeither} "
+            + $"of {orphanTotalChecked}");
+        sb.AppendLine("    top 15 names claimed by neither link: " + string.Join(", ",
+            neitherClaimedNameCounts.OrderByDescending(p => p.Value).Take(15)
+                .Select(p => $"{p.Key}×{p.Value}")));
+
+        // ── follow-up: are the "claimed by neither link" bones real things, or plumbing? ──
+        int neitherTotal = orphanClaimedByNeither;
+        sb.AppendLine($"\n  of the {neitherTotal} bones claimed by NEITHER link, are they real things:");
+        sb.AppendLine($"\n  1. geometry — named as a split's bone via BoneRemapIDs[BlendIndex]:");
+        sb.AppendLine($"    with at least one split piece      {neitherWithGeometry} of {neitherTotal}");
+        sb.AppendLine($"    with no split at all                {neitherTotal - neitherWithGeometry} "
+            + $"of {neitherTotal}");
+        sb.AppendLine("    pieces-per-bone, of the ones with geometry: " + string.Join(", ",
+            neitherPiecesHist.OrderBy(p => p.Key).Select(p => $"{p.Key}×{p.Value}")));
+        sb.AppendLine("    top 15 names WITH geometry: " + string.Join(", ",
+            neitherWithGeomNameCounts.OrderByDescending(p => p.Value).Take(15)
+                .Select(p => $"{p.Key}×{p.Value}")));
+        sb.AppendLine("    top 15 names WITHOUT geometry: " + string.Join(", ",
+            neitherNoGeomNameCounts.OrderByDescending(p => p.Value).Take(15)
+                .Select(p => $"{p.Key}×{p.Value}")));
+
+        sb.AppendLine($"\n  2. hit boxes, of the {neitherWithGeometry} bones WITH geometry:");
+        sb.AppendLine($"    at least one non-placeholder hit box   {neitherGeomWithNonZeroBox} "
+            + $"of {neitherWithGeometry}");
+        sb.AppendLine($"    every piece's hit box is all-zero      "
+            + $"{neitherWithGeometry - neitherGeomWithNonZeroBox} of {neitherWithGeometry}");
+
+        sb.AppendLine($"\n  3. referenced by some OTHER prefab collection (headlight/backlight/toplight, "
+            + "snow rest, wipers, driving wheels, fuel tanks, exhaust emitters, axle name/brake drum/rot "
+            + "wing, window, door points, seat (+its door), climb box dummy/bone):");
+        sb.AppendLine($"    claimed by at least one such reference   {neitherClaimedByOtherRef} "
+            + $"of {neitherTotal}");
+        sb.AppendLine($"    claimed by NOTHING in the whole prefab   {neitherClaimedByNothingAtAll} "
+            + $"of {neitherTotal}");
+        sb.AppendLine("    per collection: " + string.Join(", ",
+            neitherRefCollectionCounts.OrderByDescending(p => p.Value).Select(p => $"{p.Key}×{p.Value}")));
+
+        sb.AppendLine($"\n  4. attachments — a helper frame (Dummy/Point) hung off it via AttachmentReferences:");
+        sb.AppendLine($"    with at least one attachment   {neitherWithAttachment} of {neitherTotal}");
+        sb.AppendLine($"    with none                      {neitherTotal - neitherWithAttachment} "
+            + $"of {neitherTotal}");
 
         // ── what a hashed volume actually names ──
         sb.AppendLine($"\n  a volume that carries a pair of hashes ({hash5Total} of them):");
@@ -2196,6 +2841,294 @@ internal static class CarPhysicsProbes
                      .Where(k => !PartTypeNames.ContainsKey(k.Part)).Distinct().OrderBy(k => k.Part))
         {
             sb.AppendLine($"    {partType,2} (unnamed) type {volumeType}×{typeByPart[(partType, volumeType)]}");
+        }
+    }
+
+    /// <summary>
+    /// Whether a bone's geometry survives to the far LOD, or drops out — the fact that decides whether a
+    /// "component" is one geometry or a ragged list of them.
+    /// <para>
+    /// The split/hit-box table (<c>BlendMeshSplits</c>) is ONE block shared across LODs (docs/car-anatomy.md:
+    /// quantization, bounds and BlendMeshSplits all break LOD0 if edited through LOD1), so a piece cannot
+    /// "not be there" by having a different table — the only way a piece is absent at a LOD is if its face
+    /// range does not fit inside THAT LOD's own (shorter) index buffer. A split's bone is
+    /// <c>BoneRemapIDs[BlendIndex]</c> (measured: right 98.89% of the time, docs/car-anatomy.md), and the flat
+    /// remap table is PER LOD (<c>FrameBlendInfo.BoneIndexInfos[lod]</c>) — resolved here through each LOD's
+    /// own table, never LOD0's reused, per the explicit ask.
+    /// </para>
+    /// <para>
+    /// <c>FrameSkeleton.BoneLODUsage</c> / <c>MappingForBlendingInfo.RefToUsageArray</c>/<c>UsageArray</c> look
+    /// like a more direct answer to "which bones does this LOD use", but their own doc comments carry
+    /// unresolved TODOs ("my suspicion is...") — not measured elsewhere in this codebase, so they are not
+    /// trusted here. The split/index-buffer reading above is the one already established and tested
+    /// (<c>--probe-bullets</c>, <c>BulletProbes.PiecesOf</c>) and is used unchanged.
+    /// </para>
+    /// </summary>
+    private static void LodCoverage(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ LOD coverage: does a bone's geometry survive to the far level? ════");
+
+        FileInfo[] archives = new DirectoryInfo(folder).GetFiles("*.sds");
+        Array.Sort(archives, (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+        // Q1: LOD count, over every extracted archive AND over just the ones with a car prefab.
+        var lodCountAll = new Dictionary<int, int>();
+        var lodCountPrefab = new Dictionary<int, int>();
+        int allCars = 0, prefabCars = 0;
+
+        // Q2-Q4: per-bone LOD presence, split three ways.
+        const string BucketOwned = "Unk3[0] owned";
+        const string BucketNeither = "claimed by neither link";
+        const string BucketOther = "everything else";
+        var lodsPresentHist = new Dictionary<(string Bucket, int Lods), int>();
+        var lod0ByBucket = new Dictionary<string, int>();
+        var vanishByBucket = new Dictionary<string, int>();
+        var bothByBucket = new Dictionary<string, int>();
+        var lod1OnlyByBucket = new Dictionary<string, int>();
+        var vanishNameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var reverseNameCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        int twoLodCars = 0, otherLodCars = 0, noRemapForLod = 0;
+
+        // Q5: bone-palette size per LOD.
+        int remapMismatch = 0, remapPairs = 0, lod1Smaller = 0, lod1Equal = 0, lod1Bigger = 0;
+        long sumLod0 = 0, sumLod1 = 0;
+
+        foreach (FileInfo sds in archives)
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            FrameResource? fr;
+            try { fr = SdsMeshLoader.OpenScene(extracted).FrameResource; }
+            catch (Exception) { continue; }
+            if (fr?.FrameObjects == null) continue;
+
+            FrameObjectModel? carModel = fr.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
+            if (carModel == null) continue;
+            allCars++;
+
+            int totalLods = carModel.Geometry?.LOD?.Length ?? 0;
+            lodCountAll[totalLods] = lodCountAll.GetValueOrDefault(totalLods) + 1;
+
+            // Is this one of the 85 cars with a car prefab? Same gate Census uses.
+            string? prf = null;
+            try { prf = SdsManifest.Load(extracted).GetFiles("PREFAB").FirstOrDefault(); }
+            catch (Exception) { /* no manifest, no prefab */ }
+            PrefabEntryW? entry = null;
+            if (prf != null)
+            {
+                try
+                {
+                    PrefabFile file = PrefabFile.Load(prf);
+                    entry = file.Wire.Prefabs.FirstOrDefault(p => p.CarInit.Count > 0);
+                }
+                catch (Exception) { entry = null; }
+            }
+            if (entry == null || entry.CarInit[0].Deformation.Count == 0) continue;
+            prefabCars++;
+            lodCountPrefab[totalLods] = lodCountPrefab.GetValueOrDefault(totalLods) + 1;
+            List<PrefabDeformPartW> deformParts = entry.CarInit[0].Deformation[0].DeformParts;
+
+            // The bone table and the two ownership sets, rebuilt exactly as the main census does.
+            string[] carBonesByJoint = (carModel.GetSkeletonObject().BoneNames ?? [])
+                .Select(n => n.ToString() ?? "").ToArray();
+            var boneHashes = new Dictionary<ulong, string>();
+            foreach (string n in carBonesByJoint)
+            {
+                if (n.Length > 0) boneHashes.TryAdd(Fnv64.Hash(n), n);
+            }
+            var ownedSet = new HashSet<ulong>();
+            var smSet = new HashSet<ulong>();
+            foreach (PrefabDeformPartW p in deformParts)
+            {
+                if (p.Unk3.Count > 0) ownedSet.Add(p.Unk3[0]);
+                foreach (PrefabSmDeformBoneW sm in p.SmDeformBones) smSet.Add(sm.SmJointName);
+            }
+
+            // ── per-LOD split presence: for each LOD, which bone hashes have >= 1 piece whose face range
+            // fits inside THAT LOD's own index buffer, resolved through THAT LOD's own remap table ──
+            Illusion.Formats.Frames.Resources.FrameBlendInfo.BoneIndexInfo[] blendLods = [];
+            try { blendLods = carModel.GetBlendInfoObject().BoneIndexInfos ?? []; }
+            catch (Exception) { /* no blend info: nothing can be attributed to a bone at any LOD */ }
+
+            var presentAt = new List<HashSet<ulong>>();
+            for (int lod = 0; lod < totalLods; lod++)
+            {
+                var here = new HashSet<ulong>();
+                if (lod >= blendLods.Length)
+                {
+                    noRemapForLod++;
+                    presentAt.Add(here);
+                    continue;
+                }
+                byte[] remap = blendLods[lod].BoneRemapIDs ?? [];
+                int indexLen = carModel.GetIndexBuffer(lod)?.GetData()?.Length ?? 0;
+                foreach (FrameObjectModel.WeightedByMeshSplit split in carModel.BlendMeshSplits ?? [])
+                {
+                    int boneId = split.BlendIndex < remap.Length ? remap[split.BlendIndex] : -1;
+                    if (boneId < 0 || boneId >= carBonesByJoint.Length) continue;
+                    ulong hash = Fnv64.Hash(carBonesByJoint[boneId]);
+                    if (here.Contains(hash)) continue;
+
+                    bool anyRangeFits = false;
+                    foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+                    {
+                        foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                        {
+                            foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                            {
+                                if (range.StartIndex + (range.NumFaces * 3) <= indexLen) { anyRangeFits = true; break; }
+                            }
+                            if (anyRangeFits) break;
+                        }
+                        if (anyRangeFits) break;
+                    }
+                    if (anyRangeFits) here.Add(hash);
+                }
+                presentAt.Add(here);
+            }
+
+            if (totalLods == 2) twoLodCars++; else if (totalLods > 0) otherLodCars++;
+
+            // ── classify every bone that has geometry ANYWHERE into the 3 buckets, and measure coverage ──
+            foreach ((ulong boneHash, string boneName) in boneHashes)
+            {
+                bool hasAnyGeometry = presentAt.Any(set => set.Contains(boneHash));
+                if (!hasAnyGeometry) continue;
+
+                string bucket = ownedSet.Contains(boneHash) ? BucketOwned
+                    : !smSet.Contains(boneHash) ? BucketNeither
+                    : BucketOther;
+
+                int lodsPresent = presentAt.Count(set => set.Contains(boneHash));
+                lodsPresentHist[(bucket, lodsPresent)] =
+                    lodsPresentHist.GetValueOrDefault((bucket, lodsPresent)) + 1;
+
+                if (totalLods == 2)
+                {
+                    bool inLod0 = presentAt[0].Contains(boneHash);
+                    bool inLod1 = presentAt[1].Contains(boneHash);
+                    if (inLod0)
+                    {
+                        lod0ByBucket[bucket] = lod0ByBucket.GetValueOrDefault(bucket) + 1;
+                        if (inLod1) bothByBucket[bucket] = bothByBucket.GetValueOrDefault(bucket) + 1;
+                        else
+                        {
+                            vanishByBucket[bucket] = vanishByBucket.GetValueOrDefault(bucket) + 1;
+                            vanishNameCounts[boneName] = vanishNameCounts.GetValueOrDefault(boneName) + 1;
+                        }
+                    }
+                    if (inLod1 && !inLod0)
+                    {
+                        lod1OnlyByBucket[bucket] = lod1OnlyByBucket.GetValueOrDefault(bucket) + 1;
+                        reverseNameCounts[boneName] = reverseNameCounts.GetValueOrDefault(boneName) + 1;
+                    }
+                }
+            }
+
+            // ── Q5: bone-palette size per LOD, cross-checked two ways ──
+            int[] lodRemapIdCount = carModel.GetSkeletonObject().LodRemapIDCount ?? [];
+            for (int lod = 0; lod < totalLods && lod < blendLods.Length; lod++)
+            {
+                int fromSkeleton = lod < lodRemapIdCount.Length ? lodRemapIdCount[lod] : -1;
+                int fromBlend = blendLods[lod].BoneRemapIDs?.Length ?? -1;
+                if (fromSkeleton >= 0 && fromBlend >= 0 && fromSkeleton != fromBlend) remapMismatch++;
+            }
+            if (totalLods == 2 && blendLods.Length >= 2)
+            {
+                int p0 = blendLods[0].BoneRemapIDs?.Length ?? 0;
+                int p1 = blendLods[1].BoneRemapIDs?.Length ?? 0;
+                remapPairs++;
+                sumLod0 += p0;
+                sumLod1 += p1;
+                if (p1 < p0) lod1Smaller++; else if (p1 > p0) lod1Bigger++; else lod1Equal++;
+            }
+        }
+
+        // ── report ──
+        sb.AppendLine($"  the reading applied: BoneRemapIDs[BlendIndex] resolved through EACH LOD's OWN flat "
+            + "remap table (FrameBlendInfo.BoneIndexInfos[lod]) — LOD1 is never resolved against LOD0's table.");
+        sb.AppendLine($"  a piece counts as present at a LOD when at least one face range fits inside THAT "
+            + "LOD's own index buffer length; the split/hit-box table itself is one block shared by both LODs.");
+
+        sb.AppendLine($"\n  1. LOD count per model:");
+        sb.AppendLine($"    over all {allCars} extracted archives:      " + string.Join(", ",
+            lodCountAll.OrderBy(p => p.Key).Select(p => $"{p.Key} LODs×{p.Value}")));
+        sb.AppendLine($"    over the {prefabCars} with a car prefab:    " + string.Join(", ",
+            lodCountPrefab.OrderBy(p => p.Key).Select(p => $"{p.Key} LODs×{p.Value}")));
+        check("every car with a prefab carries exactly 2 LODs",
+            prefabCars > 0 && lodCountPrefab.Count == 1 && lodCountPrefab.ContainsKey(2),
+            string.Join(", ", lodCountPrefab.Select(p => $"{p.Key}×{p.Value}")));
+        check("the LOD count is the same on the wider 106-archive set as on the 85 with a prefab",
+            lodCountAll.Count == lodCountPrefab.Count
+            && lodCountAll.Keys.All(k => lodCountPrefab.ContainsKey(k)),
+            $"all: {string.Join(",", lodCountAll.Keys.OrderBy(k => k))}  "
+                + $"prefab: {string.Join(",", lodCountPrefab.Keys.OrderBy(k => k))}");
+        sb.AppendLine($"    cars with exactly 2 LODs: {twoLodCars}; other LOD counts: {otherLodCars}; "
+            + $"LODs with no remap table at all: {noRemapForLod}");
+
+        sb.AppendLine($"\n  2. per-bone LOD coverage, of bones that have geometry SOMEWHERE, split three ways:");
+        foreach (string bucket in new[] { BucketOwned, BucketNeither, BucketOther })
+        {
+            var row = lodsPresentHist.Where(p => p.Key.Bucket == bucket).OrderBy(p => p.Key.Lods).ToList();
+            int total = row.Sum(p => p.Value);
+            sb.AppendLine($"    {bucket,-24} {total,5} bones   " + string.Join(", ",
+                row.Select(p => $"{p.Key.Lods} LOD(s)×{p.Value}")));
+        }
+
+        sb.AppendLine($"\n  bones present in LOD0 but ABSENT from LOD1 (\"vanish\"), among cars with exactly "
+            + "2 LODs, by bucket:");
+        int lod0TotalAll = 0, vanishTotalAll = 0, bothTotalAll = 0, lod1OnlyTotalAll = 0;
+        foreach (string bucket in new[] { BucketOwned, BucketNeither, BucketOther })
+        {
+            int lod0 = lod0ByBucket.GetValueOrDefault(bucket);
+            int vanish = vanishByBucket.GetValueOrDefault(bucket);
+            int both = bothByBucket.GetValueOrDefault(bucket);
+            lod0TotalAll += lod0; vanishTotalAll += vanish; bothTotalAll += both;
+            sb.AppendLine($"    {bucket,-24} vanish {vanish,5} of {lod0,5} in LOD0  (survive: {both})");
+        }
+        sb.AppendLine($"    TOTAL                    vanish {vanishTotalAll,5} of {lod0TotalAll,5} in LOD0  "
+            + $"(survive: {bothTotalAll})");
+        check("some LOD0 geometry does not survive to LOD1",
+            lod0TotalAll > 0 && vanishTotalAll > 0, $"{vanishTotalAll} of {lod0TotalAll}");
+
+        sb.AppendLine("\n  3. top 20 names of bones present in LOD0 but absent from LOD1:");
+        sb.AppendLine("    " + string.Join(", ", vanishNameCounts.OrderByDescending(p => p.Value).Take(20)
+            .Select(p => $"{p.Key}×{p.Value}")));
+
+        sb.AppendLine("\n  4. the reverse — bones present in LOD1 but NOT LOD0:");
+        foreach (string bucket in new[] { BucketOwned, BucketNeither, BucketOther })
+        {
+            lod1OnlyTotalAll += lod1OnlyByBucket.GetValueOrDefault(bucket);
+        }
+        sb.AppendLine($"    total: {lod1OnlyTotalAll} (by bucket: " + string.Join(", ",
+            new[] { BucketOwned, BucketNeither, BucketOther }
+                .Select(b => $"{b}={lod1OnlyByBucket.GetValueOrDefault(b)}")) + ")");
+        if (lod1OnlyTotalAll > 0)
+        {
+            sb.AppendLine("    names: " + string.Join(", ", reverseNameCounts.OrderByDescending(p => p.Value)
+                .Take(20).Select(p => $"{p.Key}×{p.Value}")));
+        }
+        check("nothing has geometry in LOD1 that is missing from LOD0",
+            lod1OnlyTotalAll == 0, $"{lod1OnlyTotalAll} counterexamples");
+
+        sb.AppendLine($"\n  5. bone-palette size per LOD (FrameSkeleton.LodRemapIDCount / "
+            + $"FrameBlendInfo.BoneIndexInfos[lod].BoneRemapIDs.Length — {remapMismatch} disagreements "
+            + "between the two, over every LOD of every car with a prefab):");
+        if (remapPairs > 0)
+        {
+            double avgLod0 = (double)sumLod0 / remapPairs;
+            double avgLod1 = (double)sumLod1 / remapPairs;
+            sb.AppendLine($"    average palette size — LOD0: {avgLod0:F1}   LOD1: {avgLod1:F1}   "
+                + $"(LOD1 is smaller on average by {avgLod0 - avgLod1:F1})");
+            sb.AppendLine($"    LOD1 smaller: {lod1Smaller} of {remapPairs}   equal: {lod1Equal} of {remapPairs}   "
+                + $"LOD1 bigger: {lod1Bigger} of {remapPairs}");
+            check("the far LOD uses a smaller (or equal) bone palette than LOD0, never a bigger one",
+                remapPairs > 0 && lod1Bigger == 0, $"{lod1Bigger} of {remapPairs} had a BIGGER LOD1 palette");
+        }
+        else
+        {
+            sb.AppendLine("    no 2-LOD car with a resolvable remap table on both levels");
         }
     }
 
@@ -3168,6 +4101,11 @@ internal static class CarPhysicsProbes
     /// <summary>Tallies one value of a field whose vocabulary is being surveyed.</summary>
     private static void Bump(Dictionary<short, int> into, short value) =>
         into[value] = into.GetValueOrDefault(value) + 1;
+
+    /// <summary>A hit box that is not just a zeroed placeholder — position or size carries something.</summary>
+    private static bool IsNonZeroBox(FrameObjectModel.HitBoxInfo b) =>
+        b.Position.S1 != 0 || b.Position.S2 != 0 || b.Position.S3 != 0
+        || b.Size.S1 != 0 || b.Size.S2 != 0 || b.Size.S3 != 0;
 
     private static bool IsRotationIdentity(Matrix4x4 m) =>
         MathF.Abs(m.M11 - 1f) < 1e-4f && MathF.Abs(m.M22 - 1f) < 1e-4f && MathF.Abs(m.M33 - 1f) < 1e-4f
