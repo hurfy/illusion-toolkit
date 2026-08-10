@@ -194,6 +194,44 @@
             </Setter>
         </Style>
 
+        <!-- One half of a two-way switch between two READINGS of the same thing — the scene panel's
+             Components | Raw. Same cell shape and accent as the numbered strip below it, but radio buttons:
+             there are exactly two, they are named rather than numbered, and neither is a list of anything. -->
+        <Style x:Key="SegmentButton" TargetType="RadioButton">
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
+            <Setter Property="Background" Value="{StaticResource SurfaceControl}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                                Padding="10,0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SurfaceControlHot}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Accent}" />
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- A numbered strip for picking one of a handful of same-shaped things — the tuning tab's tables.
              Same visual language as the render-mode selector below (rounded cell, accent when current), but
              a ListBox rather than radio buttons: the selection is bound, not counted, and arrow keys work.

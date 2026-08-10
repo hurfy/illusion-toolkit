@@ -1,4 +1,6 @@
+using Illusion.Assets.Adapters;
 using Illusion.Assets.Sds;
+using Illusion.Domain;
 using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
@@ -153,6 +155,44 @@ public sealed partial class Car
                 // whose bone does not resolve, which is a diagnosis rather than a crash.
             }
             return Stitch(prefab, frames, lod, previous, file, extracted);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the car of an archive that is already OPEN — the one the editor stages, stitched against the
+    /// frame graph the viewport is drawing rather than against a second copy read off disk.
+    ///
+    /// <para>
+    /// Which matters twice. A bone renamed or a frame minted this session exists only in that graph, so a car
+    /// read from the file would show a component the modder has already changed the name of; and holding a
+    /// second frame resource for a car the editor already has open is megabytes of duplicate for a tree.
+    /// The prefab itself IS read from the working copy, because that is where a prefab edit lands the moment
+    /// it is made — the same rule the property panel's own read follows.
+    /// </para>
+    /// </summary>
+    /// <param name="document">The staged frame document. A document this layer does not recognise falls back
+    /// to <see cref="Read(FileInfo, int, Car?)"/>, which reads both halves off disk.</param>
+    /// <returns>
+    /// Null when the archive carries no car prefab — which is most archives.
+    /// <para>
+    /// A read that FAILS throws rather than returning null, which is the difference between "this is not a
+    /// car" and "I could not tell". The caller shows a hierarchy either way, but only the first of those is
+    /// an answer worth remembering: memoing a working copy that was locked for a moment would leave the
+    /// archive with no components for the rest of the session.
+    /// </para>
+    /// </returns>
+    public static Car? ReadStaged(ISceneDocument document, int lod = 0, Car? previous = null)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (document is not SceneDocumentAdapter staged) return Read(document.SourceArchive, lod, previous);
+
+        string extracted = MafiaEnvironment.ExtractedDir(document.SourceArchive);
+        foreach (string file in SdsManifest.Load(extracted).GetFiles("PREFAB"))
+        {
+            PrefabFile prefab = PrefabFile.Load(file);
+            if (prefab.Car == null) continue;
+            return Stitch(prefab, staged.Frame, lod, previous, file, extracted);
         }
         return null;
     }

@@ -40,6 +40,25 @@ public sealed class UserSettings
     /// something to download. Off leaves the settings window's own check, which is always available.</summary>
     public bool CheckUpdatesOnStartup { get; set; } = true;
 
+    private List<string>? _rawSceneTree;
+
+    /// <summary>
+    /// The archives whose hierarchy the user left on RAW — file names, lower-cased, without the folder.
+    ///
+    /// <para>
+    /// A car opens on its components, so only the DEVIATIONS are stored: an archive absent from this list is
+    /// one the modder never switched, and a car that gains a component view in a later build therefore opens
+    /// on it rather than inheriting an empty preference. Keyed by the file's name and not its path, because
+    /// the same car under a reinstalled game is the same car.
+    /// </para>
+    /// </summary>
+    public List<string> RawSceneTree
+    {
+        // Never null, whoever wrote the file: "RawSceneTree": null is as legal in JSON as a missing key.
+        get => _rawSceneTree ??= [];
+        set => _rawSceneTree = value;
+    }
+
     private Dictionary<string, string>? _hotkeys;
 
     /// <summary>

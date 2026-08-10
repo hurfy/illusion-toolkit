@@ -750,6 +750,17 @@ internal static class ProbeRunner
                 CarComponentProbes.RunCarComponentsProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // Whether opening a car shows the CAR rather than the file: the scene panel built headless around
+            // one staged archive, with the component tree in the hierarchy's row — every component a row,
+            // named after its own bone and nested by the prefab's parent link, the bare ones alongside, the
+            // Components | Raw switch putting the frame tree back exactly as it was, a selection surviving
+            // that switch both ways, and an archive that is not a car left on its frames. Writes (and
+            // restores) the switch's per-archive position in settings.json. Optional arg = the car to focus
+            // on. Output: %TEMP%\illusion_component_tree.txt
+            case "--probe-component-tree":
+                ComponentTreeProbes.RunComponentTreeProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // The carry-verbatim guarantee: every shipped car read through the Car aggregate, saved again
             // with no edit, and compared byte for byte with the file it came from — plus what a save that DID
             // change something reports, which has to name the field rather than a byte offset. Every save is
