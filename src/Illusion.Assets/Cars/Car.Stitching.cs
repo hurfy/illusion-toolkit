@@ -115,6 +115,11 @@ public sealed partial class Car
         List<CarMarker> markers = car == null ? [] : HangMarkers(car, rig, byBone, body, faults);
         List<CarComponent> roots = [.. components.Where(c => c.Parent == null)];
 
+        // ── what did not stitch, beyond what the passes above already named ──
+        if (car != null) MatchRows(car, byBone, components, rig, faults);
+        LostGeometry(rig, byBone, handleBones, previous, lod, byAnchor, faults);
+        OffTheNameTable(rig, components, body, faults);
+
         var stitched = new Car(prefab, frames, prefabPath, extracted, lod, components, roots, body, markers,
             faults, byBone, byAnchor);
         // What the prefab file holds right now, so a later save can tell whether somebody else has written it
@@ -240,6 +245,213 @@ public sealed partial class Car
     }
 
     /// <summary>
+    /// Lines the deform parts up against the prefab's OTHER collections, in both directions.
+    ///
+    /// <para>
+    /// A door is written down in two places that share nothing but a hash: the deform part that says it
+    /// crumples, and the door row that says where its handle and its lock are. Nothing in the format keeps the
+    /// two in step, so each can name a bone the other has never heard of — and both halves of that
+    /// disagreement are worth a modder's attention, because each of them is half a door.
+    /// </para>
+    /// <para>
+    /// Only the collections that name a BONE are lined up. Seats, climb boxes, fuel tanks and exhaust
+    /// emitters name a Dummy or a Point hung off one, and they are already stitched as markers.
+    /// </para>
+    /// </summary>
+    private static void MatchRows(
+        CarPrefab car, Dictionary<ulong, CarComponent> byBone, List<CarComponent> components, Rig rig,
+        List<CarFault> faults)
+    {
+        // A car whose frame resource could not be opened stitches on purpose (see Car.ReadFrom), and there is
+        // nothing to line the rows up AGAINST — every one of them would name a hash nobody has heard of, and
+        // sixty raw-hex lines would bury the one fault that says the rig never loaded.
+        if (rig.BoneNames.Count == 0) return;
+
+        foreach ((string label, ulong bone) in BoneRows(car))
+        {
+            // Drawn ANYWHERE, not drawn at this level. A component's existence is LOD-scoped and 4882 of 5046
+            // bones carry nothing at the far level, so asking byBone alone would turn a switch to LOD 1 into
+            // one long fault about a car nobody has touched.
+            if (bone == 0 || byBone.ContainsKey(bone) || rig.Drawn.Contains(bone)) continue;
+            faults.Add(new CarFault(CarFaultKind.RowWithoutComponent,
+                $"{label} names {Named(bone, rig)}, which is no component of this car",
+                ShipsThisWay: true));
+        }
+
+        // The other direction, and only for the two kinds the file keeps a collection of. A bumper has no
+        // bumper list to be missing from, so asking whether it is in one would invent a fault the format has
+        // no room for.
+        var doors = new HashSet<ulong>(car.Doors.Select(d => d.Frame));
+        var windows = new HashSet<ulong>(car.Windows.Select(w => w.Frame));
+        foreach (CarComponent component in components)
+        {
+            if (component.BoneHash == 0) continue;
+            HashSet<ulong>? rows = component.PartType switch
+            {
+                DoorPartType => doors,
+                WindowPartType => windows,
+                _ => null,
+            };
+            if (rows == null || rows.Contains(component.BoneHash)) continue;
+            faults.Add(new CarFault(CarFaultKind.ComponentWithoutRow,
+                $"part {component.PartIndex} (\"{component.Name}\", {component.Kind}) has no row in this "
+                + $"car's {component.Kind} list", component.Id, ShipsThisWay: true));
+        }
+    }
+
+    /// <summary>The engine's part kinds that have a sibling collection keyed on the part's own bone.</summary>
+    private const uint DoorPartType = 4;
+
+    private const uint WindowPartType = 5;
+
+    /// <summary>Every row of the prefab that names a BONE, labelled the way a modder would name it. Measured:
+    /// door 193/193, window 527/527, axle 360/360, wiper 148/148 and steering wheel 83/83 name a bone and
+    /// never a helper frame.</summary>
+    private static IEnumerable<(string Label, ulong Bone)> BoneRows(CarPrefab car)
+    {
+        IReadOnlyList<CarPrefab.DoorPoints> doors = car.Doors;
+        for (int i = 0; i < doors.Count; i++)
+        {
+            yield return (Numbered("Door", i, doors.Count), doors[i].Frame);
+        }
+        IReadOnlyList<CarPrefab.Window> windows = car.Windows;
+        for (int i = 0; i < windows.Count; i++)
+        {
+            yield return (Numbered("Window", i, windows.Count), windows[i].Frame);
+        }
+        IReadOnlyList<CarPrefab.Axle> axles = car.Axles;
+        for (int i = 0; i < axles.Count; i++)
+        {
+            yield return (Numbered("Axle", i, axles.Count), axles[i].Frame);
+            yield return (Numbered("Brake drum", i, axles.Count), axles[i].BrakeDrum);
+            // "Rot wing" rather than "Axle rot wing": three collections come out of one loop, and a label
+            // that starts with another label's is one nothing downstream can tell apart.
+            yield return (Numbered("Rot wing", i, axles.Count), axles[i].RotWing);
+        }
+        for (int i = 0; i < car.Wipers.Count; i++)
+        {
+            yield return (Numbered("Wiper", i, car.Wipers.Count), car.Wipers[i]);
+        }
+        for (int i = 0; i < car.DrivingWheels.Count; i++)
+        {
+            yield return (Numbered("Driving wheel", i, car.DrivingWheels.Count), car.DrivingWheels[i]);
+        }
+    }
+
+    /// <summary>
+    /// Bones whose geometry is gone — the one failure a tolerant reader would otherwise hide.
+    ///
+    /// <para>
+    /// A bare component is minted FROM its geometry, so losing the last of it breaks nothing visibly: the row
+    /// simply stops appearing on the next resolve, and the modder is left hunting for a licence plate that was
+    /// there a push ago. It reads two ways, and both are here because they are different accidents. A bone
+    /// still holding its SEAT in the split table with no face left in it is a rebuild that emptied the pieces;
+    /// a bone that had a component last time and mints none now is a push that took the split with it, which
+    /// is the irreversible one — geometry weighted to that bone afterwards has nowhere to go.
+    /// </para>
+    /// </summary>
+    private static void LostGeometry(
+        Rig rig, Dictionary<ulong, CarComponent> byBone, HashSet<ulong> handleBones, Car? previous, int lod,
+        Dictionary<long, ComponentId> byAnchor, List<CarFault> faults)
+    {
+        var said = new HashSet<ulong>();
+        foreach (ulong bone in rig.DeadSeats)
+        {
+            if (byBone.ContainsKey(bone) || handleBones.Contains(bone)) continue;
+            said.Add(bone);
+            // Shipped: `deform_top_roof` on berkley_kingfisher_pha is written exactly this way, and it is the
+            // same bone the component census names as the difference between 2587 and 2586.
+            faults.Add(new CarFault(CarFaultKind.BareComponentLostGeometry,
+                $"{Named(bone, rig)} still holds its seat in the split table and no piece of it has a face "
+                + "left", ShipsThisWay: true));
+        }
+
+        // Against the previous stitch, and only at the SAME level: a component that has geometry at LOD 0 and
+        // none at LOD 1 is 96.7 % of them, and calling that a loss would make the far level one long fault.
+        if (previous == null || previous.Lod != lod) return;
+        foreach (CarComponent was in previous.Components)
+        {
+            int joint = was.BoneJoint;
+            if (!was.IsBare || joint < 0 || joint >= rig.BonesByJoint.Length) continue;
+            // Still standing under this anchor — renamed, or given a deform part of its own, but not lost.
+            if (byAnchor.ContainsKey(Anchor(joint, partIndex: -1))) continue;
+
+            // The bone this joint holds NOW, and the one the component stood on THEN. Both have to be dark
+            // before this is a loss: a push that inserts a bone renumbers every joint above it, and reading
+            // the new rig at the old joint number would then report a component that has merely moved down a
+            // row — still drawn, still in the tree — as having lost everything.
+            ulong bone = Fnv64.Hash(rig.BonesByJoint[joint]);
+            // Only geometry loss. A bone some part has since claimed as a deform handle stopped being a
+            // component for a reason of its own, and naming that a lost panel would be a false alarm.
+            if (rig.Pieces.GetValueOrDefault(bone) > 0 || rig.Pieces.GetValueOrDefault(was.BoneHash) > 0
+                || handleBones.Contains(bone) || !said.Add(bone))
+            {
+                continue;
+            }
+            faults.Add(new CarFault(CarFaultKind.BareComponentLostGeometry,
+                $"\"{was.Name}\" had geometry when this car was last read and has none now", was.Id));
+        }
+    }
+
+    /// <summary>
+    /// Components the game will load and not draw.
+    ///
+    /// <para>
+    /// The frame name table is what says which frames of an archive are instantiated at all; a frame the table
+    /// does not reach loads and is invisible, and nothing else in the archive disagrees — no reader complains,
+    /// no count is off. So the editor is the only place it can be caught, and the alternative is spawning the
+    /// car and noticing that a part of it is not there.
+    /// </para>
+    /// <para>
+    /// REACHED, not listed. Measured over the 85 shipped cars: not one of their models is on the table itself
+    /// — what is on it is 247 holder frames, three per car (the car, its <c>_rain</c> variant and a numbered
+    /// entry), and the model hangs off one of them at exactly one hop, 85 of 85. So membership is a question
+    /// about the parent chain, and asking it of the frame alone would call every shipped car invisible.
+    /// </para>
+    /// </summary>
+    private static void OffTheNameTable(
+        Rig rig, List<CarComponent> components, CarComponent? body, List<CarFault> faults)
+    {
+        // The model first, because every component of a car is a weight group inside one skinned mesh: it out
+        // of the table's reach is not one invisible panel, it is the whole car.
+        if (rig.Model is { } model && !Reaches(model))
+        {
+            faults.Add(new CarFault(CarFaultKind.FrameNotOnNameTable,
+                $"the model \"{model.Name?.String}\" this car is drawn from is not reached from the frame "
+                + "name table, so none of it is drawn in game", body?.Id ?? ComponentId.None));
+        }
+        foreach (CarComponent component in components)
+        {
+            if (component.BoneHash == 0
+                || !rig.FrameByHash.TryGetValue(component.BoneHash, out FrameObjectBase? frame)
+                || ReferenceEquals(frame, rig.Model) || Reaches(frame))
+            {
+                continue;
+            }
+            faults.Add(new CarFault(CarFaultKind.FrameNotOnNameTable,
+                $"\"{component.Name}\" has a frame of its own that the frame name table does not reach, so "
+                + "it loads and is invisible in game", component.Id));
+        }
+    }
+
+    /// <summary>Whether the frame name table reaches this frame — itself, or anything above it. Depth-capped
+    /// rather than trusting the chain: a parent loop in an edited archive would otherwise be walked for
+    /// ever, and this runs on every scene change.</summary>
+    private static bool Reaches(FrameObjectBase frame)
+    {
+        FrameObjectBase? at = frame;
+        for (int depth = 0; at != null && depth < 64; depth++, at = at.Parent)
+        {
+            if (at.IsOnFrameTable) return true;
+        }
+        return false;
+    }
+
+    /// <summary>A bone as a modder would read it: its name in quotes, or the bare hash when the rig has none.</summary>
+    private static string Named(ulong bone, Rig rig) =>
+        rig.BoneNames.TryGetValue(bone, out string? name) ? $"\"{name}\"" : Hex(bone);
+
+    /// <summary>
     /// Resolves every marker to the component owning the bone it hangs off, and to the body otherwise.
     ///
     /// <para>
@@ -340,6 +552,9 @@ public sealed partial class Car
     {
         internal string[] BonesByJoint { get; set; } = [];
 
+        /// <summary>The model the car is drawn from — one skinned mesh, whose bones ARE its parts.</summary>
+        internal FrameObjectModel? Model { get; set; }
+
         /// <summary>Every bone of every model in the archive, by the FNV64 of its name.</summary>
         internal Dictionary<ulong, string> BoneNames { get; } = [];
 
@@ -353,6 +568,18 @@ public sealed partial class Car
 
         /// <summary>How many split pieces each bone carries at the level being read.</summary>
         internal Dictionary<ulong, int> Pieces { get; } = [];
+
+        /// <summary>
+        /// Bones that hold a seat in the split table and no face anywhere in it. Not a per-level question —
+        /// the split table is one block shared by both levels, so a bone with no face range at all is drawn
+        /// at neither.
+        /// </summary>
+        internal HashSet<ulong> DeadSeats { get; } = [];
+
+        /// <summary>The other side of the same reading: bones whose splits hold at least one face, at either
+        /// level. What says a row points at real geometry even when the level on screen does not draw it.
+        /// </summary>
+        internal HashSet<ulong> Drawn { get; } = [];
     }
 
     private static Rig ReadRig(FrameResource? frames, int lod)
@@ -374,6 +601,7 @@ public sealed partial class Car
         var models = frames.FrameObjects.Values.OfType<FrameObjectModel>().ToList();
         FrameObjectModel? car = models.FirstOrDefault();
         if (car == null) return rig;
+        rig.Model = car;
 
         for (int m = 0; m < models.Count; m++)
         {
@@ -423,17 +651,32 @@ public sealed partial class Car
         FrameBlendInfo.BoneIndexInfo[] levels;
         try { levels = car.GetBlendInfoObject().BoneIndexInfos ?? []; }
         catch (Exception) { return; }
-        if (lod < 0 || lod >= levels.Length) return;
+        if (levels.Length == 0) return;
 
+        // ── the SEAT pass, which is not a per-level question ──
+        //
+        // It reads through level 0's table whatever level is being shown: the split table is one block shared
+        // by both, and level 1's table names a tenth of the bones (73.3 against 10.8), so asking it would
+        // answer "gone" for most of the car. It also runs for a level that does NOT EXIST — 3 of the 85 cars
+        // ship a single LOD — because "does this bone draw anywhere" has an answer there too, and without one
+        // every prefab row of a single-LOD car reads as naming nothing the moment the switch moves.
+        byte[] seats = levels[0].BoneRemapIDs ?? [];
+        foreach (FrameObjectModel.WeightedByMeshSplit split in car.BlendMeshSplits ?? [])
+        {
+            if (Bone(split.BlendIndex, seats, rig) is not { } seated) continue;
+            if (HasFaces(split)) rig.Drawn.Add(seated); else rig.DeadSeats.Add(seated);
+        }
+        // A bone with two splits, one emptied and one still drawn, has not lost its geometry.
+        rig.DeadSeats.ExceptWith(rig.Drawn);
+
+        // ── and the per-level one: how much this bone actually draws at the level being read ──
+        if (lod < 0 || lod >= levels.Length) return;
         byte[] remap = levels[lod].BoneRemapIDs ?? [];
         int indices = car.GetIndexBuffer(lod)?.GetData()?.Length ?? 0;
 
         foreach (FrameObjectModel.WeightedByMeshSplit split in car.BlendMeshSplits ?? [])
         {
-            int bone = split.BlendIndex < remap.Length ? remap[split.BlendIndex] : -1;
-            if (bone < 0 || bone >= rig.BonesByJoint.Length) continue;
-            string name = rig.BonesByJoint[bone];
-            if (name.Length == 0) continue;
+            if (Bone(split.BlendIndex, remap, rig) is not { } bone) continue;
 
             int drawn = 0;
             foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
@@ -441,17 +684,45 @@ public sealed partial class Car
                 if (Fits(piece, indices)) drawn++;
             }
             if (drawn == 0) continue;
-            ulong hash = Fnv64.Hash(name);
-            rig.Pieces[hash] = rig.Pieces.GetValueOrDefault(hash) + drawn;
+            rig.Pieces[bone] = rig.Pieces.GetValueOrDefault(bone) + drawn;
         }
 
+        static ulong? Bone(int blendIndex, byte[] remap, Rig rig)
+        {
+            int bone = blendIndex < remap.Length ? remap[blendIndex] : -1;
+            if (bone < 0 || bone >= rig.BonesByJoint.Length) return null;
+            string name = rig.BonesByJoint[bone];
+            return name.Length == 0 ? null : Fnv64.Hash(name);
+        }
+
+        // Whether the split holds a face AT ALL — the question the seat pass asks. A range that does not fit
+        // THIS level's index buffer is geometry at the other level, not geometry that is gone.
+        static bool HasFaces(FrameObjectModel.WeightedByMeshSplit split)
+        {
+            foreach (FrameObjectModel.BlendMeshSplitInfo piece in split.Data ?? [])
+            {
+                foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
+                {
+                    foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
+                    {
+                        if (range.NumFaces > 0) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // A range of NO faces is not geometry at this level, it is an emptied piece — and reading it as drawn
+        // is what would mint a component for a bone the seat pass has just called dead, silently swallowing
+        // the fault written for exactly that accident. Measured: no shipped car carries one (the component
+        // census's 2586 does not move), so this only ever fires on a car something has been done to.
         static bool Fits(FrameObjectModel.BlendMeshSplitInfo piece, int indices)
         {
             foreach (FrameObjectModel.MiniMaterialBurst burst in piece.Data ?? [])
             {
                 foreach (FrameObjectModel.FacesBurst range in burst.Data ?? [])
                 {
-                    if (range.StartIndex + (range.NumFaces * 3) <= indices) return true;
+                    if (range.NumFaces > 0 && range.StartIndex + (range.NumFaces * 3) <= indices) return true;
                 }
             }
             return false;

@@ -757,6 +757,15 @@ internal static class ProbeRunner
             // that switch both ways, and an archive that is not a car left on its frames. Writes (and
             // restores) the switch's per-archive position in settings.json. Optional arg = the car to focus
             // on. Output: %TEMP%\illusion_component_tree.txt
+            // What the aggregate could NOT stitch, and whether it says so: every fault kind reproduced on a
+            // natural example where the corpus has one and on a synthetic car where it does not, the whole
+            // corpus swept so a fault firing on shipped cars is caught as noise, and a broken car saved with
+            // no edit and compared byte for byte. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_car_faults.txt
+            case "--probe-car-faults":
+                CarFaultProbes.RunCarFaultsProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             case "--probe-component-tree":
                 ComponentTreeProbes.RunComponentTreeProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");

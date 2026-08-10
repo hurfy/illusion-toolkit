@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Numerics;
 using System.Windows.Data;
 using Illusion.Assets.Adapters;
@@ -155,6 +156,10 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Car = car;
         _rowsById.Clear();
         Roots = car == null ? [] : Build(car, folded);
+        // After the rows, because a fault leads to the row it is about and the rows have to exist first.
+        Faults = car == null
+            ? []
+            : [.. car.Faults.Select(f => new FaultRowViewModel(f, RowOf(f.Component)))];
         RootsView = CollectionViewSource.GetDefaultView(Roots);
         RootsView.Filter = o => o is ComponentRowViewModel row && row.HasSearchMatch;
         Selected = null;
@@ -177,6 +182,10 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Raise(nameof(ShowsComponents));
         Raise(nameof(Selected));
         Raise(nameof(SelectedCollision));
+        Raise(nameof(Faults));
+        Raise(nameof(HasFaults));
+        Raise(nameof(FaultSummary));
+        Raise(nameof(FaultsOpen));
         if (!moved) return;
         Raise(nameof(IsRaw));
         Raise(nameof(IsComponents));
@@ -188,21 +197,21 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     private List<ComponentRowViewModel> Build(Car car, Dictionary<long, bool> folded)
     {
         var roots = new List<ComponentRowViewModel>();
-        foreach (CarComponent component in car.Roots) roots.Add(Row(component, parent: null, folded));
+        foreach (CarComponent component in car.Roots) roots.Add(Row(car, component, parent: null, folded));
         return roots;
     }
 
     private ComponentRowViewModel Row(
-        CarComponent component, ComponentRowViewModel? parent, Dictionary<long, bool> folded)
+        Car car, CarComponent component, ComponentRowViewModel? parent, Dictionary<long, bool> folded)
     {
-        var row = new ComponentRowViewModel(component, parent);
+        var row = new ComponentRowViewModel(component, parent, car.FaultsOf(component.Id));
         if (folded.TryGetValue(component.Id.Value, out bool wasFolded) && wasFolded) row.IsExpanded = false;
         _rowsById[component.Id.Value] = row;
         foreach (CarCollision collision in component.Collisions)
         {
             row.AddCollision(new CollisionRowViewModel(collision, row));
         }
-        foreach (CarComponent child in component.Children) row.AddChild(Row(child, row, folded));
+        foreach (CarComponent child in component.Children) row.AddChild(Row(car, child, row, folded));
         return row;
     }
 
@@ -248,6 +257,76 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
 
     /// <summary>The roots as the tree binds them — narrowed by the same search.</summary>
     public ICollectionView? RootsView { get; private set; }
+
+    // ── the diagnosis ──
+
+    /// <summary>
+    /// Everything the aggregate could not stitch about the staged car, as a list.
+    ///
+    /// <para>
+    /// The editor opens every car, including the ones it cannot fully understand — those are the cars the tool
+    /// is most needed for — so what it could not make sense of has to be READABLE the moment the car opens
+    /// rather than discovered one component at a time. The rows that have a component of their own also carry
+    /// their fault (<see cref="ComponentRowViewModel.HasFault"/>); this is where the ones that do not are
+    /// seen at all.
+    /// </para>
+    /// <para>
+    /// Deliberately NOT narrowed by the panel's search. A diagnosis filtered by what the modder happens to be
+    /// looking for is one that hides the fault they have not thought to look for yet.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<FaultRowViewModel> Faults { get; private set; } = [];
+
+    /// <summary>Whether this car has anything wrong with it — what the strip above the tree appears for.</summary>
+    public bool HasFaults => Faults.Count > 0;
+
+    /// <summary>Whether any of them is a failure no shipped car raises. What decides whether the strip reads
+    /// as damage or as a note.</summary>
+    public bool HasBreak => Faults.Any(f => f.IsBreak);
+
+    /// <summary>
+    /// How many, in words, for the strip's own line — and in WHICH words, which is the part that matters.
+    ///
+    /// <para>
+    /// 41 faults over 8 of the 85 shipped cars are things cars are simply written like: a half-track whose
+    /// axles name its track hinges, 24 door parts with no door row. Telling a modder that a stock archive
+    /// they have not touched "did not fully stitch" is how a diagnosis stops being read — so a car carrying
+    /// only those says what it is, and the accusing line is kept for the faults no shipped car raises.
+    /// </para>
+    /// </summary>
+    public string FaultSummary
+    {
+        get
+        {
+            string count = Faults.Count.ToString(CultureInfo.InvariantCulture);
+            if (Faults.Any(f => !f.Fault.ShipsThisWay))
+            {
+                return Faults.Count == 1
+                    ? "1 fault — this car did not fully stitch"
+                    : $"{count} faults — this car did not fully stitch";
+            }
+            return Faults.Count == 1
+                ? "1 note — this car's lists do not line up"
+                : $"{count} notes — this car's lists do not line up";
+        }
+    }
+
+    private bool _faultsOpen;
+
+    /// <summary>
+    /// Whether the list itself is open under the strip. Shut by default and remembered for as long as the
+    /// session lasts: the count is the diagnosis being AVAILABLE, and a list that opens itself on every car
+    /// takes the tree's room to say something the modder has already read.
+    /// </summary>
+    public bool FaultsOpen
+    {
+        get => _faultsOpen && HasFaults;
+        set { if (_faultsOpen != value) { _faultsOpen = value; Raise(nameof(FaultsOpen)); } }
+    }
+
+    /// <summary>Selects the component a fault is about, so reading the diagnosis and looking at what it is
+    /// about are one gesture. A fault with no component of its own selects nothing.</summary>
+    public void Select(FaultRowViewModel? fault) => Select(fault?.Component);
 
     // ── frame ⇄ component ──
 

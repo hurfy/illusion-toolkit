@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Illusion.Assets.Adapters;
 using Illusion.Domain;
 using Illusion.Scene;
@@ -110,6 +111,9 @@ public partial class ScenePanel : UserControl
         // whichever of them just took the row.
         _components.PropertyChanged += (_, e) =>
         {
+            // The same rule the switch follows: whatever moves the view-model is what the panel reacts to, so
+            // a click and anything else that opens the diagnosis take exactly the same path.
+            if (e.PropertyName == nameof(ComponentTreeViewModel.FaultsOpen)) { ApplyFaults(); return; }
             if (e.PropertyName != nameof(ComponentTreeViewModel.IsRaw)) return;
             ApplyTreeMode();
             // Moving the switch is a deliberate act, so the tree that just took the row scrolls to the
@@ -256,6 +260,48 @@ public partial class ScenePanel : UserControl
         ComponentsMode.IsChecked = !_components.IsRaw;
         RawMode.IsChecked = _components.IsRaw;
         _syncingMode = false;
+        ApplyFaults();
+    }
+
+    // ── the diagnosis ──
+
+    // What did not stitch, on the panel. Shown in BOTH switch positions: the faults are the car's, not the
+    // tree's, and a modder who has stepped over to the frames to look at a name table is exactly the one who
+    // wants to know why they went.
+    private void ApplyFaults()
+    {
+        bool show = _components.HasFaults && !_hierarchyDisowned;
+        FaultStrip.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show)
+        {
+            // Dropped rather than left standing: the rows point at the previous car's components, and holding
+            // them would keep that car's whole tree alive behind an invisible panel.
+            FaultList.ItemsSource = null;
+            return;
+        }
+
+        FaultToggle.Content = _components.FaultSummary;
+        // The strip's own colour: a warning only when one of the faults is a failure no shipped car raises.
+        // 41 of the corpus's faults are how cars are written, and an amber band on a stock archive nobody has
+        // touched is how the whole diagnosis learns to be ignored.
+        FaultToggle.Foreground = _components.HasBreak ? Palette.StatusWarn : Palette.TextDim;
+        FaultToggle.IsChecked = _components.FaultsOpen;
+        FaultScroll.Visibility = _components.FaultsOpen ? Visibility.Visible : Visibility.Collapsed;
+        if (!ReferenceEquals(FaultList.ItemsSource, _components.Faults))
+        {
+            FaultList.ItemsSource = _components.Faults;
+        }
+    }
+
+    private void Faults_Click(object sender, RoutedEventArgs e) =>
+        _components.FaultsOpen = FaultToggle.IsChecked == true;
+
+    // A fault leads to the component it is about, so reading the diagnosis and looking at what it says are one
+    // gesture. The ones with no component of their own — a door row naming a bone nothing claims — lead
+    // nowhere, and leaving the selection where it is says that more honestly than clearing it would.
+    private void Fault_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: FaultRowViewModel row }) _components.Select(row);
     }
 
     // The user moved the switch. Everything that follows from it hangs off the view-model's own change,

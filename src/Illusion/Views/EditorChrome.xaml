@@ -21,6 +21,9 @@
         <StreamGeometry x:Key="IconCamera">M1.5,4 L6.8,4 L6.8,8.5 L1.5,8.5 Z M6.8,5.4 L10.5,3.9 L10.5,8.6 L6.8,7.1</StreamGeometry>
         <StreamGeometry x:Key="IconCollision">M6,1.5 L10,3 L10,6.2 C10,8.8 8.2,10.3 6,11 C3.8,10.3 2,8.8 2,6.2 L2,3 Z</StreamGeometry>
         <StreamGeometry x:Key="IconEmpty">M6,2 L6,10 M2,6 L10,6</StreamGeometry>
+        <!-- A triangle with a bang: what the toolkit could not make sense of. Stroked like the tree's icons,
+             so a faulted component row carries it beside its kind glyph at the same weight. -->
+        <StreamGeometry x:Key="IconWarning">M6,1.6 L11,10.4 L1,10.4 Z M6,4.6 L6,7.4 M6,8.9 L6,9.1</StreamGeometry>
         <!-- Toolbar layer icons (12×12, stroked like the tree's). Each says what the layer IS, so the row reads
              without its label: a stack of sheets (the Layers button), a district grid, scattered instances, and
              a route through waypoints. Collisions reuse the tree's shield (IconCollision) — same thing, same

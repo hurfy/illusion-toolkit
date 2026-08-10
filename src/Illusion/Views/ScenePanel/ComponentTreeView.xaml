@@ -11,6 +11,7 @@
     <UserControl.Resources>
         <v:ComponentGlyphConverter x:Key="ComponentGlyph" />
         <v:ComponentTintConverter x:Key="ComponentTint" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
 
     <Grid>
@@ -119,6 +120,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
                               Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
@@ -154,6 +156,29 @@
                         </TextBlock>
                         <TextBlock Grid.Column="2" Text="{Binding Kind}" Foreground="{StaticResource TextFaint}"
                                    FontSize="10.5" VerticalAlignment="Center" Margin="8,0,4,0" />
+                        <!-- What did not stitch about THIS component, on its own row. The car's full list is
+                             above the tree; this is what makes a fault something a modder trips over rather
+                             than something they have to go and read. The tooltip carries every one of them. -->
+                        <Path Grid.Column="3" Width="11" Height="11" Stretch="Uniform" Fill="Transparent"
+                              StrokeThickness="1.2"
+                              StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              VerticalAlignment="Center" Margin="0,0,4,0" SnapsToDevicePixels="True"
+                              Data="{StaticResource IconWarning}" ToolTip="{Binding FaultTip}"
+                              Visibility="{Binding HasFault, Converter={StaticResource BoolToVis}}">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <!-- Faint for a component the game simply ships this way — 24 door parts
+                                         over the corpus have no door row — and a warning only for a failure
+                                         no shipped car raises. -->
+                                    <Setter Property="Stroke" Value="{StaticResource TextFaint}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasBreak}" Value="True">
+                                            <Setter Property="Stroke" Value="{StaticResource StatusWarn}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
                     </Grid>
                 </HierarchicalDataTemplate>
 

@@ -74,6 +74,7 @@ internal static class ComponentTreeProbes
             CheckNotACar(folder, Check, sb);
             CheckRestitch(car, Check, sb);
             CheckBroken(car, Check, sb);
+            CheckFaults(car, folder, Check, sb);
             Render(car, Check, sb);
         }
         catch (Exception ex)
@@ -576,6 +577,129 @@ internal static class ComponentTreeProbes
         sb.AppendLine();
     }
 
+    // ── the diagnosis a car opens with ──
+
+    /// <summary>
+    /// What the aggregate could not stitch, on the panel: a strip above the tree that says how many faults
+    /// there are and opens the list, and a mark on every component row that carries one.
+    ///
+    /// <para>
+    /// Both are needed and neither replaces the other. A fault about a PREFAB ROW has no component to sit on
+    /// and exists only in the list; a fault about a component is what a modder trips over on the row without
+    /// having gone looking. The focus car has exactly one of the first kind, which is why it is the case this
+    /// starts from.
+    /// </para>
+    /// </summary>
+    private static void CheckFaults(
+        FileInfo car, string folder, Action<string, bool, string> check, StringBuilder sb)
+    {
+        sb.AppendLine("════ the diagnosis a car opens with ════");
+        if (!Stage(car, out ScenePanel? panel, out D3DImageHost? host)) return;
+        if (panel!.Components.Car is not { } whole) { check("the car stitched", false, ""); return; }
+
+        IReadOnlyList<FaultRowViewModel> rows = panel.Components.Faults;
+        sb.AppendLine($"  {car.Name}: {rows.Count} fault(s) — "
+            + string.Join("; ", rows.Select(r => $"{r.Title}: {r.What}")));
+
+        check("a car with something wrong with it says so above the tree, without being asked",
+            panel.FaultStrip.Visibility == Visibility.Visible && rows.Count == whole.Faults.Count
+            && rows.Count > 0,
+            $"{rows.Count} rows, strip {panel.FaultStrip.Visibility}");
+        // The focus car ships with its one fault, so the strip must NOT accuse it of anything: 41 of the
+        // corpus's faults are how cars are written, and a band that says "did not fully stitch" over a stock
+        // archive is how the whole diagnosis learns to be ignored.
+        check("…and a car that merely ships odd is called odd, not broken",
+            Equals(panel.FaultToggle.Content, panel.Components.FaultSummary)
+            && !panel.Components.HasBreak
+            && panel.Components.FaultSummary.Contains("do not line up", StringComparison.Ordinal),
+            panel.Components.FaultSummary);
+        // Shut on open: the count IS the diagnosis being available, and a list that unfolds itself takes the
+        // tree's room to repeat something already read.
+        check("the list itself is shut until it is asked for",
+            panel.FaultScroll.Visibility == Visibility.Collapsed && !panel.Components.FaultsOpen,
+            $"scroll {panel.FaultScroll.Visibility}");
+
+        panel.Components.FaultsOpen = true;
+        check("…and opening it opens it, through the view-model rather than through the button",
+            panel.FaultScroll.Visibility == Visibility.Visible
+            && ReferenceEquals(panel.FaultList.ItemsSource, rows),
+            $"scroll {panel.FaultScroll.Visibility}, {rows.Count} bound");
+
+        // The focus car's own fault is about a BONE, not about a component: the split table still seats
+        // deform_top_roof and no piece of it has a face left. Nothing in the tree could carry it.
+        FaultRowViewModel? homeless = rows.FirstOrDefault(r => !r.HasComponent);
+        check("a fault with no component of its own is in the list, which is the only place it can be",
+            homeless != null && rows.All(r => r.HasComponent || r.Fault.Component == default),
+            homeless?.What ?? "every fault had a component");
+
+        // ── and the other kind: a fault ON a row ──
+        CarComponent? part = whole.Components.FirstOrDefault(c =>
+            !c.IsBare && c.BoneJoint >= 0 && c.PartType != 1);
+        FrameObjectModel? model = LiveModel(host!);
+        if (part == null || model == null) { check("the car has a part to break", false, ""); return; }
+        HashName[] bones = model.GetSkeletonObject().BoneNames!;
+        string original = bones[part.BoneJoint].String;
+        bones[part.BoneJoint].String = original + "_gone";
+        try
+        {
+            host!.RaiseSceneChanged();
+
+            ComponentRowViewModel? broken = panel.Components.Roots.SelectMany(r => r.SelfAndDescendants())
+                .FirstOrDefault(r => r.Component.PartIndex == part.PartIndex);
+            FaultRowViewModel? about = panel.Components.Faults.FirstOrDefault(r =>
+                r.Component != null && r.Component.Id == broken?.Id);
+
+            check("a fault about a component is marked on that component's own row",
+                broken is { HasFault: true }
+                && broken.FaultTip.Contains("no bone of this car", StringComparison.Ordinal),
+                broken == null ? "the row vanished" : broken.FaultTip);
+            check("…and the line in the list leads to it, so reading and looking are one gesture",
+                about != null && Select(panel, about) && ReferenceEquals(panel.Components.Selected, broken),
+                about == null ? "no line named the component" : about.What);
+            // MORE, not exactly one more: breaking a part whose bone a door or axle row also names raises a
+            // second fault about that row, so which car is in focus decides whether it is one or two. What is
+            // asserted is that the shipped fault survived and the new one joined it.
+            check("the strip counts the new fault as well as the one the car shipped with",
+                panel.Components.Faults.Count > rows.Count
+                && panel.Components.Faults.Any(r => r.Fault.Kind == CarFaultKind.ComponentBoneUnresolved)
+                && panel.FaultStrip.Visibility == Visibility.Visible,
+                $"{panel.Components.Faults.Count} faults, {rows.Count} before");
+            // …and the strip stops calling this car merely odd: a bone that does not resolve is a failure no
+            // shipped car raises, so the line goes from a note to a fault.
+            check("…and a break makes the strip read as damage rather than as a note",
+                panel.Components.HasBreak
+                && panel.Components.FaultSummary.Contains("did not fully stitch", StringComparison.Ordinal),
+                panel.Components.FaultSummary);
+            sb.AppendLine($"  after renaming \"{original}\" away: "
+                + $"{panel.Components.Faults.Count} faults, marked on {panel.Components.Roots
+                    .SelectMany(r => r.SelfAndDescendants()).Count(r => r.HasFault)} row(s)");
+        }
+        finally
+        {
+            bones[part.BoneJoint].String = original;
+            host!.RaiseSceneChanged();
+        }
+
+        // An archive that is not a car has no faults and no strip — the panel it shares with every other
+        // archive must not grow a band that says nothing.
+        var plain = new FileInfo(Path.Combine(folder, "cars_universal.sds"));
+        if (plain.Exists && Stage(plain, out ScenePanel? other, out _) && other != null)
+        {
+            check("an archive that is not a car has no strip at all",
+                !other.Components.HasFaults && other.FaultStrip.Visibility == Visibility.Collapsed
+                && other.FaultList.ItemsSource == null,
+                $"strip {other.FaultStrip.Visibility}");
+        }
+        sb.AppendLine();
+    }
+
+    /// <summary>Selecting a line of the diagnosis, the way the panel's own click handler does.</summary>
+    private static bool Select(ScenePanel panel, FaultRowViewModel fault)
+    {
+        panel.Components.Select(fault);
+        return true;
+    }
+
     // ── a picture of it ──
 
     /// <summary>
@@ -588,6 +712,9 @@ internal static class ComponentTreeProbes
         try
         {
             if (!Stage(car, out ScenePanel? panel, out _) || panel == null) return;
+            // Open, because the shut strip is one line and cannot fail: what a picture is for here is whether
+            // a fault's title, its line and the tree still share a panel 340 px wide.
+            panel.Components.FaultsOpen = true;
 
             const double width = 340, height = 900;
             panel.Background = new System.Windows.Media.SolidColorBrush(

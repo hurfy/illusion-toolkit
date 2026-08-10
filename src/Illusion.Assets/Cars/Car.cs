@@ -35,6 +35,7 @@ public sealed partial class Car
     private readonly Dictionary<ulong, CarComponent> _byBone;
     private readonly Dictionary<long, CarComponent> _byId;
     private readonly Dictionary<long, ComponentId> _byAnchor;
+    private readonly Dictionary<long, List<CarFault>> _faultsById;
 
     private Car(
         PrefabFile prefab, FrameResource? frames, string? prefabPath, string? extracted, int lod,
@@ -55,6 +56,9 @@ public sealed partial class Car
         _byBone = byBone;
         _byAnchor = byAnchor;
         _byId = components.ToDictionary(c => c.Id.Value);
+        _faultsById = faults.Where(f => f.Component.IsSet)
+            .GroupBy(f => f.Component.Value)
+            .ToDictionary(g => g.Key, g => g.ToList());
     }
 
     /// <summary>
@@ -113,6 +117,23 @@ public sealed partial class Car
 
     /// <summary>What could not be stitched. Empty on a car the toolkit understands completely.</summary>
     public IReadOnlyList<CarFault> Faults { get; }
+
+    /// <summary>
+    /// The faults that belong to one component — what is shown ON the row rather than in the list.
+    ///
+    /// <para>
+    /// Not every fault has one: a door row naming a bone nothing claims is a fault about a row, and there is
+    /// no component for it to sit on. Those live in the list alone.
+    /// </para>
+    /// <para>
+    /// And an id this answers for is NOT always one <see cref="ComponentById"/> can resolve. A component that
+    /// lost its last geometry is named by the identity it had in the previous stitch and deliberately no
+    /// longer exists in this one — which is the whole point of that fault. Pair the two lookups only with a
+    /// null check.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<CarFault> FaultsOf(ComponentId id) =>
+        id.IsSet && _faultsById.TryGetValue(id.Value, out List<CarFault>? found) ? found : [];
 
     /// <summary>Which component a bone belongs to — the lookup the viewport and the bridge resolve through.
     /// Unambiguous on 85 of 85 cars, so it is a straight lookup and not a disambiguation.</summary>

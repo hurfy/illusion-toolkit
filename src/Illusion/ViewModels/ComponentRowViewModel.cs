@@ -34,10 +34,12 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     /// </summary>
     private readonly List<object> _rows = [];
 
-    internal ComponentRowViewModel(CarComponent component, ComponentRowViewModel? parent)
+    internal ComponentRowViewModel(
+        CarComponent component, ComponentRowViewModel? parent, IReadOnlyList<CarFault> faults)
     {
         Component = component;
         Parent = parent;
+        Faults = faults;
     }
 
     /// <summary>The component this row is. Its identity is what everything else keys on.</summary>
@@ -96,6 +98,23 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     /// <summary>Whether the bone the part names is actually in this car. False is the signature of a rename
     /// made in Blender, and the row is shown broken rather than dropped.</summary>
     public bool IsBroken => !Component.BoneResolves;
+
+    /// <summary>
+    /// What the toolkit could not stitch about THIS component — shown on the row, not only in the car's
+    /// list, because a fault a modder has to go looking for is one they find by noticing the damage first.
+    /// </summary>
+    public IReadOnlyList<CarFault> Faults { get; }
+
+    /// <summary>Whether anything about this component failed to stitch.</summary>
+    public bool HasFault => Faults.Count > 0;
+
+    /// <summary>Whether one of them is a failure no shipped car raises — the difference between a component
+    /// something was done to and one the game simply ships that way. Only the first earns a warning colour.
+    /// </summary>
+    public bool HasBreak => Faults.Any(f => !f.ShipsThisWay);
+
+    /// <summary>Every one of them, one per line, for the row's tooltip.</summary>
+    public string FaultTip => string.Join("\n", Faults.Select(f => $"{f.Title}: {f.What}"));
 
     /// <summary>How many deform handles this component crumples around, said on the row because a component
     /// with none does not crumple at all and that is worth seeing without opening it.</summary>
