@@ -115,8 +115,15 @@ public sealed partial class Car
         List<CarMarker> markers = car == null ? [] : HangMarkers(car, rig, byBone, body, faults);
         List<CarComponent> roots = [.. components.Where(c => c.Parent == null)];
 
-        return new Car(prefab, frames, prefabPath, extracted, lod, components, roots, body, markers, faults,
-            byBone, byAnchor);
+        var stitched = new Car(prefab, frames, prefabPath, extracted, lod, components, roots, body, markers,
+            faults, byBone, byAnchor);
+        // What the prefab file holds right now, so a later save can tell whether somebody else has written it
+        // in the meantime — four other modules still write this same file directly.
+        stitched.RememberPrefabOnDisk();
+        // Last, because it restates every collision in its own component's space and therefore needs the
+        // components and the rig it has just built.
+        stitched.HangCollisions(rig);
+        return stitched;
     }
 
     /// <summary>The engine's part kind for the body — the one part every shipped car has exactly one of.</summary>

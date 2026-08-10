@@ -69,6 +69,7 @@ internal static class ComponentTreeProbes
             CheckTree(car, Check, sb);
             CheckSwitch(car, Check, sb);
             CheckSelection(car, Check, sb);
+            CheckCollisions(car, Check, sb);
             CheckRemembered(car, Check, sb);
             CheckNotACar(folder, Check, sb);
             CheckRestitch(car, Check, sb);
@@ -200,14 +201,14 @@ internal static class ComponentTreeProbes
             panel.ComponentTree.Visibility == Visibility.Visible
             && panel.Tree.Visibility == Visibility.Collapsed, "");
 
-        // Everything that ACTS on a row — adding a collision shape, sweeping unused hulls, rolling the
+        // Everything that acts on a row and is not a component's OWN — sweeping unused hulls, rolling the
         // archive back — is on the frame tree's menu, and a car opening on its components would otherwise
         // hide the only path to those behind a switch nobody has been told about.
         MenuItem? back = panel.ComponentTree.ComponentTree.ContextMenu?.Items
-            .OfType<MenuItem>().FirstOrDefault();
+            .OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Show in Raw tree");
         check("the component tree offers the way back to the frame tree's own menu",
-            back != null && (back.Header as string) == "Show in Raw tree",
-            back?.Header as string ?? "no context menu");
+            back != null, back?.Header as string ?? "no context menu");
         if (back != null)
         {
             back.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent, back));
@@ -292,6 +293,105 @@ internal static class ComponentTreeProbes
             ReferenceEquals(components.Selected, part) && part.IsSelected,
             components.Selected?.Name ?? "(nothing)");
         sb.AppendLine($"  selection carried across the switch: \"{part.Name}\" ({part.Kind})\n");
+    }
+
+    // ── a component lists what it is solid with ──
+
+    /// <summary>
+    /// Every collision of the car appears under the component that carries it, by ROLE and SHAPE — and
+    /// nothing on the row says type 5, whose bone space the matrix is in, or that one kind of volume states a
+    /// full size while the other states half of one.
+    ///
+    /// <para>
+    /// Read-only here. What an edit WRITES is measured at the seam, by <c>--probe-collision-role</c>, against
+    /// a mirror of the car under the temp directory — this probe reads the player's own install and must not
+    /// write a byte of it.
+    /// </para>
+    /// </summary>
+    private static void CheckCollisions(FileInfo car, Action<string, bool, string> check, StringBuilder sb)
+    {
+        sb.AppendLine("════ a component lists its collisions by role and shape ════");
+        if (!Stage(car, out ScenePanel? panel, out D3DImageHost? host)) return;
+        ComponentTreeViewModel components = panel!.Components;
+        if (components.Car is not { } stitched) { check("the car stitched", false, ""); return; }
+
+        List<ComponentRowViewModel> rows = [.. components.Roots.SelectMany(r => r.SelfAndDescendants())];
+        List<CollisionRowViewModel> collisions = [.. rows.SelectMany(r => r.Collisions)];
+        int held = stitched.Components.Sum(c => c.Collisions.Count);
+
+        sb.AppendLine($"  {collisions.Count} collision rows over {rows.Count} components: "
+            + string.Join("  ", collisions.GroupBy(c => c.Label).OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => $"{g.Key} ×{g.Count()}")));
+
+        check("every collision the aggregate stitched has a row under its own component",
+            held > 0 && collisions.Count == held, $"{collisions.Count} rows over {held} collisions");
+        check("each row says what it is and what form it takes",
+            collisions.All(c => c.Label.Contains('·', StringComparison.Ordinal) && c.Size.EndsWith(" m",
+                StringComparison.Ordinal)),
+            collisions.FirstOrDefault()?.Label ?? "(none)");
+        check("a row belongs to the component whose collision it is",
+            collisions.All(c => c.Component.Component.Collisions.Contains(c.Collision)), "");
+
+        // A cooked hull cannot be re-cooked at another size, so its row says so rather than letting a modder
+        // find out by typing a number that goes nowhere.
+        CollisionRowViewModel? hull =
+            collisions.FirstOrDefault(c => c.Collision.Shape == Assets.Cars.CarCollisionShape.Hull);
+        sb.AppendLine($"  read-only rows: {collisions.Count(c => c.IsReadOnly)}"
+            + (hull == null ? "" : $" — e.g. \"{hull.Label}\": {hull.ReadOnlyReason}"));
+        check("a hull's row is read-only and carries the reason",
+            hull != null && hull.IsReadOnly && hull.ReadOnlyReason is { Length: > 0 },
+            hull == null ? "this car carries no hull" : hull.ReadOnlyReason ?? "no reason");
+
+        // Selecting a collision: the tree's highlight is the collision's, and the viewport stays on the
+        // component's bone — a self-describing volume has no frame at all, and the mirror stub of a solid one
+        // is a copy the modder is deliberately never shown.
+        CollisionRowViewModel? first =
+            collisions.FirstOrDefault(c => !c.Component.IsBroken && !c.Component.IsBare);
+        if (first != null)
+        {
+            components.Select(first);
+            check("selecting a collision lights its own row and leaves the viewport on its component",
+                ReferenceEquals(components.SelectedCollision, first) && first.IsSelected
+                && components.Selected == null
+                && host!.SelectedNode?.Source is BoneNodeAdapter bone
+                && bone.BoneName == first.Component.Name,
+                $"{first.Label} → {host!.SelectedNode?.Name ?? "(nothing)"}");
+
+            components.Select(first.Component);
+            check("…and selecting a component again clears it, so the menu acts on exactly one row",
+                components.SelectedCollision == null && !first.IsSelected
+                && ReferenceEquals(components.Selected, first.Component), "");
+        }
+
+        // The menu offers what the row can actually do. An item shown while it cannot do anything is a
+        // promise the menu does not keep.
+        ContextMenu? menu = panel.ComponentTree.ComponentTree.ContextMenu;
+        string[] headers = [.. menu?.Items.OfType<MenuItem>().Select(m => m.Header as string ?? "") ?? []];
+        sb.AppendLine($"  the component tree's menu: {string.Join(" · ", headers)}");
+        check("the menu can add a collision to a component and resize or remove one of its own",
+            headers.Contains("Add collision…", StringComparer.Ordinal)
+            && headers.Contains("Size and position…", StringComparer.Ordinal)
+            && headers.Contains("Remove collision", StringComparer.Ordinal),
+            string.Join(" · ", headers));
+
+        if (first != null && menu != null)
+        {
+            components.Select(first.Component);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            MenuItem? add = menu.Items.OfType<MenuItem>()
+                .FirstOrDefault(m => (m.Header as string) == "Add collision…");
+            MenuItem? resize = menu.Items.OfType<MenuItem>()
+                .FirstOrDefault(m => (m.Header as string) == "Size and position…");
+            check("on a component the menu offers only what a component can be given",
+                add?.Visibility == Visibility.Visible && resize?.Visibility == Visibility.Collapsed, "");
+
+            components.Select(first);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("on a collision it offers only what that collision can be done to",
+                add?.Visibility == Visibility.Collapsed && resize?.Visibility == Visibility.Visible
+                && resize.IsEnabled != first.IsReadOnly, "");
+        }
+        sb.AppendLine();
     }
 
     // ── the switch's position is remembered per archive ──

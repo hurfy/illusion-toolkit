@@ -56,6 +56,7 @@ public sealed class CarComponent
 {
     private readonly List<CarComponent> _children = [];
     private readonly List<CarMarker> _markers = [];
+    private readonly List<CarCollision> _collisions = [];
 
     internal CarComponent(
         ComponentId id, string name, ulong boneHash, int boneJoint, bool boneResolves,
@@ -128,9 +129,22 @@ public sealed class CarComponent
     /// <summary>The seats, climb boxes, tanks, emitters and lights that hang off this component's bone.</summary>
     public IReadOnlyList<CarMarker> Markers => _markers;
 
+    /// <summary>
+    /// What this component is solid with — its own collision, its glass, its zones — by role and shape, with
+    /// every size and position stated in the component's OWN space.
+    ///
+    /// <para>
+    /// A bare component has none and can be given none: a collision volume hangs off a deform part, and a
+    /// bone that no part claims has nothing to hang one off until it is given a part of its own.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<CarCollision> Collisions => _collisions;
+
     internal void AddChild(CarComponent child) => _children.Add(child);
 
     internal void AddMarker(CarMarker marker) => _markers.Add(marker);
+
+    internal void AddCollision(CarCollision collision) => _collisions.Add(collision);
 
     /// <summary>Whether <paramref name="other"/> is this component or anything above it — the check that
     /// keeps a broken parent link from closing a loop the tree would walk forever.</summary>

@@ -770,6 +770,16 @@ internal static class ProbeRunner
                 CarRoundTripProbes.RunCarRoundTripProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // A collision authored by ROLE and SHAPE, travelling the whole path: what a modder asked for comes
+            // back, and what reached the file — the stored type, the bone space the matrix went into, the
+            // extents, the ItemDesc record and the mirror stub — matches how shipped cars of the same role and
+            // part kind are written, with the corpus as the oracle. The focus car's working copy is mirrored
+            // into the temp directory, so the game's folders are never written to. Optional arg = the car to
+            // focus on. Output: %TEMP%\illusion_collision_role.txt
+            case "--probe-collision-role":
+                CollisionRoleProbes.RunCollisionRoleProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt

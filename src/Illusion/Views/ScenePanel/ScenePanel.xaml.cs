@@ -94,6 +94,17 @@ public partial class ScenePanel : UserControl
 
         ComponentTree.Attach(_components);
         ComponentTree.ShowInRawRequested += () => _components.IsRaw = true;
+        ComponentTree.AddCollisionRequested += AddCollision;
+        ComponentTree.EditCollisionRequested += EditCollision;
+        ComponentTree.RemoveCollisionRequested += RemoveCollision;
+        // An edit rebuilds the rows around a car that has gained or lost something, and the selection has to
+        // be resolved onto the new rows — the same treatment a scene change gets, minus the scroll.
+        _components.CarEdited += () =>
+        {
+            ComponentTree.Refresh();
+            ApplyTreeMode();
+            ShowSelectionInTree(scroll: false);
+        };
         // The switch is the view-model's, not the radio button's: whatever moves it — a click, an archive
         // arriving with its own remembered position — swaps the trees and re-resolves the selection into
         // whichever of them just took the row.
@@ -253,6 +264,52 @@ public partial class ScenePanel : UserControl
     {
         if (_syncingMode || _components == null) return;
         _components.IsRaw = ReferenceEquals(sender, RawMode);
+    }
+
+    // ── Collision by role and shape ──
+
+    /// <summary>
+    /// Asks what a component's new collision is and how big, and hands the answer to the aggregate.
+    ///
+    /// <para>
+    /// The dialog stays open on a refusal and says why in place. A modder is still standing in front of the
+    /// numbers that caused it, and closing the window to show a notice behind it makes them type the whole
+    /// thing again to find out whether the second guess was any better.
+    /// </para>
+    /// </summary>
+    private void AddCollision(ComponentRowViewModel row)
+    {
+        var dialog = new ComponentCollisionWindow(row.Name, row.Kind)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.AddCollision(
+                row, dialog.Role, dialog.Shape, dialog.Size, dialog.Position, out string? refusal);
+            if (refusal == null) return;
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    private void EditCollision(CollisionRowViewModel row)
+    {
+        var dialog = new ComponentCollisionWindow(row.Component.Name, row.Collision)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.SetCollision(row, dialog.Size, dialog.Position, out string? refusal);
+            if (refusal == null) return;
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    private void RemoveCollision(CollisionRowViewModel row)
+    {
+        _components.RemoveCollision(row, out string? refusal);
+        if (refusal != null) _viewport.RaiseNotice("collision not removed: " + refusal, isError: true);
     }
 
     // ── Selection → property tabs ──

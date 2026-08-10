@@ -32,12 +32,18 @@
                   VirtualizingStackPanel.IsVirtualizing="True"
                   VirtualizingStackPanel.VirtualizationMode="Recycling">
             <TreeView.ContextMenu>
-                <!-- This tree edits nothing yet. Everything that acts on a row — adding a collision shape,
-                     sweeping unused hulls, rolling the archive back — is on the frame tree's own menu, and a
-                     car opening on its components would otherwise hide the only path to those behind a
-                     switch nobody has been told about. The selected component's frame is what the frame tree
-                     lands on, so the way back is one click and keeps the modder's place. -->
-                <ContextMenu>
+                <!-- What a component can be given, and what one of its collisions can be done to. Everything
+                     else that acts on a row — sweeping unused hulls, rolling the archive back — is still on
+                     the frame tree's own menu, and a car opening on its components would otherwise hide the
+                     only path to those behind a switch nobody has been told about. The selected component's
+                     frame is what the frame tree lands on, so the way back is one click. -->
+                <ContextMenu Opened="Menu_Opened">
+                    <MenuItem x:Name="AddCollisionItem" Header="Add collision…" Click="AddCollision_Click" />
+                    <MenuItem x:Name="EditCollisionItem" Header="Size and position…"
+                              Click="EditCollision_Click" />
+                    <MenuItem x:Name="RemoveCollisionItem" Header="Remove collision"
+                              Click="RemoveCollision_Click" />
+                    <Separator />
                     <MenuItem Header="Show in Raw tree" Click="ShowInRaw_Click" />
                 </ContextMenu>
             </TreeView.ContextMenu>
@@ -150,6 +156,30 @@
                                    FontSize="10.5" VerticalAlignment="Center" Margin="8,0,4,0" />
                     </Grid>
                 </HierarchicalDataTemplate>
+
+                <!-- A collision of that component: what it is, what form it takes, and how big.
+                     By ROLE and SHAPE — never the stored type, never whose bone space the matrix is in, and
+                     never that one kind of volume states a full size while the other states half of one. -->
+                <DataTemplate DataType="{x:Type vm:CollisionRowViewModel}">
+                    <Grid ToolTip="{Binding ReadOnlyReason}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                              Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stroke="{StaticResource TextFaint}"
+                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Data="{StaticResource IconCollision}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="2" Text="{Binding Size}" Foreground="{StaticResource TextFaint}"
+                                   FontSize="10.5" VerticalAlignment="Center" Margin="8,0,4,0" />
+                    </Grid>
+                </DataTemplate>
             </TreeView.Resources>
         </TreeView>
     </Grid>

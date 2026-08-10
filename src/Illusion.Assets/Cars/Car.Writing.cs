@@ -101,6 +101,27 @@ public sealed partial class Car
                     ["the frame graph changed and this archive lists no frame resource to write it into"]);
             }
         }
+        // A shape record is only real once the manifest names it — packing builds the archive from the
+        // manifest and never from the folder — so a manifest that cannot be opened refuses the save here,
+        // while nothing has been written, rather than leaving a record the archive carries and never uses.
+        if (_pendingShapes.Count > 0 && Announceable(redirect) is { } why)
+        {
+            return new CarSave([], [], [why]);
+        }
+
+        // ── the prefab: has anyone else written it since this car read it? ──
+        //
+        // The aggregate writes the WHOLE prefab from the copy it holds, so a file that moved underneath it
+        // would be overwritten rather than merged — and four other modules still write this same file
+        // directly. Refusing is the only honest answer: the edit is still in memory, and reopening the
+        // archive picks up both.
+        if (_prefabOnDisk != null && Current(PrefabPath) is { } now
+            && !now.AsSpan().SequenceEqual(_prefabOnDisk))
+        {
+            return new CarSave([], [], [$"{Path.GetFileName(PrefabPath)}: it changed on disk after this car "
+                + "was read, and saving would write over that change — reopen the archive and make the edit "
+                + "again"]);
+        }
 
         // ── the prefab: serialized, read back, and compared before it is allowed anywhere near a file ──
         string prefab = Path.GetFileName(PrefabPath);
@@ -127,8 +148,151 @@ public sealed partial class Car
         var written = new List<string>();
         var unchanged = new List<string>();
         Put(PrefabPath, bytes, redirect, written, unchanged);
+        // What the file holds NOW, so the guard above measures the next save against this one rather than
+        // against the state the car was read in. A redirected save leaves PrefabPath alone, and then so does
+        // this.
+        if (redirect == null) _prefabOnDisk = bytes;
+        List<string> lostShapes = SaveShapes(redirect, written, unchanged);
         if (manifest != null) SaveFrames(manifest, redirect, written, unchanged);
-        return new CarSave(written, unchanged, []);
+        return new CarSave(written, unchanged, lostShapes);
+    }
+
+    /// <summary>The prefab's bytes as this car last read or wrote them — what says whether somebody else has
+    /// written the file since. Null for a car stitched in memory, which has no file to be overtaken on.</summary>
+    private byte[]? _prefabOnDisk;
+
+    /// <summary>Remembers what the prefab file held when this car was read.</summary>
+    private void RememberPrefabOnDisk()
+    {
+        if (PrefabPath != null) _prefabOnDisk = Current(PrefabPath);
+    }
+
+    private static byte[]? Current(string path)
+    {
+        try { return File.Exists(path) ? File.ReadAllBytes(path) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>Why the manifest cannot be written, or null when it can. Asked BEFORE anything is written,
+    /// because a shape record the manifest never names is a resource the packer silently drops.</summary>
+    private string? Announceable(Func<string, string>? redirect)
+    {
+        if (Extracted == null) return "this car has no working copy to write its shape records into";
+        try
+        {
+            SdsManifest.Load(Path.GetDirectoryName(Mirror(redirect))!);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SdsFormatException)
+        {
+            return "the archive's manifest cannot be read, so a shape record could not be announced in it "
+                + $"— and one the manifest does not name is dropped when the archive is packed ({ex.Message})";
+        }
+    }
+
+    /// <summary>
+    /// Writes the ItemDesc records a collision edit minted or changed, and unwrites the ones it took away.
+    ///
+    /// <para>
+    /// The MANIFEST goes with each of them, and it is not optional in either direction. Packing builds the
+    /// archive from the manifest and never from the folder, so a record written and not announced is silently
+    /// dropped — and an entry left naming a file that is gone does not get skipped either, it fails the whole
+    /// Build with "Could not find file …ItemDesc_0.ids" until the entry goes.
+    /// </para>
+    /// </summary>
+    /// <returns>What could not be delivered, each named. Non-empty makes the whole save a failure, because a
+    /// record the manifest does not name is one the game never sees.</returns>
+    private List<string> SaveShapes(
+        Func<string, string>? redirect, List<string> written, List<string> unchanged)
+    {
+        var lost = new List<string>();
+        if (_pendingShapes.Count == 0) return lost;
+
+        foreach ((string path, byte[]? bytes) in _pendingShapes.ToList())
+        {
+            string target = redirect?.Invoke(path) ?? path;
+            string name = Path.GetFileName(path);
+            if (bytes == null)
+            {
+                if (!Announce(redirect, name, add: false))
+                {
+                    // The entry is still there and the file is about to go, which is the one combination that
+                    // fails a Build outright — so the file stays and the loss is reported instead.
+                    lost.Add($"{name}: the manifest still names it and could not be rewritten, so the record "
+                        + "was left in place rather than leaving the archive unpackable");
+                    continue;
+                }
+                try { if (File.Exists(target)) File.Delete(target); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // The manifest no longer names it, so the archive still packs; the file is orphaned, not
+                    // fatal, and re-extracting the archive clears it.
+                }
+                written.Add(target);
+                _pendingShapes.Remove(path);
+                continue;
+            }
+            Put(target, bytes, redirect: null, written, unchanged);
+            if (Announce(redirect, name, add: true)) { _pendingShapes.Remove(path); continue; }
+
+            // Written and unannounced is the worst of the three outcomes: the packer builds from the
+            // manifest, so the record would be dropped and the volume naming it would resolve to nothing —
+            // a collision that is in every file and in no game. The file goes back and the save fails.
+            try { if (File.Exists(target)) File.Delete(target); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* reported below */ }
+            written.Remove(target);
+            lost.Add($"{name}: it could not be announced in the archive's manifest, and a record the manifest "
+                + "does not name is dropped when the archive is packed");
+        }
+        return lost;
+    }
+
+    /// <summary>
+    /// Says (or unsays) a shape record in the archive's manifest.
+    ///
+    /// <para>
+    /// A REDIRECTED save says it in the mirror's own manifest, copying the original there first — which is
+    /// what keeps a probe measuring the corpus from writing into the player's install, and is also the only
+    /// way the mirror is a complete archive that could actually be packed.
+    /// </para>
+    /// </summary>
+    /// <returns>False when the manifest could not be changed — which the caller turns into a failed save,
+    /// because the pre-existing shape writer treats exactly this as a hard refusal for the same reason.</returns>
+    private bool Announce(Func<string, string>? redirect, string file, bool add)
+    {
+        if (Extracted == null) return false;
+        try
+        {
+            SdsManifest manifest = SdsManifest.Load(Path.GetDirectoryName(Mirror(redirect))!);
+            if (add) manifest.AddEntry("ItemDesc", file, ItemDescVersion); else manifest.RemoveEntry(file);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SdsFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The manifest this save writes to: the archive's own, or — under a redirect — a copy of it inside the
+    /// mirror, made on first use.
+    ///
+    /// <para>
+    /// The copy is what keeps a probe measuring the corpus from writing into the player's install, and it is
+    /// also the only way the mirror is an archive that could actually be packed: a shape record is real only
+    /// once a manifest names it.
+    /// </para>
+    /// </summary>
+    private string Mirror(Func<string, string>? redirect)
+    {
+        string source = Path.Combine(Extracted!, "SDSContent.xml");
+        string target = redirect?.Invoke(source) ?? source;
+        if (File.Exists(target)) return target;
+
+        string? folder = Path.GetDirectoryName(target);
+        if (folder != null) Directory.CreateDirectory(folder);
+        File.Copy(source, target);
+        return target;
     }
 
     /// <summary>

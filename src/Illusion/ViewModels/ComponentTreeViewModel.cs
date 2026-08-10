@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Numerics;
 using System.Windows.Data;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Cars;
@@ -157,6 +158,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         RootsView = CollectionViewSource.GetDefaultView(Roots);
         RootsView.Filter = o => o is ComponentRowViewModel row && row.HasSearchMatch;
         Selected = null;
+        SelectedCollision = null;
 
         string? archive = document?.SourceArchive.Name;
         bool moved = !string.Equals(archive, _archive, StringComparison.OrdinalIgnoreCase);
@@ -174,6 +176,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Raise(nameof(RootsView));
         Raise(nameof(ShowsComponents));
         Raise(nameof(Selected));
+        Raise(nameof(SelectedCollision));
         if (!moved) return;
         Raise(nameof(IsRaw));
         Raise(nameof(IsComponents));
@@ -195,6 +198,10 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         var row = new ComponentRowViewModel(component, parent);
         if (folded.TryGetValue(component.Id.Value, out bool wasFolded) && wasFolded) row.IsExpanded = false;
         _rowsById[component.Id.Value] = row;
+        foreach (CarCollision collision in component.Collisions)
+        {
+            row.AddCollision(new CollisionRowViewModel(collision, row));
+        }
         foreach (CarComponent child in component.Children) row.AddChild(Row(child, row, folded));
         return row;
     }
@@ -231,6 +238,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     {
         foreach (ComponentRowViewModel child in row.Children) Narrow(child, searching);
         row.ChildrenView.Refresh();
+        // A collision row has nothing under it and follows its component, so there is nothing to narrow
+        // there — filtering one out would empty a matching door of the very thing it is made of.
         // While searching, the tree opens onto the matches. Clearing the query does NOT re-open everything —
         // the same thing the frame tree does, and the reason is the same: which branches are folded is the
         // modder's, and a search is not permission to unfold the lot.
@@ -352,6 +361,14 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     // same component after each unrelated edit is the panel moving the user where they did not ask to go.
     private void Highlight(ComponentRowViewModel? row)
     {
+        // A collision row is never left lit beside a component: whatever moves the highlight settles which
+        // ONE row the menu acts on, and two lit rows would make "Remove collision" a question about which.
+        if (SelectedCollision != null)
+        {
+            SelectedCollision.IsSelected = false;
+            SelectedCollision = null;
+            Raise(nameof(SelectedCollision));
+        }
         if (ReferenceEquals(row, Selected)) return;
         bool moved = Selected?.Id != row?.Id;
 
@@ -364,6 +381,179 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         }
         Raise(nameof(Selected));
         if (row != null && moved) SelectionShown?.Invoke(row);
+    }
+
+    // ── editing ──
+
+    /// <summary>The collision row the menu acts on, or null when the selection is a component.</summary>
+    public CollisionRowViewModel? SelectedCollision { get; private set; }
+
+    /// <summary>
+    /// Points the menu at a collision, and the viewport at the component that carries it.
+    ///
+    /// <para>
+    /// The viewport draws frames and has nothing to select for a collision — a self-describing volume has no
+    /// frame at all, and the mirror stub of a solid one is a copy the modder is deliberately never shown. So
+    /// the component's own bone is what the gizmo, the property tabs and Delete stay pointed at.
+    /// </para>
+    /// </summary>
+    public void Select(CollisionRowViewModel? row)
+    {
+        if (row == null) return;
+        _viewport.Select(NodeOf(row.Component.Component));
+        // …and the tree's highlight is THIS row, not the component's. Handing the bone over raises the
+        // viewport's own selection change, which lights the component row on the way back through
+        // ShowSelection, so the clearing has to come after it rather than before.
+        Highlight(null);
+        SelectedCollision = row;
+        row.IsSelected = true;
+        Raise(nameof(SelectedCollision));
+    }
+
+    /// <summary>Raised after an edit has been written and the car re-stitched, so the panel can rebuild the
+    /// rows around a tree whose components may have gained or lost something.</summary>
+    public event Action? CarEdited;
+
+    /// <summary>
+    /// Gives a component one more collision, by role and shape.
+    ///
+    /// <para>
+    /// The aggregate is the only path from here to bytes: it derives the stored type, the space, the extents,
+    /// the ItemDesc record and the mirror stub, and this hands the result to the three things that always
+    /// follow an edit in this editor — the undo stack, the build list, and the modder.
+    /// </para>
+    /// </summary>
+    public void AddCollision(
+        ComponentRowViewModel? row, CarCollisionRole role, CarCollisionShape shape,
+        Vector3 size, Vector3 position, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
+        {
+            refusal = "no car is open";
+            return;
+        }
+
+        CarCollisionEdit? edit = car.AddCollision(fresh.Component, role, shape, size, position, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+        // The layer goes on once the collision is really there: one that exists and is invisible reads as
+        // "nothing happened", and looking at where the box landed is the whole reason for typing a position
+        // rather than guessing one. After the commit, so the overlay redraws from the file that was written.
+        if (refusal == null) _viewport.ShowPartShapes = true;
+    }
+
+    /// <summary>Resizes and moves a collision, in its component's own space.</summary>
+    public void SetCollision(
+        CollisionRowViewModel? row, Vector3 size, Vector3 position, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Collision(row) is not (Car car, CarCollision collision))
+        {
+            refusal = "that collision is no longer there";
+            return;
+        }
+
+        // The turn the collision already has is kept: the modder typed a position, not a rotation, and
+        // throwing away a shipped volume's orientation because its position moved would be a second edit
+        // nobody asked for.
+        Matrix4x4 placement = collision.Placement;
+        placement.Translation = position;
+
+        CarCollisionEdit? edit = car.SetCollision(collision, size, placement, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>Takes a collision off its component, and its ItemDesc record and mirror stub with it when
+    /// nothing else names them.</summary>
+    public void RemoveCollision(CollisionRowViewModel? row, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Collision(row) is not (Car car, CarCollision collision))
+        {
+            refusal = "that collision is no longer there";
+            return;
+        }
+
+        CarCollisionEdit? edit = car.RemoveCollision(collision, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>
+    /// Re-reads the car from the working copy before an edit is made on it, and finds the row again in what
+    /// comes back.
+    ///
+    /// <para>
+    /// This is not belt and braces. The aggregate writes the WHOLE prefab from the copy it holds, and that
+    /// copy is only refreshed when the SCENE changes — while four other modules write the same file directly
+    /// and raise nothing: the Prefab tab repointing a seat, the collision overlay changing a volume's type,
+    /// a part being added. Editing on top of a stale read would put those changes back the way they were, and
+    /// the modder would be told the collision was added.
+    /// </para>
+    /// </summary>
+    private (Car Car, ComponentRowViewModel Row)? Reread(ComponentId id)
+    {
+        Restitch();
+        if (Car is not { } car || RowOf(id) is not { } row) return null;
+        return (car, row);
+    }
+
+    /// <summary>The same, for a row that names a collision: the component is found again by identity and the
+    /// collision by its place in that component's list.</summary>
+    private (Car Car, CarCollision Collision)? Collision(CollisionRowViewModel row)
+    {
+        int at = row.Component.Collisions.ToList().FindIndex(c => ReferenceEquals(c, row));
+        if (Reread(row.Component.Id) is not (Car car, ComponentRowViewModel fresh)) return null;
+        CarCollision? found = fresh.Component.Collisions.ElementAtOrDefault(at);
+        return found == null ? null : (car, found);
+    }
+
+    /// <summary>
+    /// Writes one intent through, and tells everything that has to hear about it.
+    ///
+    /// <para>
+    /// A save that is REFUSED puts the car back first. The aggregate refuses whole — it verifies the prefab by
+    /// writing it and reading it back before a byte reaches a file — so a refusal here means nothing was
+    /// written, and leaving the edit in memory would let the next save carry it in unnoticed.
+    /// </para>
+    /// </summary>
+    private void Commit(Car car, CarCollisionEdit edit, ref string? refusal)
+    {
+        CarSave saved = car.Save();
+        if (!saved.Ok)
+        {
+            refusal = string.Join("; ", saved.Lost);
+            car.Restore(edit.Before);
+            return;
+        }
+
+        _viewport.History.Push(new CarCollisionEditAction(edit, () => Car, Restitch,
+            why => _viewport.RaiseNotice("that could not be taken back: " + why, isError: true)));
+        if (_document != null) _viewport.MarkArchiveModified(_document.SourceArchive);
+        Restitch();
+        _viewport.RaiseNotice(edit.What + ". Build to write it into the archive.");
+    }
+
+    /// <summary>
+    /// Re-stitches the car and rebuilds the rows over it — what every edit ends with, and what an undo of one
+    /// ends with too.
+    ///
+    /// <para>
+    /// The collision overlay is redrawn from the file rather than from the cache, because the file is what
+    /// just changed and the overlay is where a modder sees whether the box landed where they meant it to.
+    /// </para>
+    /// </summary>
+    private void Restitch()
+    {
+        SelectedCollision = null;
+        Refresh(_document);
+        _viewport.RefreshCarCollisionOverlay();
+        CarEdited?.Invoke();
     }
 
     // ── remembering the switch ──

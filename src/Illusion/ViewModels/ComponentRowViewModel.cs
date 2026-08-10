@@ -22,6 +22,17 @@ namespace Illusion.ViewModels;
 public sealed class ComponentRowViewModel : INotifyPropertyChanged
 {
     private readonly List<ComponentRowViewModel> _children = [];
+    private readonly List<CollisionRowViewModel> _collisions = [];
+
+    /// <summary>
+    /// What the tree actually binds: this component's collisions first, then the components hanging off it.
+    ///
+    /// <para>
+    /// The collisions come first because they are what this component IS made of, while a child component —
+    /// a window under its door — is a thing of its own that happens to hang here.
+    /// </para>
+    /// </summary>
+    private readonly List<object> _rows = [];
 
     internal ComponentRowViewModel(CarComponent component, ComponentRowViewModel? parent)
     {
@@ -38,18 +49,27 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     /// <summary>What hangs off this component, in the prefab's own order.</summary>
     public IReadOnlyList<ComponentRowViewModel> Children => _children;
 
+    /// <summary>What this component is solid with, by role and shape.</summary>
+    public IReadOnlyList<CollisionRowViewModel> Collisions => _collisions;
+
     private ICollectionView? _childrenView;
 
-    /// <summary>The children as the tree binds them — the same list, narrowed to what the panel's search box
-    /// matches. Built on first read: a car is shallow, but only the open branches are ever bound.</summary>
+    /// <summary>The rows under this one as the tree binds them — its collisions and its child components,
+    /// narrowed to what the panel's search box matches. Built on first read: a car is shallow, but only the
+    /// open branches are ever bound.</summary>
     public ICollectionView ChildrenView
     {
         get
         {
             if (_childrenView == null)
             {
-                _childrenView = CollectionViewSource.GetDefaultView(_children);
-                _childrenView.Filter = o => o is ComponentRowViewModel row && row.HasSearchMatch;
+                _childrenView = CollectionViewSource.GetDefaultView(_rows);
+                _childrenView.Filter = o => o switch
+                {
+                    ComponentRowViewModel row => row.HasSearchMatch,
+                    CollisionRowViewModel collision => collision.HasSearchMatch,
+                    _ => false,
+                };
             }
             return _childrenView;
         }
@@ -102,7 +122,19 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
         set { if (_isSelected != value) { _isSelected = value; Raise(nameof(IsSelected)); } }
     }
 
-    internal void AddChild(ComponentRowViewModel child) => _children.Add(child);
+    internal void AddChild(ComponentRowViewModel child)
+    {
+        _children.Add(child);
+        _rows.Add(child);
+    }
+
+    internal void AddCollision(CollisionRowViewModel collision)
+    {
+        _collisions.Add(collision);
+        // Ahead of every child component, however the two are added: the collisions are what this component
+        // is made of, and a window that hangs off a door should not come between the door and its own glass.
+        _rows.Insert(_collisions.Count - 1, collision);
+    }
 
     /// <summary>Opens every branch above this row, so a row selected from the viewport is one the tree can
     /// actually show.</summary>

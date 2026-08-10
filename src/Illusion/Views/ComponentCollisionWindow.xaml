@@ -1,0 +1,121 @@
+<Window x:Class="Illusion.Views.ComponentCollisionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Illusion.Views"
+        Title="Collision"
+        Width="560" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Component tree → right-click a component → Add collision…
+
+         FOUR questions and no more: what it is, what form it takes, how big it is and where it sits. The
+         stored volume type, the bone space the matrix goes into, the axis reversal between the two copies of
+         it, whether the extents mean a full size or half of one, the ItemDesc record and the frame stub are
+         all derived from the answers and none of them is on this window — a modder who has to know which of
+         the four parallel lists owns their door cannot make a car.
+
+         Same shell as CollisionBoxWindow: 24px-inset content over a hairline-topped command bar, a DimLabel
+         caption above each field, and the app's own DropDownField rather than a system combo box. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- content -->
+            <RowDefinition Height="Auto" />  <!-- command bar -->
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+
+            <!-- WHAT IT IS. Pre-filled from the component's kind and meant to be overridden: a part carrying
+                 two kinds of volume is the normal case, not the exception — doors run 0 ×21 / 5 ×228 and
+                 covers 0 ×16 / 5 ×231 over the shipped cars, so a door with both its own collision and its
+                 glass is simply how a car is built. -->
+            <TextBlock Style="{StaticResource DimLabel}" Text="What it is" Margin="0,0,0,4" />
+            <v:DropDownField x:Name="RoleBox" DisplayPath="Title" SelectionChanged="Role_Changed"
+                             ToolTip="Body is the car's own solid; glass is a pane; a zone is the engine bay or the snow." />
+            <TextBlock x:Name="RoleHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+                       TextWrapping="Wrap" />
+
+            <TextBlock x:Name="ShapeCaption" Style="{StaticResource DimLabel}" Text="Shape" Margin="0,0,0,4" />
+            <v:DropDownField x:Name="ShapeBox" DisplayPath="Title" SelectionChanged="Shape_Changed"
+                             ToolTip="The form the collision takes." />
+            <TextBlock x:Name="ShapeHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+                       TextWrapping="Wrap" />
+
+            <!-- The WHOLE size, never half of one and never a radius to double in your head. A capsule and a
+                 cylinder take their width from the first two and their whole length from the third. -->
+            <TextBlock x:Name="SizeCaption" Style="{StaticResource DimLabel}"
+                       Text="Size in metres — the whole thing, not half of it" Margin="0,0,0,4" />
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBox x:Name="SizeX" Grid.Row="0" Grid.Column="0" Style="{StaticResource DarkBox}" Text="0.30" />
+                <TextBox x:Name="SizeY" Grid.Row="0" Grid.Column="2" Style="{StaticResource DarkBox}" Text="0.30" />
+                <TextBox x:Name="SizeZ" Grid.Row="0" Grid.Column="4" Style="{StaticResource DarkBox}" Text="0.30" />
+
+                <TextBlock x:Name="SizeLabelX" Grid.Row="1" Grid.Column="0" Style="{StaticResource DimLabel}"
+                           Margin="1,4,0,0" />
+                <TextBlock x:Name="SizeLabelY" Grid.Row="1" Grid.Column="2" Style="{StaticResource DimLabel}"
+                           Margin="1,4,0,0" />
+                <TextBlock x:Name="SizeLabelZ" Grid.Row="1" Grid.Column="4" Style="{StaticResource DimLabel}"
+                           Margin="1,4,0,0" />
+            </Grid>
+
+            <!-- In the COMPONENT's own space, which is the only space a modder has any reason to think in.
+                 Where the file actually keeps it depends on what the volume is, and that conversion is the
+                 toolkit's job. -->
+            <TextBlock x:Name="PositionCaption" Style="{StaticResource DimLabel}" Margin="0,0,0,4" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBox x:Name="AtX" Grid.Row="0" Grid.Column="0" Style="{StaticResource DarkBox}" Text="0" />
+                <TextBox x:Name="AtY" Grid.Row="0" Grid.Column="2" Style="{StaticResource DarkBox}" Text="0" />
+                <TextBox x:Name="AtZ" Grid.Row="0" Grid.Column="4" Style="{StaticResource DarkBox}" Text="0" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource DimLabel}" Text="X"
+                           Margin="1,4,0,0" />
+                <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource DimLabel}" Text="Y"
+                           Margin="1,4,0,0" />
+                <TextBlock Grid.Row="1" Grid.Column="4" Style="{StaticResource DimLabel}" Text="Z"
+                           Margin="1,4,0,0" />
+            </Grid>
+
+            <TextBlock x:Name="ErrorLabel" Foreground="{StaticResource StatusErrorText}" FontSize="11.5"
+                       Margin="0,12,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock x:Name="FootNote" DockPanel.Dock="Left" Style="{StaticResource DimLabel}"
+                           MaxWidth="280" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" Click="Cancel_Click" />
+                    <Button x:Name="AcceptButton" Style="{StaticResource AccentButton}" MinWidth="92"
+                            Height="32" Content="Add" IsDefault="True" Click="Accept_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -57,8 +57,15 @@ public sealed partial class Car
         _byId = components.ToDictionary(c => c.Id.Value);
     }
 
-    /// <summary>The prefab as it was read. The writing half patches this; nothing else may.</summary>
-    public PrefabFile Prefab { get; }
+    /// <summary>
+    /// The prefab as it was read. The writing half patches this; nothing else may.
+    ///
+    /// <para>
+    /// Replaced whole in exactly one place: restoring an undo SNAPSHOT, which puts back the bytes the prefab
+    /// held rather than running a derivation backwards.
+    /// </para>
+    /// </summary>
+    public PrefabFile Prefab { get; private set; }
 
     /// <summary>The frame graph as it was read, or null when the archive carries none.</summary>
     public FrameResource? Frames { get; }

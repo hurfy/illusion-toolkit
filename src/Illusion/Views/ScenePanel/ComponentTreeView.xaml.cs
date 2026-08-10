@@ -51,6 +51,7 @@ public partial class ComponentTreeView : UserControl
         ComponentTree.SelectedItemChanged += (_, e) =>
         {
             if (e.NewValue is ComponentRowViewModel row) components.Select(row);
+            else if (e.NewValue is CollisionRowViewModel collision) components.Select(collision);
         };
     }
 
@@ -81,27 +82,80 @@ public partial class ComponentTreeView : UserControl
     {
         if (e.OriginalSource is not DependencyObject source) return;
         if (FindAncestor<System.Windows.Controls.Primitives.ToggleButton>(source) != null) return;
-        if (FindAncestor<TreeViewItem>(source)?.DataContext is not ComponentRowViewModel row) return;
-        _components?.Select(row);
+        Pick(FindAncestor<TreeViewItem>(source)?.DataContext);
     }
 
     // Right-click selects the row under the cursor first, so the menu acts on it.
     private void ComponentTree_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is not DependencyObject source) return;
-        if (FindAncestor<TreeViewItem>(source)?.DataContext is not ComponentRowViewModel row) return;
-        if (!ReferenceEquals(_components?.Selected, row)) _components?.Select(row);
+        object? clicked = FindAncestor<TreeViewItem>(source)?.DataContext;
+        if (clicked is ComponentRowViewModel row && ReferenceEquals(_components?.Selected, row)
+            && _components?.SelectedCollision == null)
+        {
+            return;
+        }
+        Pick(clicked);
+    }
+
+    // One row, whichever kind it is. A collision row points the menu at itself and the viewport at the
+    // component that carries it — the viewport has nothing of its own to select for a collision.
+    private void Pick(object? row)
+    {
+        switch (row)
+        {
+            case ComponentRowViewModel component: _components?.Select(component); break;
+            case CollisionRowViewModel collision: _components?.Select(collision); break;
+        }
     }
 
     /// <summary>
-    /// The component tree edits nothing yet, so the one thing its menu can offer is the way BACK: everything
-    /// that acts on a row — adding a collision shape, sweeping unused hulls, rolling the archive back —
-    /// lives on the frame tree's own menu, and a car opening on its components would otherwise hide the only
-    /// path to them behind a switch nobody has been told about.
+    /// The way BACK: everything that acts on a row and is not a component's own — sweeping unused hulls,
+    /// rolling the archive back — lives on the frame tree's own menu, and a car opening on its components
+    /// would otherwise hide the only path to them behind a switch nobody has been told about.
     /// </summary>
     public event Action? ShowInRawRequested;
 
     private void ShowInRaw_Click(object sender, RoutedEventArgs e) => ShowInRawRequested?.Invoke();
+
+    /// <summary>A component was asked for one more collision — the host puts the question and applies it.</summary>
+    public event Action<ComponentRowViewModel>? AddCollisionRequested;
+
+    /// <summary>A collision was asked for a new size and position.</summary>
+    public event Action<CollisionRowViewModel>? EditCollisionRequested;
+
+    /// <summary>A collision was asked to go.</summary>
+    public event Action<CollisionRowViewModel>? RemoveCollisionRequested;
+
+    // Which items the menu offers depends on what is under the cursor: a component can be given a collision,
+    // and a collision can be resized or taken away. An item that is shown while it cannot do anything is a
+    // promise the menu does not keep — and a read-only collision (a cooked hull) can only be removed.
+    private void Menu_Opened(object sender, RoutedEventArgs e)
+    {
+        CollisionRowViewModel? collision = _components?.SelectedCollision;
+        bool onComponent = _components?.Selected != null && collision == null;
+
+        AddCollisionItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
+        EditCollisionItem.Visibility = collision != null ? Visibility.Visible : Visibility.Collapsed;
+        RemoveCollisionItem.Visibility = collision != null ? Visibility.Visible : Visibility.Collapsed;
+        EditCollisionItem.IsEnabled = collision is { IsReadOnly: false };
+        EditCollisionItem.ToolTip = collision?.ReadOnlyReason;
+    }
+
+    private void AddCollision_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.Selected is { } row) AddCollisionRequested?.Invoke(row);
+    }
+
+    private void EditCollision_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedCollision is { } row) EditCollisionRequested?.Invoke(row);
+    }
+
+    private void RemoveCollision_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedCollision is { } row) RemoveCollisionRequested?.Invoke(row);
+    }
 
     /// <summary>
     /// Scrolls a row into view, realizing it through the virtualized panels — WPF's TreeView does not
