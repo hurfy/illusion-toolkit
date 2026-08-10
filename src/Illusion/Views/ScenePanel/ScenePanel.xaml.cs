@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using Illusion.Assets.Adapters;
+using Illusion.Assets.Cars;
 using Illusion.Domain;
 using Illusion.Scene;
 using Illusion.ViewModels;
@@ -98,6 +99,10 @@ public partial class ScenePanel : UserControl
         ComponentTree.AddCollisionRequested += AddCollision;
         ComponentTree.EditCollisionRequested += EditCollision;
         ComponentTree.RemoveCollisionRequested += RemoveCollision;
+        ComponentTree.AddMarkerRequested += AddMarker;
+        ComponentTree.EditMarkerRequested += EditMarker;
+        ComponentTree.RemoveMarkerRequested += RemoveMarker;
+        ComponentTree.EditDataRowRequested += EditDataRow;
         // An edit rebuilds the rows around a car that has gained or lost something, and the selection has to
         // be resolved onto the new rows — the same treatment a scene change gets, minus the scroll.
         _components.CarEdited += () =>
@@ -356,6 +361,67 @@ public partial class ScenePanel : UserControl
     {
         _components.RemoveCollision(row, out string? refusal);
         if (refusal != null) _viewport.RaiseNotice("collision not removed: " + refusal, isError: true);
+    }
+
+    // ── Markers, under the component they hang off ──
+
+    /// <summary>
+    /// Gives a component one more marker. There is nothing to ask: the role came from the menu, the bone is
+    /// the component's own, and where it goes is a drag — so the aggregate mints the frame and the row, and
+    /// the modder moves it.
+    /// </summary>
+    private void AddMarker(ComponentRowViewModel row, CarMarkerRole role)
+    {
+        _components.AddMarker(row, role, out string? refusal);
+        if (refusal != null) _viewport.RaiseNotice("marker not added: " + refusal, isError: true);
+    }
+
+    /// <summary>The numbers a marker's own row carries. The dialog stays open on a refusal and says why in
+    /// place, for the reason the collision one does: the modder is still standing in front of the numbers
+    /// that caused it.</summary>
+    private void EditMarker(MarkerRowViewModel row)
+    {
+        var dialog = new CarFieldsWindow(
+            $"{row.Label} on {row.Component.Name}",
+            $"What \"{row.Name}\" carries in the car's own {row.Marker.Role.ToString().ToLowerInvariant()} "
+            + "list. The marker itself is placed by dragging it in the viewport.",
+            row.Marker.Fields)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.SetMarker(row, dialog.Values, out string? refusal);
+            if (refusal == null) return;
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    private void RemoveMarker(MarkerRowViewModel row)
+    {
+        _components.RemoveMarker(row, out string? refusal);
+        if (refusal != null) _viewport.RaiseNotice("marker not removed: " + refusal, isError: true);
+    }
+
+    /// <summary>One of the prefab rows that names a component's own bone — its door points, its window, its
+    /// axle.</summary>
+    private void EditDataRow(ComponentDataRowViewModel row)
+    {
+        var dialog = new CarFieldsWindow(
+            $"{row.Label} on {row.Component.Name}",
+            $"What this car's {row.Row.Kind} list says about \"{row.Component.Name}\". It is a row of its "
+            + "own beside the component, and nothing in the format keeps the two in step — which is why it "
+            + "is shown here.",
+            row.Row.Fields)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.SetDataRow(row, dialog.Values, out string? refusal);
+            if (refusal == null) return;
+            dialog = dialog.Again(refusal);
+        }
     }
 
     // ── Selection → property tabs ──

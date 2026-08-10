@@ -11,6 +11,8 @@
     <UserControl.Resources>
         <v:ComponentGlyphConverter x:Key="ComponentGlyph" />
         <v:ComponentTintConverter x:Key="ComponentTint" />
+        <v:MarkerGlyphConverter x:Key="MarkerGlyph" />
+        <v:MarkerTintConverter x:Key="MarkerTint" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
 
@@ -40,10 +42,17 @@
                      frame is what the frame tree lands on, so the way back is one click. -->
                 <ContextMenu Opened="Menu_Opened">
                     <MenuItem x:Name="AddCollisionItem" Header="Add collision…" Click="AddCollision_Click" />
+                    <!-- The roles are filled in from the aggregate rather than spelled here: the two it
+                         cannot mint are absent rather than greyed, because a wiper is a bone on all 148
+                         shipped ones and a light is a slot rather than a row. -->
+                    <MenuItem x:Name="AddMarkerItem" Header="Add marker" />
                     <MenuItem x:Name="EditCollisionItem" Header="Size and position…"
                               Click="EditCollision_Click" />
                     <MenuItem x:Name="RemoveCollisionItem" Header="Remove collision"
                               Click="RemoveCollision_Click" />
+                    <MenuItem x:Name="EditMarkerItem" Header="Marker data…" Click="EditMarker_Click" />
+                    <MenuItem x:Name="RemoveMarkerItem" Header="Remove marker" Click="RemoveMarker_Click" />
+                    <MenuItem x:Name="EditDataRowItem" Header="Row…" Click="EditDataRow_Click" />
                     <Separator />
                     <MenuItem Header="Show in Raw tree" Click="ShowInRaw_Click" />
                 </ContextMenu>
@@ -203,6 +212,82 @@
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                         <TextBlock Grid.Column="2" Text="{Binding Size}" Foreground="{StaticResource TextFaint}"
                                    FontSize="10.5" VerticalAlignment="Center" Margin="8,0,4,0" />
+                    </Grid>
+                </DataTemplate>
+
+                <!-- One of the prefab rows that names this component's OWN bone: a door's handle and lock, a
+                     window's depth, an axle's masses. Not a marker — a marker hangs a helper frame off the
+                     bone, this names the bone itself — but it sits here for the same reason: the modder
+                     should not have to know which of the four parallel lists a number lives in. -->
+                <DataTemplate DataType="{x:Type vm:ComponentDataRowViewModel}">
+                    <Grid ToolTip="{Binding Tip}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                              Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stroke="{Binding Row.Kind, Converter={StaticResource ComponentTint}}"
+                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Data="{Binding Row.Kind, Converter={StaticResource ComponentGlyph}}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="2" Text="{Binding Summary}"
+                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   VerticalAlignment="Center" Margin="8,0,4,0" />
+                    </Grid>
+                </DataTemplate>
+
+                <!-- The markers of one ROLE, and the markers in it. Grouped rather than listed flat because
+                     of where they land: the body holds every marker whose bone no component owns, 524 of the
+                     1081 shipped ones, and a body with nineteen rows under it in no order is the flat pile
+                     this view exists to take away, merely moved one level down. -->
+                <HierarchicalDataTemplate DataType="{x:Type vm:MarkerGroupRowViewModel}"
+                                          ItemsSource="{Binding Markers}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                              Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stroke="{Binding Role, Converter={StaticResource MarkerTint}}"
+                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Data="{Binding Role, Converter={StaticResource MarkerGlyph}}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                </HierarchicalDataTemplate>
+
+                <!-- One marker: what it is, and the frame it names. Clicking it selects that frame in the
+                     viewport, so the next thing the modder does can be to drag it — which is the whole
+                     operation for the four roles that carry no numbers of their own. -->
+                <DataTemplate DataType="{x:Type vm:MarkerRowViewModel}">
+                    <Grid ToolTip="{Binding Tip}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="10" Height="10" Stretch="Uniform"
+                              Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stroke="{Binding Marker.Role, Converter={StaticResource MarkerTint}}"
+                              Opacity="0.75"
+                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Data="{Binding Marker.Role, Converter={StaticResource MarkerGlyph}}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="2" Text="{Binding Name}"
+                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   VerticalAlignment="Center" Margin="8,0,4,0"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="120" />
                     </Grid>
                 </DataTemplate>
             </TreeView.Resources>

@@ -148,13 +148,42 @@ public static class CarPartBuilder
             return null;
         }
 
-        // A climb box's row states the box, and the row was just COPIED from the donor — so without this the
-        // new one sits exactly on top of an existing box and there is nothing new to climb, however the
-        // Dummy is dragged. Measured: 265 of 281 shipped rows are the Dummy's own extents placed where the
-        // Dummy stands (`--probe-car-items`), and this makes the new row say the same about its own frame.
-        if (kind == CarItemKind.ClimbBox) CarClimbBoxes.SyncFromFrames(extracted, resource);
+        // A climb box's row states the box and a seat's row states where its occupant sits, and both were just
+        // COPIED from the donor — so without this the new one sits exactly on top of an existing box and there
+        // is nothing new to climb, however the Dummy is dragged. Through the aggregate, which is the one path
+        // from a change to a car's bytes. Only the two kinds whose row says where the part IS: the others
+        // carry nothing a frame could contradict, and a stitch of the whole car to find that out is a cost
+        // paid for nothing.
+        if (kind is CarItemKind.ClimbBox or CarItemKind.Seat)
+        {
+            Cars.Car.SyncMarkers(extracted, resource, [frame], out _);
+            // …and the row a REDO puts back is re-read after that sync rather than before it. The bytes
+            // AddItemIn captured are the donor's copy, so replaying them would give the part back with the
+            // neighbour's box or the neighbour's seating position and nothing would sync it again.
+            change = Resynced(change) ?? change;
+        }
 
         return new AddedCarPart(frame, change, kind, bone, name, donor);
+    }
+
+    /// <summary>
+    /// The same change, holding the row as it stands NOW — after the sync that rewrote it from the part's own
+    /// frame.
+    /// </summary>
+    /// <returns>Null when the row cannot be read back, in which case the caller keeps the bytes it had: an
+    /// undo that puts back a slightly stale row is worse than nothing only if it puts back nothing.</returns>
+    private static PrefabEditing.ItemChange? Resynced(PrefabEditing.ItemChange change)
+    {
+        PrefabFile prefab;
+        try { prefab = PrefabFile.Load(change.PrefabPath); }
+        catch (Exception ex) when (ex is IOException or Formats.SdsFormatException) { return null; }
+
+        // Taken and put straight back: the only way to read one row's bytes is to serialize it, and taking it
+        // is what does that. Nothing is written — the file on disk already holds the synced row.
+        byte[]? bytes = prefab.TakeCarItem(change.Kind, change.Index);
+        if (bytes == null) return null;
+        prefab.PutCarItem(change.Kind, change.Index, bytes);
+        return change with { Item = bytes };
     }
 
     /// <summary>The frame an EXISTING part of this kind names, or 0 — the best donor there is.</summary>

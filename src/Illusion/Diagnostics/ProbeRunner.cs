@@ -789,6 +789,16 @@ internal static class ProbeRunner
                 CollisionRoleProbes.RunCollisionRoleProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // Markers under the component they hang off: where each of the 1081 lands, what its own parallel
+            // row carries, and whether an edit made on that row survives a round trip through the aggregate
+            // and reaches the file alone — plus adding and removing one, the refusals, and the climb box whose
+            // row the game reads instead of its frame. The focus car's working copy is mirrored into the temp
+            // directory, so the game's folders are never written to. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_car_markers.txt
+            case "--probe-car-markers":
+                CarMarkerProbes.RunCarMarkersProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt

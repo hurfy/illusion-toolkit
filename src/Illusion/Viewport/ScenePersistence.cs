@@ -110,6 +110,15 @@ internal sealed class ScenePersistence
                 continue;
             }
             document.SaveWorkingCopy();
+            // A car's markers say where they are twice — a climb box's box and a seat's position live in a
+            // prefab row as well, and the ROW is the copy the game reads. The save carries a dragged marker
+            // through to it, and can be refused; the drag is held for the next save either way, but the
+            // modder has to hear about it or "I moved it and nothing happened" has no explanation.
+            if (document is Assets.Adapters.SceneDocumentAdapter { MarkerRowsRefused: { } why })
+            {
+                _host.RaiseNotice(
+                    "the markers you moved could not be written into the car's prefab: " + why, isError: true);
+            }
             _unsavedFrames.Remove(fr);        // written; the archive stays on the build list until packed
             saved++;
         }

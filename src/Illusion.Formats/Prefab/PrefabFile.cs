@@ -52,6 +52,18 @@ public enum CarValueSlot
     WindowOpenable,
     SeatType,
     SeatPosition,
+
+    /// <summary>
+    /// WHICH seat of the car this is — authored, not the row's position in the list.
+    ///
+    /// <para>
+    /// Measured over the 213 seats of the 85 shipped cars: unique within its car 213/213 and below the seat
+    /// count 213/213, so the values are a permutation of 0…n−1 — but they equal the row's own position on
+    /// only 5 of 213, and the commonest two-seat car is written <c>1, 0</c>. So the list order is not the
+    /// numbering, and a writer that renumbers by position overwrites what the author said on 208 of them.
+    /// </para>
+    /// </summary>
+    SeatIndex,
     DoorHandle,
     DoorLock,
     AxleType,
@@ -408,6 +420,7 @@ public sealed partial class PrefabFile
             CarValueSlot.WindowOpenable when other != null && In(index, other.WindowData.Count)
                 => other.WindowData[index].IsOpenable,
             CarValueSlot.SeatType when In(index, car.Seats.Count) => car.Seats[index].SeatType,
+            CarValueSlot.SeatIndex when In(index, car.Seats.Count) => car.Seats[index].SeatIndex,
             CarValueSlot.SeatPosition when In(index, car.Seats.Count) => Axis(car.Seats[index].Position, axis),
             CarValueSlot.DoorHandle when In(index, car.DoorPoints.Count)
                 => Axis(car.DoorPoints[index].HandlePos, axis),
@@ -489,6 +502,8 @@ public sealed partial class PrefabFile
                 other.WindowData[index].IsOpenable = (byte)(value != 0 ? 1 : 0); return true;
             case CarValueSlot.SeatType when In(index, car.Seats.Count):
                 car.Seats[index].SeatType = (uint)Math.Max(0, value); return true;
+            case CarValueSlot.SeatIndex when In(index, car.Seats.Count):
+                car.Seats[index].SeatIndex = (uint)Math.Max(0, value); return true;
             case CarValueSlot.SeatPosition when In(index, car.Seats.Count):
                 car.Seats[index].Position = With(car.Seats[index].Position, axis, value); return true;
             case CarValueSlot.DoorHandle when In(index, car.DoorPoints.Count):
@@ -642,7 +657,11 @@ public sealed partial class PrefabFile
             case CarItemKind.Seat:
                 var seat = CloneLast(car.Seats, (s, w) => s.WriteTo(w), Native.Model.PrefabSeatW.ReadFrom);
                 seat.FrameName = frameHash;
-                seat.SeatIndex = (uint)car.Seats.Count;
+                // The next number nothing is using, rather than the row's own position: the numbering is a
+                // permutation of 0…n−1 that the list order does not follow (see CarValueSlot.SeatIndex), and
+                // over the corpus the count IS one past the highest — but only because they are a permutation,
+                // and a car somebody has already edited need not be.
+                seat.SeatIndex = car.Seats.Count == 0 ? 0 : car.Seats.Max(s => s.SeatIndex) + 1;
                 car.Seats.Add(seat);
                 return true;
 
@@ -709,8 +728,16 @@ public sealed partial class PrefabFile
         {
             case CarItemKind.Seat when index < car.Seats.Count:
                 byte[] seat = Pack(w => car.Seats[index].WriteTo(w));
+                uint gone = car.Seats[index].SeatIndex;
                 car.Seats.RemoveAt(index);
-                for (int i = 0; i < car.Seats.Count; i++) car.Seats[i].SeatIndex = (uint)i;
+                // Closed up by VALUE, not by position. The numbering is a permutation of 0…n−1 and the list
+                // order does not follow it, so renumbering by position moves seats the modder never touched —
+                // on a car written 1, 0, 3, 2 it would call the third seat the second. Only the numbers above
+                // the one that went move, and only by one.
+                foreach (Native.Model.PrefabSeatW kept in car.Seats)
+                {
+                    if (kept.SeatIndex > gone) kept.SeatIndex--;
+                }
                 return seat;
             case CarItemKind.Door when index < car.DoorPoints.Count:
                 byte[] door = Pack(w => car.DoorPoints[index].WriteTo(w));
@@ -761,8 +788,14 @@ public sealed partial class PrefabFile
         switch (kind)
         {
             case CarItemKind.Seat when index <= car.Seats.Count:
-                car.Seats.Insert(index, Native.Model.PrefabSeatW.ReadFrom(reader));
-                for (int i = 0; i < car.Seats.Count; i++) car.Seats[i].SeatIndex = (uint)i;
+                var back = Native.Model.PrefabSeatW.ReadFrom(reader);
+                // The mirror of the close-up above: the numbers at or above the one coming back move up by
+                // one, and the seat itself keeps the number it was written with rather than taking its row's.
+                foreach (Native.Model.PrefabSeatW kept in car.Seats)
+                {
+                    if (kept.SeatIndex >= back.SeatIndex) kept.SeatIndex++;
+                }
+                car.Seats.Insert(index, back);
                 return true;
             case CarItemKind.Door when index <= car.DoorPoints.Count:
                 car.DoorPoints.Insert(index, Native.Model.PrefabDoorPointsW.ReadFrom(reader));

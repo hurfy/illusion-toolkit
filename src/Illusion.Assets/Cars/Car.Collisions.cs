@@ -14,70 +14,6 @@ namespace Illusion.Assets.Cars;
 /// <summary>One ItemDesc record of the archive, with the file it came out of.</summary>
 internal sealed record CarShapeRecord(ItemDescFile Shape, string File);
 
-/// <summary>
-/// Everything the affected structures held before (or after) one collision-level intent, kept as BYTES rather
-/// than as a recipe.
-///
-/// <para>
-/// Undo restores this; it never runs the derivation backwards. Derivation is lossy in places — the hit-box
-/// rule reproduces only 65.3 % of the boxes a car ships with — so reversing it would leave a car that differs
-/// from the one the modder started with, in fields they never touched.
-/// </para>
-/// </summary>
-public sealed class CarCollisionState
-{
-    internal CarCollisionState(
-        byte[] prefab, IReadOnlyList<(string Path, byte[]? Bytes)> shapes,
-        IReadOnlyList<CarStubState> stubs, FrameObjectModel.HitBoxInfo[]? hitBoxes)
-    {
-        Prefab = prefab;
-        Shapes = shapes;
-        Stubs = stubs;
-        HitBoxes = hitBoxes;
-    }
-
-    internal byte[] Prefab { get; }
-
-    /// <summary>The ItemDesc files this intent touched, with the bytes they held — or null for a file that
-    /// did not exist, which is how an undo of an add knows to take it away again.</summary>
-    internal IReadOnlyList<(string Path, byte[]? Bytes)> Shapes { get; }
-
-    /// <summary>The mirror stubs it touched, each with everything needed to put it back exactly.</summary>
-    internal IReadOnlyList<CarStubState> Stubs { get; }
-
-    /// <summary>The model's per-piece hit boxes as they were. The whole array — it is sixteen bytes a piece,
-    /// and a snapshot of part of it could not be put back without knowing which part.</summary>
-    internal FrameObjectModel.HitBoxInfo[]? HitBoxes { get; }
-}
-
-/// <summary>
-/// One mirror stub as it stood: whether the graph held it, where, on which joint, and — the part that is
-/// easy to forget — how it hung in the frame graph.
-///
-/// <para>
-/// The two parent slots are recorded because taking a stub OUT clears them, and a frame put back without
-/// them is an orphan: <c>ParentIndex1</c> cascades the transform and <c>ParentIndex2</c> anchors the frame
-/// to a scene, and a frame anchored to nothing loads and is invisible. An undo has to give back the archive
-/// that was there, not one that merely has the same rows.
-/// </para>
-/// </summary>
-/// <param name="Order">Where it sat among the graph's frames. A frame resource is written in the order the
-/// frames are held in, so a stub taken out and put back at the END is an archive whose every frame after it
-/// has moved — the same car, and not the same bytes. An undo owes the bytes.</param>
-/// <param name="Attached">And where its reference sat in the model's attachment list, which is written in
-/// its own order for the same reason.</param>
-internal sealed record CarStubState(
-    FrameObjectCollision Stub, bool Present, Matrix4x4 Local, int Joint,
-    FrameObjectBase? Parent, FrameObjectBase? Root, int Order, int Attached);
-
-/// <summary>
-/// One collision-level intent, as the two states it moved between — which is what makes it ONE undo step
-/// however many structures it touched: a prefab volume, an ItemDesc record, a manifest entry, a frame stub
-/// and a handful of hit boxes.
-/// </summary>
-/// <param name="What">The one line to tell the modder.</param>
-public sealed record CarCollisionEdit(string What, CarCollisionState Before, CarCollisionState After);
-
 public sealed partial class Car
 {
     /// <summary>The archive's ItemDesc records by the DATA hash a prefab volume names them by.</summary>
@@ -283,7 +219,7 @@ public sealed partial class Car
     /// their width from X and Y and their whole length from Z.</param>
     /// <param name="position">Where it sits, in the COMPONENT's own space.</param>
     /// <returns>Null with a <paramref name="refusal"/> when it cannot be done; nothing is changed then.</returns>
-    public CarCollisionEdit? AddCollision(
+    public CarEdit? AddCollision(
         CarComponent component, CarCollisionRole role, CarCollisionShape shape,
         Vector3 fullSize, Vector3 position, out string? refusal)
     {
@@ -323,20 +259,20 @@ public sealed partial class Car
         {
             // Nothing has been written to a file yet, so putting the car back is dropping what was just made.
             if (shapeFile != null) { _pendingShapes.Remove(shapeFile); Forget(shapeFile); }
-            if (stub != null) DropStub(stub);
+            if (stub != null) DropFrame(stub);
             refusal = "the car's prefab would not take another collision on this component";
             return null;
         }
 
-        var before = new CarCollisionState(
+        var before = new CarState(
             prefabWas,
             shapeFile == null ? [] : [(shapeFile, null)],
             stub == null
                 ? []
-                : [new CarStubState(stub, Present: false, stub.LocalTransform, component.BoneJoint,
+                : [new CarFrameState(stub, Present: false, stub.LocalTransform, component.BoneJoint,
                     Parent: null, Root: null, Order: -1, Attached: -1)],
             boxesWere);
-        return new CarCollisionEdit(
+        return new CarEdit(
             $"{CarCollision.RoleName(role)} {CarCollision.ShapeName(shape)} added to \"{component.Name}\"",
             before,
             Snapshot(shapeFile == null ? [] : [shapeFile], stub == null ? [] : [stub]));
@@ -354,7 +290,7 @@ public sealed partial class Car
     /// </summary>
     /// <param name="placement">Where it goes, in the component's own space, scale and all.</param>
     /// <returns>Null with a <paramref name="refusal"/> when it cannot be done; nothing is changed then.</returns>
-    public CarCollisionEdit? SetCollision(
+    public CarEdit? SetCollision(
         CarCollision collision, Vector3 fullSize, Matrix4x4 placement, out string? refusal)
     {
         ArgumentNullException.ThrowIfNull(collision);
@@ -392,7 +328,7 @@ public sealed partial class Car
             if (_stubsByFile.TryGetValue(record.Shape.Hash, out FrameObjectCollision? stub)) stubs.Add(stub);
         }
 
-        CarCollisionState before = Snapshot(shapeFiles, stubs);
+        CarState before = Snapshot(shapeFiles, stubs);
 
         if (collision.Role == CarCollisionRole.Body)
         {
@@ -410,7 +346,7 @@ public sealed partial class Car
             return null;
         }
 
-        return new CarCollisionEdit(
+        return new CarEdit(
             $"{collision.Label} on \"{component.Name}\" changed", before, Snapshot(shapeFiles, stubs));
     }
 
@@ -420,7 +356,7 @@ public sealed partial class Car
     /// collision out of the car as a side effect.
     /// </summary>
     /// <returns>Null with a <paramref name="refusal"/> when it cannot be done; nothing is changed then.</returns>
-    public CarCollisionEdit? RemoveCollision(CarCollision collision, out string? refusal)
+    public CarEdit? RemoveCollision(CarCollision collision, out string? refusal)
     {
         ArgumentNullException.ThrowIfNull(collision);
         refusal = null;
@@ -442,7 +378,7 @@ public sealed partial class Car
             if (_stubsByFile.TryGetValue(record.Shape.Hash, out FrameObjectCollision? stub)) stubs.Add(stub);
         }
 
-        CarCollisionState before = Snapshot(shapeFiles, stubs);
+        CarState before = Snapshot(shapeFiles, stubs);
         if (Prefab.TakeCarVolume(collision.PartIndex, collision.VolumeIndex) == null)
         {
             refusal = "the prefab would not give the collision up";
@@ -454,9 +390,9 @@ public sealed partial class Car
             Forget(record.File);
             _stubsByFile.Remove(record.Shape.Hash);
         }
-        foreach (FrameObjectCollision stub in stubs) DropStub(stub);
+        foreach (FrameObjectCollision stub in stubs) DropFrame(stub);
 
-        return new CarCollisionEdit(
+        return new CarEdit(
             $"{collision.Label} removed from \"{component.Name}\"", before, Snapshot(shapeFiles, stubs));
     }
 
@@ -470,7 +406,7 @@ public sealed partial class Car
     /// undo that recomputed them would leave the other third rebuilt.
     /// </para>
     /// </summary>
-    public void Restore(CarCollisionState state)
+    public void Restore(CarState state)
     {
         ArgumentNullException.ThrowIfNull(state);
 
@@ -492,9 +428,9 @@ public sealed partial class Car
             catch (Exception) { /* a record we cannot read back is one we never wrote */ }
         }
 
-        foreach (CarStubState stub in state.Stubs)
+        foreach (CarFrameState frame in state.FrameStates)
         {
-            if (stub.Present) PutStub(stub); else DropStub(stub.Stub);
+            if (frame.Present) PutFrame(frame); else DropFrame(frame.Frame);
         }
 
         if (state.HitBoxes != null && Model is { } model)
@@ -718,7 +654,7 @@ public sealed partial class Car
         // transform and ParentIndex2 anchors the frame to a scene, and getting the two the wrong way round is
         // what sends an attachment off to the model's origin.
         // Order -1: a frame that never existed joins at the end, which is where a new one belongs.
-        PutStub(new CarStubState(
+        PutFrame(new CarFrameState(
             stub, Present: true, placement, component.BoneJoint, donor.Parent, donor.Root,
             Order: -1, Attached: -1));
         return stub;
@@ -749,32 +685,34 @@ public sealed partial class Car
     }
 
     /// <summary>
-    /// Puts a stub into the graph exactly as the state describes it — and does so IDEMPOTENTLY, because a
-    /// restore is run on stubs that never left.
+    /// Puts a frame into the graph exactly as the state describes it — and does so IDEMPOTENTLY, because a
+    /// restore is run on frames that never left.
     ///
     /// <para>
     /// Both halves need saying. <c>AttachToJoint</c> appends an attachment reference without looking for one
-    /// it already has, so re-attaching an attached stub gives the model two of them, and a few undo/redo
+    /// it already has, so re-attaching an attached frame gives the model two of them, and a few undo/redo
     /// cycles give it ten — a shape no shipped car has and one that grows for as long as the session lasts.
-    /// And the two parent slots are set from the state rather than left alone, because taking a stub out
-    /// clears them: a frame put back without them is anchored to no scene, which loads and is invisible.
+    /// And the two parent slots are set from the state rather than left alone, because taking a frame out
+    /// clears them: one put back without them is anchored to no scene, which loads and is invisible.
     /// </para>
     /// </summary>
-    private void PutStub(CarStubState state)
+    private void PutFrame(CarFrameState state)
     {
         if (Frames?.FrameObjects == null || Model is not { } model) return;
-        FrameObjectCollision stub = state.Stub;
-        stub.LocalTransform = state.Local;
-        stub.SetParent(ParentInfo.ParentType.ParentIndex1, state.Parent);
-        stub.SetParent(ParentInfo.ParentType.ParentIndex2, state.Root);
-        if (!Frames.FrameObjects.ContainsKey(stub.RefID)) Reinsert(stub, state.Order);
-        model.DetachFromJoints(stub);
+        FrameObjectBase frame = state.Frame;
+        frame.LocalTransform = state.Local;
+        // A Dummy's own box is the other half of where a climb box is, and typing new corners resizes it.
+        if (state.Bounds is { } box && frame is FrameObjectDummy dummy) dummy.Bounds = box;
+        frame.SetParent(ParentInfo.ParentType.ParentIndex1, state.Parent);
+        frame.SetParent(ParentInfo.ParentType.ParentIndex2, state.Root);
+        if (!Frames.FrameObjects.ContainsKey(frame.RefID)) Reinsert(frame, state.Order);
+        model.DetachFromJoints(frame);
         if (state.Joint >= 0 && state.Joint <= byte.MaxValue)
         {
-            model.AttachToJoint(stub, (byte)state.Joint);
-            Reorder(model, stub, state.Attached);
+            model.AttachToJoint(frame, (byte)state.Joint);
+            Reorder(model, frame, state.Attached);
         }
-        _stubsByFile[stub.Hash] = stub;
+        if (frame is FrameObjectCollision stub) _stubsByFile[stub.Hash] = stub;
         // A frame added to the graph is a frame the name table has to gain, or it loads and is invisible.
         TouchFrames(nameTable: true);
     }
@@ -789,15 +727,15 @@ public sealed partial class Car
     /// dictionary is the price; it is paid once, on an undo, over a few hundred frames.
     /// </para>
     /// </summary>
-    private void Reinsert(FrameObjectCollision stub, int order)
+    private void Reinsert(FrameObjectBase frame, int order)
     {
         Dictionary<int, object> frames = Frames!.FrameObjects;
-        if (order < 0 || order >= frames.Count) { frames.Add(stub.RefID, stub); return; }
+        if (order < 0 || order >= frames.Count) { frames.Add(frame.RefID, frame); return; }
 
         List<KeyValuePair<int, object>> had = [.. frames];
-        had.Insert(order, new KeyValuePair<int, object>(stub.RefID, stub));
+        had.Insert(order, new KeyValuePair<int, object>(frame.RefID, frame));
         frames.Clear();
-        foreach ((int refId, object frame) in had) frames.Add(refId, frame);
+        foreach ((int refId, object held) in had) frames.Add(refId, held);
     }
 
     /// <summary>Puts a re-attached frame back at the place its reference held in the model's attachment list,
@@ -815,16 +753,17 @@ public sealed partial class Car
         model.AttachmentReferences = [.. had];
     }
 
-    private void DropStub(FrameObjectCollision stub)
+    private void DropFrame(FrameObjectBase frame)
     {
         if (Frames?.FrameObjects == null) return;
-        Model?.DetachFromJoints(stub);
-        stub.SetParent(ParentInfo.ParentType.ParentIndex1, null);
-        stub.SetParent(ParentInfo.ParentType.ParentIndex2, null);
-        Frames.FrameObjects.Remove(stub.RefID);
+        Model?.DetachFromJoints(frame);
+        frame.SetParent(ParentInfo.ParentType.ParentIndex1, null);
+        frame.SetParent(ParentInfo.ParentType.ParentIndex2, null);
+        Frames.FrameObjects.Remove(frame.RefID);
         // A stub the graph no longer holds must stop answering lookups, or the next edit finds a detached
         // frame and syncs a placement into nothing.
-        if (_stubsByFile.TryGetValue(stub.Hash, out FrameObjectCollision? found)
+        if (frame is FrameObjectCollision stub
+            && _stubsByFile.TryGetValue(stub.Hash, out FrameObjectCollision? found)
             && ReferenceEquals(found, stub))
         {
             _stubsByFile.Remove(stub.Hash);
@@ -832,32 +771,32 @@ public sealed partial class Car
         TouchFrames(nameTable: true);
     }
 
-    /// <summary>Where a stub sits among the graph's frames, or -1 when the graph does not hold it.</summary>
-    private int OrderOf(FrameObjectCollision stub)
+    /// <summary>Where a frame sits among the graph's frames, or -1 when the graph does not hold it.</summary>
+    private int OrderOf(FrameObjectBase frame)
     {
         if (Frames?.FrameObjects == null) return -1;
         int at = 0;
         foreach (int refId in Frames.FrameObjects.Keys)
         {
-            if (refId == stub.RefID) return at;
+            if (refId == frame.RefID) return at;
             at++;
         }
         return -1;
     }
 
-    /// <summary>Which joint a stub hangs off, so an undo can put it back on the same one.</summary>
-    private int JointOf(FrameObjectCollision stub)
+    /// <summary>Which joint a frame hangs off, so an undo can put it back on the same one.</summary>
+    private int JointOf(FrameObjectBase frame)
     {
         foreach (FrameObjectModel.AttachmentReference reference in Model?.AttachmentReferences ?? [])
         {
-            if (ReferenceEquals(reference.Attachment, stub)) return reference.JointIndex;
+            if (ReferenceEquals(reference.Attachment, frame)) return reference.JointIndex;
         }
         return -1;
     }
 
     /// <summary>Where its reference sits in the model's attachment list, or -1 when it is not attached.</summary>
-    private int AttachedOf(FrameObjectCollision stub) =>
-        Array.FindIndex(Model?.AttachmentReferences ?? [], r => ReferenceEquals(r.Attachment, stub));
+    private int AttachedOf(FrameObjectBase frame) =>
+        Array.FindIndex(Model?.AttachmentReferences ?? [], r => ReferenceEquals(r.Attachment, frame));
 
     // ── the hit boxes ──
 
@@ -961,23 +900,24 @@ public sealed partial class Car
 
     // ── snapshots ──
 
-    /// <summary>Everything the named structures hold right now, as bytes — see <see cref="CarCollisionState"/>
+    /// <summary>Everything the named structures hold right now, as bytes — see <see cref="CarState"/>
     /// for why an undo is this rather than a reversed derivation.</summary>
-    private CarCollisionState Snapshot(
-        IReadOnlyList<string> shapeFiles, IReadOnlyList<FrameObjectCollision> stubs)
+    private CarState Snapshot(
+        IReadOnlyList<string> shapeFiles, IReadOnlyList<FrameObjectBase> frames)
     {
         var shapes = new List<(string, byte[]?)>(shapeFiles.Count);
         foreach (string path in shapeFiles) shapes.Add((path, ShapeBytes(path)));
 
-        var placed = new List<CarStubState>(stubs.Count);
-        foreach (FrameObjectCollision stub in stubs)
+        var placed = new List<CarFrameState>(frames.Count);
+        foreach (FrameObjectBase frame in frames)
         {
-            placed.Add(new CarStubState(
-                stub, Frames?.FrameObjects?.ContainsKey(stub.RefID) == true, stub.LocalTransform,
-                JointOf(stub), stub.Parent, stub.Root, OrderOf(stub), AttachedOf(stub)));
+            placed.Add(new CarFrameState(
+                frame, Frames?.FrameObjects?.ContainsKey(frame.RefID) == true, frame.LocalTransform,
+                JointOf(frame), frame.Parent, frame.Root, OrderOf(frame), AttachedOf(frame),
+                frame is FrameObjectDummy dummy ? dummy.Bounds : null));
         }
 
-        return new CarCollisionState(Prefab.ToBytes(), shapes, placed, CopyBoxes());
+        return new CarState(Prefab.ToBytes(), shapes, placed, CopyBoxes());
     }
 
     /// <summary>The model's hit boxes as they stand, copied rather than referenced — the array is rewritten

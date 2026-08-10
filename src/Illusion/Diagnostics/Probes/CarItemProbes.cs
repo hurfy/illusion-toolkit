@@ -385,7 +385,7 @@ internal static class CarItemProbes
             if (climb?.Frame is FrameObjectDummy box)
             {
                 CarPrefab.ClimbBox row = LastClimb(scratch);
-                (Vector3 min, Vector3 max) = Assets.Prefabs.CarClimbBoxes.PlacedBox(box);
+                (Vector3 min, Vector3 max) = Assets.Cars.Car.BoxOf(box);
                 check("…and its row states ITS box, not a copy of the donor's",
                     (row.Min - min).Length() < 1e-3f && (row.Max - max).Length() < 1e-3f,
                     $"row {row.Min:F2}…{row.Max:F2} vs frame {min:F2}…{max:F2}");
@@ -394,15 +394,15 @@ internal static class CarItemProbes
 
                 // Dragged and scaled with the gizmo, then saved — the sync a save runs is what carries it.
                 box.LocalTransform = Matrix4x4.CreateScale(3f) * Matrix4x4.CreateTranslation(0.2f, 1.4f, 0.9f);
-                int moved = Assets.Prefabs.CarClimbBoxes.SyncFromFrames(scratch, fr);
+                int moved = Assets.Cars.Car.SyncMarkers(scratch, fr, [box], out _);
                 CarPrefab.ClimbBox after = LastClimb(scratch);
-                (Vector3 wantMin, Vector3 wantMax) = Assets.Prefabs.CarClimbBoxes.PlacedBox(box);
+                (Vector3 wantMin, Vector3 wantMax) = Assets.Cars.Car.BoxOf(box);
                 check("moving and scaling the Dummy carries through to the row the game climbs",
                     moved >= 1 && (after.Min - wantMin).Length() < 1e-3f
                     && (after.Max - wantMax).Length() < 1e-3f,
                     $"{moved} rewritten; row {after.Min:F2}…{after.Max:F2} vs frame {wantMin:F2}…{wantMax:F2}");
                 check("…and running the same sync again writes nothing",
-                    Assets.Prefabs.CarClimbBoxes.SyncFromFrames(scratch, fr) == 0, "");
+                    Assets.Cars.Car.SyncMarkers(scratch, fr, [box], out _) == 0, "");
 
                 CarPartBuilder.Remove(model, climb!);
             }

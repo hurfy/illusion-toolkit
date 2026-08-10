@@ -1,6 +1,7 @@
 using Illusion.Assets;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Prefabs;
+using Illusion.Domain;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Prefab;
 using Illusion.Scene;
@@ -111,6 +112,104 @@ internal sealed class CarPartController
             $"added {CarPartBuilder.Words(kind)} on \"{selected.BoneName}\" as \"{added.Name}\" — "
             + "drag it into place, then Save and Build. Ctrl+Z takes it back.");
         return true;
+    }
+
+    /// <summary>
+    /// Puts a helper frame into the scene tree, or takes it out — for the paths that mint one without going
+    /// through <see cref="AddPart"/>, which is the component tree's own "Add marker".
+    ///
+    /// <para>
+    /// A frame the graph holds and the tree does not is one the modder cannot select, cannot see and cannot
+    /// drag; a frame the tree holds and the graph does not is a row that acts on nothing. The rows are built
+    /// here rather than in the component tree so that both paths mint the same two — the copy under the bone
+    /// that says which part it belongs to, and the one in the hierarchy that says where it sits in the graph.
+    /// </para>
+    /// </summary>
+    /// <param name="document">The staged document the frame belongs to.</param>
+    /// <param name="frame">The frame that has just joined the graph, or just left it.</param>
+    /// <param name="joint">Which joint it hangs off, for the row under the bone.</param>
+    /// <param name="present">Whether it is in the graph now.</param>
+    internal void SyncHelperRows(
+        SceneDocumentAdapter document, FrameObjectBase frame, int joint, bool present)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(frame);
+
+        ISceneSource source = document.Node(frame);
+        // Gone: both of its rows go with it, wherever they are.
+        if (!present)
+        {
+            foreach (SceneNode root in _host.Tree.Roots) Prune(root, source);
+            return;
+        }
+
+        SceneNode? bone = FindBoneRow(document, joint);
+        if (bone != null && !bone.Children.Any(c => ReferenceEquals(c.Source, source)))
+        {
+            bone.AddChild(new SceneNode($"{frame.Name}  ({Kind(frame)})", "Attachment", false)
+            {
+                Source = source,
+            });
+            bone.IsExpanded = true;
+        }
+
+        // Beside a frame of the same type in the hierarchy — the same neighbour rule AddPart follows, and for
+        // the same reason: a helper's grouping node is where the loader would have put it on a reload.
+        SceneNode? sibling = FindHierarchySibling(source, Kind(frame));
+        if (sibling?.Parent is { } holder
+            && !holder.Children.Any(c => ReferenceEquals(c.Source, source)))
+        {
+            holder.AddChild(new SceneNode(frame.Name.ToString(), Kind(frame), false) { Source = source });
+            holder.IsExpanded = true;
+        }
+    }
+
+    /// <summary>The tree row of a model's joint, so a new attachment can join its children.</summary>
+    private SceneNode? FindBoneRow(SceneDocumentAdapter document, int joint)
+    {
+        foreach (SceneNode root in _host.Tree.Roots)
+        {
+            if (Find(root, node => node.Source is BoneNodeAdapter bone && bone.Index == joint
+                    && ReferenceEquals(bone.Document, document)) is { } found)
+            {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>A hierarchy row of the same KIND to sit beside — never the copy under a bone, and never the
+    /// frame itself.</summary>
+    private SceneNode? FindHierarchySibling(ISceneSource source, string kind)
+    {
+        foreach (SceneNode root in _host.Tree.Roots)
+        {
+            if (Find(root, node => !ReferenceEquals(node.Source, source)
+                    && string.Equals(node.Kind, kind, StringComparison.Ordinal)) is { } found)
+            {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private static SceneNode? Find(SceneNode node, Func<SceneNode, bool> wanted)
+    {
+        if (wanted(node)) return node;
+        foreach (SceneNode child in node.Children)
+        {
+            if (Find(child, wanted) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static void Prune(SceneNode node, ISceneSource source)
+    {
+        foreach (SceneNode child in node.Children.ToList())
+        {
+            if (ReferenceEquals(child.Source, source)) node.Children.Remove(child);
+            else Prune(child, source);
+        }
     }
 
     /// <summary>Puts a row back under its parent, or takes it away — an undo/redo of one half of the tree.</summary>

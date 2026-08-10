@@ -163,7 +163,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         RootsView = CollectionViewSource.GetDefaultView(Roots);
         RootsView.Filter = o => o is ComponentRowViewModel row && row.HasSearchMatch;
         Selected = null;
-        SelectedCollision = null;
+        SelectedChild = null;
 
         string? archive = document?.SourceArchive.Name;
         bool moved = !string.Equals(archive, _archive, StringComparison.OrdinalIgnoreCase);
@@ -181,7 +181,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Raise(nameof(RootsView));
         Raise(nameof(ShowsComponents));
         Raise(nameof(Selected));
-        Raise(nameof(SelectedCollision));
+        RaiseChild();
         Raise(nameof(Faults));
         Raise(nameof(HasFaults));
         Raise(nameof(FaultSummary));
@@ -210,6 +210,21 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         foreach (CarCollision collision in component.Collisions)
         {
             row.AddCollision(new CollisionRowViewModel(collision, row));
+        }
+        foreach (CarComponentRow data in component.Rows)
+        {
+            row.AddData(new ComponentDataRowViewModel(data, row));
+        }
+        // Grouped by role rather than listed flat: the body ends up holding every marker whose bone no
+        // component owns — 524 of the 1081 shipped ones — and nineteen rows under it in no order is the flat
+        // pile this view exists to take away, merely moved one level down. In the order the roles are
+        // declared, so two reads of the same car list them the same way round.
+        foreach (IGrouping<CarMarkerRole, CarMarker> byRole in component.Markers.GroupBy(m => m.Role)
+                     .OrderBy(g => g.Key))
+        {
+            var group = new MarkerGroupRowViewModel(byRole.Key, row);
+            foreach (CarMarker marker in byRole) group.Add(new MarkerRowViewModel(marker, row));
+            row.AddMarkerGroup(group);
         }
         foreach (CarComponent child in component.Children) row.AddChild(Row(car, child, row, folded));
         return row;
@@ -372,6 +387,39 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         return null;
     }
 
+    /// <summary>
+    /// The scene node a marker IS — the Dummy or the Point the modder drags to place it.
+    ///
+    /// <para>
+    /// Matched by the FNV64 of the frame's name, because that is the only thing the prefab row holds: the
+    /// assembly layer names frames by hash and nothing else, so a marker and its frame are joined here the
+    /// same way the game joins them.
+    /// </para>
+    /// </summary>
+    public SceneNode? NodeOfFrame(ulong frameHash)
+    {
+        if (frameHash == 0) return null;
+        foreach (SceneNode root in _viewport.Tree.Roots)
+        {
+            if (FindFrame(root, frameHash) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static SceneNode? FindFrame(SceneNode node, ulong frameHash)
+    {
+        if (node.Source is FrameNodeAdapter frame && frame.Frame.Name?.String is { Length: > 0 } name
+            && Fnv64.Hash(name) == frameHash)
+        {
+            return node;
+        }
+        foreach (SceneNode child in node.Children)
+        {
+            if (FindFrame(child, frameHash) is { } found) return found;
+        }
+        return null;
+    }
+
     private static SceneNode? FindBone(SceneNode node, ulong boneHash)
     {
         if (node.Source is BoneNodeAdapter bone && bone.BoneName.Length > 0
@@ -440,13 +488,13 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     // same component after each unrelated edit is the panel moving the user where they did not ask to go.
     private void Highlight(ComponentRowViewModel? row)
     {
-        // A collision row is never left lit beside a component: whatever moves the highlight settles which
-        // ONE row the menu acts on, and two lit rows would make "Remove collision" a question about which.
-        if (SelectedCollision != null)
+        // A child row is never left lit beside a component: whatever moves the highlight settles which ONE
+        // row the menu acts on, and two lit rows would make "Remove" a question about which.
+        if (SelectedChild != null)
         {
-            SelectedCollision.IsSelected = false;
-            SelectedCollision = null;
-            Raise(nameof(SelectedCollision));
+            SelectedChild.IsSelected = false;
+            SelectedChild = null;
+            RaiseChild();
         }
         if (ReferenceEquals(row, Selected)) return;
         bool moved = Selected?.Id != row?.Id;
@@ -464,29 +512,51 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
 
     // ── editing ──
 
-    /// <summary>The collision row the menu acts on, or null when the selection is a component.</summary>
-    public CollisionRowViewModel? SelectedCollision { get; private set; }
+    /// <summary>
+    /// The row BENEATH a component that the menu acts on — a collision, a marker, a marker group or one of
+    /// the component's own rows — or null when the selection is the component itself. One field, because
+    /// whatever the modder clicked settles which single row a menu item acts on.
+    /// </summary>
+    public IComponentChildRow? SelectedChild { get; private set; }
+
+    /// <summary>The selected child when it is a collision.</summary>
+    public CollisionRowViewModel? SelectedCollision => SelectedChild as CollisionRowViewModel;
+
+    /// <summary>The selected child when it is a marker.</summary>
+    public MarkerRowViewModel? SelectedMarker => SelectedChild as MarkerRowViewModel;
+
+    /// <summary>The selected child when it is one of the component's own prefab rows.</summary>
+    public ComponentDataRowViewModel? SelectedDataRow => SelectedChild as ComponentDataRowViewModel;
 
     /// <summary>
-    /// Points the menu at a collision, and the viewport at the component that carries it.
+    /// Points the menu at one of a component's child rows, and the viewport at the frame it is.
     ///
     /// <para>
-    /// The viewport draws frames and has nothing to select for a collision — a self-describing volume has no
-    /// frame at all, and the mirror stub of a solid one is a copy the modder is deliberately never shown. So
-    /// the component's own bone is what the gizmo, the property tabs and Delete stay pointed at.
+    /// A MARKER is a frame — a Dummy or a Point — so selecting its row hands that frame over, and the next
+    /// thing the modder does can be to drag it. A collision has none: a self-describing volume is not a frame
+    /// at all and the mirror stub of a solid one is a copy the modder is deliberately never shown, so the
+    /// component's own bone is what the gizmo, the property tabs and Delete stay pointed at instead.
     /// </para>
     /// </summary>
-    public void Select(CollisionRowViewModel? row)
+    public void Select(IComponentChildRow? row)
     {
         if (row == null) return;
-        _viewport.Select(NodeOf(row.Component.Component));
-        // …and the tree's highlight is THIS row, not the component's. Handing the bone over raises the
+        _viewport.Select(NodeOfFrame(row.FrameHash) ?? NodeOf(row.Component.Component));
+        // …and the tree's highlight is THIS row, not the component's. Handing the frame over raises the
         // viewport's own selection change, which lights the component row on the way back through
         // ShowSelection, so the clearing has to come after it rather than before.
         Highlight(null);
-        SelectedCollision = row;
+        SelectedChild = row;
         row.IsSelected = true;
+        RaiseChild();
+    }
+
+    private void RaiseChild()
+    {
+        Raise(nameof(SelectedChild));
         Raise(nameof(SelectedCollision));
+        Raise(nameof(SelectedMarker));
+        Raise(nameof(SelectedDataRow));
     }
 
     /// <summary>Raised after an edit has been written and the car re-stitched, so the panel can rebuild the
@@ -514,7 +584,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
             return;
         }
 
-        CarCollisionEdit? edit = car.AddCollision(fresh.Component, role, shape, size, position, out refusal);
+        CarEdit? edit = car.AddCollision(fresh.Component, role, shape, size, position, out refusal);
         if (edit == null) return;
         Commit(car, edit, ref refusal);
         // The layer goes on once the collision is really there: one that exists and is invisible reads as
@@ -541,7 +611,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Matrix4x4 placement = collision.Placement;
         placement.Translation = position;
 
-        CarCollisionEdit? edit = car.SetCollision(collision, size, placement, out refusal);
+        CarEdit? edit = car.SetCollision(collision, size, placement, out refusal);
         if (edit == null) return;
         Commit(car, edit, ref refusal);
     }
@@ -558,9 +628,107 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
             return;
         }
 
-        CarCollisionEdit? edit = car.RemoveCollision(collision, out refusal);
+        CarEdit? edit = car.RemoveCollision(collision, out refusal);
         if (edit == null) return;
         Commit(car, edit, ref refusal);
+    }
+
+    // ── markers ──
+
+    /// <summary>Writes the numbers a marker's own row carries, and moves the marker itself when one of them
+    /// says where it is.</summary>
+    public void SetMarker(MarkerRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Marker(row) is not (Car car, CarMarker marker))
+        {
+            refusal = "that marker is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.SetMarker(marker, fields, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>Writes the numbers one of a component's own-bone rows carries — a door's handle and lock, a
+    /// window's depth, an axle's masses.</summary>
+    public void SetDataRow(
+        ComponentDataRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (DataRow(row) is not (Car car, CarComponentRow fresh))
+        {
+            refusal = "that row is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.SetRow(fresh, fields, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>Gives a component one more marker: the helper frame is minted on its bone and the prefab row
+    /// that names it written beside it.</summary>
+    public void AddMarker(ComponentRowViewModel? row, CarMarkerRole role, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
+        {
+            refusal = "no car is open";
+            return;
+        }
+
+        CarEdit? edit = car.AddMarker(fresh.Component, role, out refusal);
+        if (edit == null) return;
+        // The frame joined the graph the viewport is drawing, so it has to join the tree the viewport lists —
+        // a frame the graph holds and the tree does not is one the modder can neither see nor drag, and
+        // dragging it is the whole of placing a marker.
+        ShowFrames(edit.After);
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>Takes a marker off its component, and the helper frame it named with it when nothing else in
+    /// the assembly still names that frame.</summary>
+    public void RemoveMarker(MarkerRowViewModel? row, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Marker(row) is not (Car car, CarMarker marker))
+        {
+            refusal = "that marker is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.RemoveMarker(marker, out refusal);
+        if (edit == null) return;
+        // …and a frame that has left the graph has to leave the tree, or its row stays behind acting on
+        // nothing.
+        ShowFrames(edit.After);
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>
+    /// Puts the frames a state holds into the scene tree, and takes the ones it says are gone out of it.
+    ///
+    /// <para>
+    /// Through the viewport's own part controller, so that a marker added here and one added from the bone
+    /// menu get the SAME two rows — the copy under the bone that says which part it belongs to, and the one
+    /// in the hierarchy that says where it sits in the graph. Run on an undo and a redo as well, because a
+    /// marker's frame comes and goes with them.
+    /// </para>
+    /// </summary>
+    private void ShowFrames(CarState state)
+    {
+        if (_document is not SceneDocumentAdapter document) return;
+        foreach (CarFrameRef frame in state.Frames)
+        {
+            _viewport.CarPartEditing.SyncHelperRows(
+                document, frame.Frame, frame.Joint, frame.Present);
+        }
     }
 
     /// <summary>
@@ -592,6 +760,30 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         return found == null ? null : (car, found);
     }
 
+    /// <summary>The same, for a marker: found again by the ROLE and the place in its own list, which is how
+    /// the prefab addresses it and therefore the only pair a re-read can be trusted to reproduce.</summary>
+    private (Car Car, CarMarker Marker)? Marker(MarkerRowViewModel row)
+    {
+        CarMarkerRole role = row.Marker.Role;
+        int index = row.Marker.Index;
+        if (Reread(row.Component.Id) is not (Car car, ComponentRowViewModel fresh)) return null;
+        CarMarker? found = fresh.Component.Markers.FirstOrDefault(
+            m => m.Role == role && m.Index == index);
+        return found == null ? null : (car, found);
+    }
+
+    /// <summary>And for one of a component's own-bone rows, found again by its kind and its place in that
+    /// list.</summary>
+    private (Car Car, CarComponentRow Row)? DataRow(ComponentDataRowViewModel row)
+    {
+        string kind = row.Row.Kind;
+        int index = row.Row.Index;
+        if (Reread(row.Component.Id) is not (Car car, ComponentRowViewModel fresh)) return null;
+        CarComponentRow? found = fresh.Component.Rows.FirstOrDefault(
+            r => string.Equals(r.Kind, kind, StringComparison.Ordinal) && r.Index == index);
+        return found == null ? null : (car, found);
+    }
+
     /// <summary>
     /// Writes one intent through, and tells everything that has to hear about it.
     ///
@@ -601,7 +793,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// written, and leaving the edit in memory would let the next save carry it in unnoticed.
     /// </para>
     /// </summary>
-    private void Commit(Car car, CarCollisionEdit edit, ref string? refusal)
+    private void Commit(Car car, CarEdit edit, ref string? refusal)
     {
         CarSave saved = car.Save();
         if (!saved.Ok)
@@ -611,7 +803,7 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
             return;
         }
 
-        _viewport.History.Push(new CarCollisionEditAction(edit, () => Car, Restitch,
+        _viewport.History.Push(new CarEditAction(edit, () => Car, Restored,
             why => _viewport.RaiseNotice("that could not be taken back: " + why, isError: true)));
         if (_document != null) _viewport.MarkArchiveModified(_document.SourceArchive);
         Restitch();
@@ -627,9 +819,17 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// just changed and the overlay is where a modder sees whether the box landed where they meant it to.
     /// </para>
     /// </summary>
+    /// <summary>What an undo or a redo ends with: the scene tree put back around the frames that state holds,
+    /// and then the car re-stitched over them.</summary>
+    private void Restored(CarState state)
+    {
+        ShowFrames(state);
+        Restitch();
+    }
+
     private void Restitch()
     {
-        SelectedCollision = null;
+        SelectedChild = null;
         Refresh(_document);
         _viewport.RefreshCarCollisionOverlay();
         CarEdited?.Invoke();

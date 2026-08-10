@@ -70,6 +70,7 @@ internal static class ComponentTreeProbes
             CheckSwitch(car, Check, sb);
             CheckSelection(car, Check, sb);
             CheckCollisions(car, Check, sb);
+            CheckMarkers(car, Check, sb);
             CheckRemembered(car, Check, sb);
             CheckNotACar(folder, Check, sb);
             CheckRestitch(car, Check, sb);
@@ -391,6 +392,119 @@ internal static class ComponentTreeProbes
             check("on a collision it offers only what that collision can be done to",
                 add?.Visibility == Visibility.Collapsed && resize?.Visibility == Visibility.Visible
                 && resize.IsEnabled != first.IsReadOnly, "");
+        }
+        sb.AppendLine();
+    }
+
+    // ── the markers, under the component they hang off ──
+
+    /// <summary>
+    /// Whether the seats, climb boxes, tanks, emitters and lights have stopped being a flat pile beside the
+    /// tree: each one inside the component owning the bone it hangs off, grouped by role, with the ones no
+    /// component owns under the body — and each selectable as the frame a modder then drags.
+    /// </summary>
+    private static void CheckMarkers(FileInfo car, Action<string, bool, string> check, StringBuilder sb)
+    {
+        sb.AppendLine("════ markers under their component, grouped by role ════");
+        if (!Stage(car, out ScenePanel? panel, out D3DImageHost? host)) return;
+        ComponentTreeViewModel components = panel!.Components;
+        if (components.Car is not { } stitched) { check("the car stitched", false, ""); return; }
+
+        List<ComponentRowViewModel> rows = [.. components.Roots.SelectMany(r => r.SelfAndDescendants())];
+        List<MarkerGroupRowViewModel> groups = [.. rows.SelectMany(r => r.MarkerGroups)];
+        List<MarkerRowViewModel> markers = [.. groups.SelectMany(g => g.Markers)];
+        List<ComponentDataRowViewModel> data = [.. rows.SelectMany(r => r.Data)];
+
+        sb.AppendLine($"  {markers.Count} marker rows in {groups.Count} groups over {rows.Count} components: "
+            + string.Join("  ", groups.GroupBy(g => g.Role).OrderBy(g => g.Key)
+                .Select(g => $"{g.Key} ×{g.Sum(x => x.Markers.Count)}")));
+        sb.AppendLine("  the body holds: " + string.Join(", ", rows
+            .Where(r => r.Component.Id == stitched.Body?.Id)
+            .SelectMany(r => r.MarkerGroups).Select(g => g.Label)));
+
+        check("every marker the aggregate hung on a component has a row under it",
+            markers.Count == stitched.Components.Sum(c => c.Markers.Count) && markers.Count > 0,
+            $"{markers.Count} rows over {stitched.Components.Sum(c => c.Markers.Count)} markers");
+        check("they are grouped by role rather than listed flat",
+            groups.Count > 0 && groups.All(g => g.Markers.Count > 0)
+            && groups.All(g => g.Markers.All(m => m.Marker.Role == g.Role))
+            && rows.All(r => r.MarkerGroups.Select(g => g.Role).Distinct().Count()
+                == r.MarkerGroups.Count),
+            $"{groups.Count} groups");
+        // Every marker whose bone no component owns goes to the body, so nothing in the car is homeless —
+        // and the body is present on 85 of 85 shipped cars, which is what makes that safe.
+        check("a marker whose bone belongs to no component is under the body, and the body is there",
+            stitched.Body != null
+            && markers.All(m => stitched.ComponentOfBone(m.Marker.Bone)?.Id == m.Component.Id
+                || m.Component.Id == stitched.Body.Id),
+            stitched.Body == null ? "no body" : $"body \"{stitched.Body.Name}\"");
+
+        // The rows that name a component's OWN bone — a door's handle and lock, a window's depth, an axle's
+        // masses. Not markers, and shown in the same place for the same reason.
+        sb.AppendLine($"  {data.Count} rows of the component's own bone: "
+            + string.Join("  ", data.GroupBy(d => d.Row.Kind).OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => $"{g.Key} ×{g.Count()}")));
+        check("a component's own prefab rows are under it, carrying their numbers",
+            data.Count == stitched.Components.Sum(c => c.Rows.Count) && data.Count > 0
+            && data.All(d => d.Row.Fields.Count > 0 && d.Label.Length > 0),
+            $"{data.Count} rows");
+
+        // Selecting a marker hands its own FRAME to the viewport, so the next thing the modder does can be to
+        // drag it — which is the whole operation for the four roles that carry no numbers.
+        MarkerRowViewModel? seat = markers.FirstOrDefault(m => m.Marker.Role == CarMarkerRole.Seat)
+            ?? markers.FirstOrDefault();
+        if (seat != null)
+        {
+            components.Select(seat);
+            check("selecting a marker lights its own row and hands its frame to the viewport",
+                ReferenceEquals(components.SelectedMarker, seat) && seat.IsSelected
+                && components.Selected == null
+                && host!.SelectedNode?.Source is FrameNodeAdapter frame
+                && Fnv64.Hash(frame.Frame.Name?.String ?? "") == seat.Marker.Frame,
+                $"{seat.Label} → {host!.SelectedNode?.Name ?? "(nothing)"}");
+
+            components.Select(seat.Component);
+            check("…and selecting its component again clears it, so the menu acts on exactly one row",
+                components.SelectedMarker == null && !seat.IsSelected
+                && ReferenceEquals(components.Selected, seat.Component), "");
+        }
+
+        // The menu offers what the row can actually do — and four of the six roles carry nothing of their own
+        // to type, so the item that would edit them is shown disabled with the reason rather than promising
+        // a dialog with no fields in it.
+        ContextMenu? menu = panel.ComponentTree.ComponentTree.ContextMenu;
+        MenuItem? addMarker = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Add marker");
+        MenuItem? editMarker = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Marker data…");
+        if (menu != null && seat != null)
+        {
+            components.Select(seat.Component);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            string[] roles = [.. addMarker?.Items.OfType<MenuItem>().Select(m => m.Header as string ?? "")
+                ?? []];
+            sb.AppendLine("  Add marker offers: " + string.Join(" · ", roles));
+            check("a component can be given a marker, of the roles whose frame the toolkit can mint",
+                addMarker?.Visibility == Visibility.Visible && roles.Length == Car.AddableRoles.Count
+                && roles.Any(r => r.Contains("climb box", StringComparison.OrdinalIgnoreCase))
+                && !roles.Any(r => r.Contains("wiper", StringComparison.OrdinalIgnoreCase)),
+                string.Join(" · ", roles));
+
+            components.Select(seat);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("on a marker the menu offers its own data and nothing a component takes",
+                editMarker?.Visibility == Visibility.Visible && addMarker?.Visibility == Visibility.Collapsed
+                && editMarker.IsEnabled == seat.HasFields, "");
+
+            MarkerRowViewModel? plain = markers.FirstOrDefault(m => !m.HasFields);
+            if (plain != null)
+            {
+                components.Select(plain);
+                menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+                check("a marker that carries nothing of its own says so rather than opening an empty dialog",
+                    editMarker is { IsEnabled: false } && editMarker.ToolTip is string { Length: > 10 },
+                    editMarker?.ToolTip as string ?? "no reason");
+            }
         }
         sb.AppendLine();
     }

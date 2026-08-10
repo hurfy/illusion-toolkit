@@ -267,7 +267,7 @@ internal static class CollisionRoleProbes
             }
 
             int had = component.Collisions.Count;
-            CarCollisionEdit? edit = car.AddCollision(
+            CarEdit? edit = car.AddCollision(
                 component, one.Role, one.Shape, one.Size, one.Position, out string? refusal);
             if (edit == null)
             {
@@ -314,7 +314,7 @@ internal static class CollisionRoleProbes
         var at = new Vector3(0.1f, 0.9f, 0.2f);
         int shapesBefore = ShapeCount(mirror);
         int stubsBefore = StubCount(car);
-        CarCollisionEdit? edit = car.AddCollision(
+        CarEdit? edit = car.AddCollision(
             body, CarCollisionRole.Body, CarCollisionShape.Box, size, at, out string? refusal);
         if (edit == null) { check("a solid can be added to the body", false, refusal ?? ""); return; }
         car.Save();
@@ -357,7 +357,7 @@ internal static class CollisionRoleProbes
         var pane = new Vector3(0.8f, 0.1f, 0.5f);
         var paneAt = new Vector3(0.03f, 0.2f, 0.45f);
         int glassShapes = ShapeCount(mirror);
-        CarCollisionEdit? glass = glassCar.AddCollision(
+        CarEdit? glass = glassCar.AddCollision(
             door, CarCollisionRole.Glass, CarCollisionShape.Box, pane, paneAt, out refusal);
         if (glass == null) { check("glass can be added to a door", false, refusal ?? ""); return; }
         glassCar.Save();
@@ -394,7 +394,7 @@ internal static class CollisionRoleProbes
         Car? capsuleCar = Car.ReadFrom(mirror);
         CarComponent? capsuleOn = Pick(capsuleCar, "body");
         if (capsuleCar == null || capsuleOn == null) return;
-        CarCollisionEdit? capsule = capsuleCar.AddCollision(
+        CarEdit? capsule = capsuleCar.AddCollision(
             capsuleOn, CarCollisionRole.Body, CarCollisionShape.Capsule,
             new Vector3(0.4f, 0.4f, 1.8f), Vector3.Zero, out refusal);
         if (capsule == null) { check("a capsule can be added", false, refusal ?? ""); return; }
@@ -423,7 +423,7 @@ internal static class CollisionRoleProbes
         if (scaleCar == null || grow == null) { check("there is a box to scale", false, ""); return; }
 
         Vector3 was = grow.Size;
-        CarCollisionEdit? scaled = scaleCar.SetCollision(
+        CarEdit? scaled = scaleCar.SetCollision(
             grow, grow.Size,
             Matrix4x4.CreateScale(2f, 3f, 4f) * Matrix4x4.CreateTranslation(grow.Position),
             out refusal);
@@ -466,7 +466,7 @@ internal static class CollisionRoleProbes
         int shapes = ShapeCount(mirror);
         int stubs = StubCount(car);
         int had = body.Collisions.Count;
-        CarCollisionEdit? edit = car.RemoveCollision(solid, out string? refusal);
+        CarEdit? edit = car.RemoveCollision(solid, out string? refusal);
         if (edit == null) { check("a solid can be removed", false, refusal ?? ""); return; }
         car.Save();
 
@@ -501,7 +501,7 @@ internal static class CollisionRoleProbes
         int shapes = ShapeCount(mirror);
         int stubs = StubCount(car);
 
-        CarCollisionEdit? edit = car.AddCollision(
+        CarEdit? edit = car.AddCollision(
             body, CarCollisionRole.Body, CarCollisionShape.Box,
             new Vector3(0.9f, 0.4f, 0.25f), new Vector3(0f, -1.2f, 0.6f), out string? refusal);
         if (edit == null) { check("a collision can be added to undo", false, refusal ?? ""); return; }
@@ -558,7 +558,7 @@ internal static class CollisionRoleProbes
         int[] wouldMove = Drift(car);
         int[] doorPieces = Pieces(car, door);
 
-        CarCollisionEdit? edit = car.AddCollision(
+        CarEdit? edit = car.AddCollision(
             door, CarCollisionRole.Glass, CarCollisionShape.Box,
             new Vector3(0.7f, 0.06f, 0.45f), new Vector3(0f, 0.1f, 0.4f), out string? refusal);
         if (edit == null) { check("glass can be added to the door", false, refusal ?? ""); return; }
@@ -653,7 +653,7 @@ internal static class CollisionRoleProbes
         byte[] rigWas = rig == null ? [] : File.ReadAllBytes(rig);
         int attachmentsWere = Attachments(car);
 
-        CarCollisionEdit? edit = car.AddCollision(
+        CarEdit? edit = car.AddCollision(
             body, CarCollisionRole.Body, CarCollisionShape.Box,
             new Vector3(0.3f, 0.3f, 0.3f), new Vector3(0f, 0f, 1f), out string? refusal);
         if (edit == null) { check("a collision can be added", false, refusal ?? ""); return; }
@@ -699,7 +699,7 @@ internal static class CollisionRoleProbes
         FrameObjectCollision? stub = Stub(second, Volume(second, solid)?.ShapeHash ?? 0);
         (string parentWas, string rootWas) = Wiring(stub);
 
-        CarCollisionEdit? removal = second.RemoveCollision(solid, out refusal);
+        CarEdit? removal = second.RemoveCollision(solid, out refusal);
         if (removal == null) { check("it can be removed", false, refusal ?? ""); return; }
         second.Save();
         second.Restore(removal.Before);
@@ -751,7 +751,7 @@ internal static class CollisionRoleProbes
         CarComponent? body = Pick(car, "body");
         if (car?.PrefabPath == null || body == null) { check("the focus car reads", false, ""); return; }
 
-        CarCollisionEdit? edit = car.AddCollision(
+        CarEdit? edit = car.AddCollision(
             body, CarCollisionRole.Zone, CarCollisionShape.Box,
             new Vector3(0.2f, 0.2f, 0.2f), Vector3.Zero, out string? refusal);
         if (edit == null) { check("a collision can be added", false, refusal ?? ""); return; }
@@ -803,7 +803,7 @@ internal static class CollisionRoleProbes
         // A bare component: nothing to hang a volume off until it is given a deform part.
         CarComponent? bare = car.Components.FirstOrDefault(c => c.IsBare);
         string? bareRefusal = null;
-        CarCollisionEdit? onBare = bare == null
+        CarEdit? onBare = bare == null
             ? null
             : car.AddCollision(bare, CarCollisionRole.Body, CarCollisionShape.Box, Vector3.One,
                 Vector3.Zero, out bareRefusal);
@@ -815,7 +815,7 @@ internal static class CollisionRoleProbes
         // Glass is always a plain box — a self-describing volume has nowhere to say it is a sphere.
         CarComponent? body = Pick(car, "body");
         string? sphereRefusal = null;
-        CarCollisionEdit? sphereGlass = body == null
+        CarEdit? sphereGlass = body == null
             ? null
             : car.AddCollision(body, CarCollisionRole.Glass, CarCollisionShape.Sphere,
                 Vector3.One, Vector3.Zero, out sphereRefusal);
@@ -825,7 +825,7 @@ internal static class CollisionRoleProbes
 
         // A capsule shorter than it is wide has no straight section to describe.
         string? flatRefusal = null;
-        CarCollisionEdit? flat = body == null
+        CarEdit? flat = body == null
             ? null
             : car.AddCollision(body, CarCollisionRole.Body, CarCollisionShape.Capsule,
                 new Vector3(1f, 1f, 0.5f), Vector3.Zero, out flatRefusal);
@@ -867,7 +867,7 @@ internal static class CollisionRoleProbes
 
         byte[] was = File.ReadAllBytes(car.PrefabPath);
         int shapes = ShapeCount(mirror);
-        CarCollisionEdit? edit = car.AddCollision(
+        CarEdit? edit = car.AddCollision(
             body, CarCollisionRole.Body, CarCollisionShape.Box,
             new Vector3(0.4f, 0.4f, 0.4f), Vector3.Zero, out string? refusal);
         if (edit == null) { check("a collision can be added", false, refusal ?? ""); return; }

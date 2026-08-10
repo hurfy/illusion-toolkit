@@ -23,13 +23,17 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
 {
     private readonly List<ComponentRowViewModel> _children = [];
     private readonly List<CollisionRowViewModel> _collisions = [];
+    private readonly List<ComponentDataRowViewModel> _data = [];
+    private readonly List<MarkerGroupRowViewModel> _markers = [];
 
     /// <summary>
-    /// What the tree actually binds: this component's collisions first, then the components hanging off it.
+    /// What the tree actually binds, in the order a modder reads the component: what it is made of first —
+    /// its collisions, then the prefab rows that name its own bone, then the markers that hang off it grouped
+    /// by role — and last the components hanging under it.
     ///
     /// <para>
-    /// The collisions come first because they are what this component IS made of, while a child component —
-    /// a window under its door — is a thing of its own that happens to hang here.
+    /// A child component comes last because it is a thing of its own that happens to hang here: a window under
+    /// its door should not come between the door and the door's own glass.
     /// </para>
     /// </summary>
     private readonly List<object> _rows = [];
@@ -54,6 +58,12 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     /// <summary>What this component is solid with, by role and shape.</summary>
     public IReadOnlyList<CollisionRowViewModel> Collisions => _collisions;
 
+    /// <summary>The prefab rows that name this component's own bone — its door points, its window, its axle.</summary>
+    public IReadOnlyList<ComponentDataRowViewModel> Data => _data;
+
+    /// <summary>The markers that hang off this component's bone, grouped by role.</summary>
+    public IReadOnlyList<MarkerGroupRowViewModel> MarkerGroups => _markers;
+
     private ICollectionView? _childrenView;
 
     /// <summary>The rows under this one as the tree binds them — its collisions and its child components,
@@ -69,7 +79,7 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
                 _childrenView.Filter = o => o switch
                 {
                     ComponentRowViewModel row => row.HasSearchMatch,
-                    CollisionRowViewModel collision => collision.HasSearchMatch,
+                    IComponentChildRow child => child.HasSearchMatch,
                     _ => false,
                 };
             }
@@ -147,12 +157,25 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
         _rows.Add(child);
     }
 
+    // The three below are inserted at a computed place rather than appended, so the reading order holds
+    // however the tree happens to fill them in: collisions, then the component's own rows, then the marker
+    // groups, and the child components after all of them.
     internal void AddCollision(CollisionRowViewModel collision)
     {
         _collisions.Add(collision);
-        // Ahead of every child component, however the two are added: the collisions are what this component
-        // is made of, and a window that hangs off a door should not come between the door and its own glass.
         _rows.Insert(_collisions.Count - 1, collision);
+    }
+
+    internal void AddData(ComponentDataRowViewModel row)
+    {
+        _data.Add(row);
+        _rows.Insert(_collisions.Count + _data.Count - 1, row);
+    }
+
+    internal void AddMarkerGroup(MarkerGroupRowViewModel group)
+    {
+        _markers.Add(group);
+        _rows.Insert(_collisions.Count + _data.Count + _markers.Count - 1, group);
     }
 
     /// <summary>Opens every branch above this row, so a row selected from the viewport is one the tree can

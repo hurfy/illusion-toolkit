@@ -112,7 +112,10 @@ public sealed partial class Car
         // ── nesting, off the prefab's own parent link ──
         Nest(parts, componentOfPart, byBone, rig, faults);
 
-        List<CarMarker> markers = car == null ? [] : HangMarkers(car, rig, byBone, body, faults);
+        List<CarMarker> markers = car == null ? [] : HangMarkers(prefab, car, rig, byBone, body, faults);
+        // …and the rows that name a component's OWN bone, which belong to it the same way and for the same
+        // reason: a door's handle and lock, a window's depth, an axle's masses.
+        if (car != null) HangRows(prefab, car, byBone, body);
         List<CarComponent> roots = [.. components.Where(c => c.Parent == null)];
 
         // ── what did not stitch, beyond what the passes above already named ──
@@ -461,8 +464,8 @@ public sealed partial class Car
     /// </para>
     /// </summary>
     private static List<CarMarker> HangMarkers(
-        CarPrefab car, Rig rig, Dictionary<ulong, CarComponent> byBone, CarComponent? body,
-        List<CarFault> faults)
+        PrefabFile prefab, CarPrefab car, Rig rig, Dictionary<ulong, CarComponent> byBone,
+        CarComponent? body, List<CarFault> faults)
     {
         var markers = new List<CarMarker>();
         foreach ((CarMarkerRole role, int index, string label, ulong frame) in MarkerRows(car))
@@ -473,7 +476,8 @@ public sealed partial class Car
             string name = rig.BoneNames.TryGetValue(frame, out string? boneName)
                 ? boneName
                 : FrameName(frame, rig) ?? Hex(frame);
-            var marker = new CarMarker(role, index, label, frame, name, bone, onOwnBone, bone != 0);
+            var marker = new CarMarker(role, index, label, frame, name, bone, onOwnBone, bone != 0,
+                MarkerFields(prefab, role, index));
             markers.Add(marker);
 
             CarComponent? owner = bone != 0 ? byBone.GetValueOrDefault(bone) : null;

@@ -43,9 +43,15 @@ public enum CarMarkerRole
 /// <param name="OnOwnBone">Whether the row names the bone directly rather than a helper hung off one.</param>
 /// <param name="Resolved">Whether it reached a bone at all. False on 0 of 1081 shipped markers, so it is the
 /// signature of a rename or a hand-edited prefab rather than of anything the game ships.</param>
+/// <param name="Fields">What the row carries beyond the frame it names — a seat's type and group and where
+/// the occupant sits, a climb box's extents. Empty for the roles whose row IS just a frame name: a fuel tank,
+/// an exhaust emitter, a wiper and a light are placed by moving their frame and say nothing else.</param>
 public sealed record CarMarker(
     CarMarkerRole Role, int Index, string Label, ulong Frame, string Name, ulong Bone,
-    bool OnOwnBone, bool Resolved)
+    bool OnOwnBone, bool Resolved, IReadOnlyList<CarField> Fields)
 {
+    /// <summary>Whether the row carries anything of its own to edit.</summary>
+    public bool HasFields => Fields.Count > 0;
+
     public override string ToString() => Label;
 }

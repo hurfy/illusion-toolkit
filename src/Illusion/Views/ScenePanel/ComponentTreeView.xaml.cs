@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Illusion.Assets.Cars;
 using Illusion.ViewModels;
 
 namespace Illusion.Views;
@@ -51,7 +52,7 @@ public partial class ComponentTreeView : UserControl
         ComponentTree.SelectedItemChanged += (_, e) =>
         {
             if (e.NewValue is ComponentRowViewModel row) components.Select(row);
-            else if (e.NewValue is CollisionRowViewModel collision) components.Select(collision);
+            else if (e.NewValue is IComponentChildRow child) components.Select(child);
         };
     }
 
@@ -91,21 +92,22 @@ public partial class ComponentTreeView : UserControl
         if (e.OriginalSource is not DependencyObject source) return;
         object? clicked = FindAncestor<TreeViewItem>(source)?.DataContext;
         if (clicked is ComponentRowViewModel row && ReferenceEquals(_components?.Selected, row)
-            && _components?.SelectedCollision == null)
+            && _components?.SelectedChild == null)
         {
             return;
         }
         Pick(clicked);
     }
 
-    // One row, whichever kind it is. A collision row points the menu at itself and the viewport at the
-    // component that carries it — the viewport has nothing of its own to select for a collision.
+    // One row, whichever kind it is. A child row points the menu at itself and the viewport at the frame it
+    // is — a marker's own Dummy or Point, and for a collision, which is no frame at all, the bone of the
+    // component that carries it.
     private void Pick(object? row)
     {
         switch (row)
         {
             case ComponentRowViewModel component: _components?.Select(component); break;
-            case CollisionRowViewModel collision: _components?.Select(collision); break;
+            case IComponentChildRow child: _components?.Select(child); break;
         }
     }
 
@@ -127,25 +129,102 @@ public partial class ComponentTreeView : UserControl
     /// <summary>A collision was asked to go.</summary>
     public event Action<CollisionRowViewModel>? RemoveCollisionRequested;
 
-    // Which items the menu offers depends on what is under the cursor: a component can be given a collision,
-    // and a collision can be resized or taken away. An item that is shown while it cannot do anything is a
-    // promise the menu does not keep — and a read-only collision (a cooked hull) can only be removed.
+    /// <summary>A component was asked for one more marker of a role.</summary>
+    public event Action<ComponentRowViewModel, CarMarkerRole>? AddMarkerRequested;
+
+    /// <summary>A marker was asked for new values on its own row.</summary>
+    public event Action<MarkerRowViewModel>? EditMarkerRequested;
+
+    /// <summary>A marker was asked to go.</summary>
+    public event Action<MarkerRowViewModel>? RemoveMarkerRequested;
+
+    /// <summary>One of a component's own prefab rows was asked for new values.</summary>
+    public event Action<ComponentDataRowViewModel>? EditDataRowRequested;
+
+    // Which items the menu offers depends on what is under the cursor: a component can be given a collision
+    // or a marker, and each of its child rows can be edited or taken away. An item that is shown while it
+    // cannot do anything is a promise the menu does not keep — a read-only collision (a cooked hull) can only
+    // be removed, and four of the six marker roles carry nothing of their own to type.
     private void Menu_Opened(object sender, RoutedEventArgs e)
     {
         CollisionRowViewModel? collision = _components?.SelectedCollision;
-        bool onComponent = _components?.Selected != null && collision == null;
+        MarkerRowViewModel? marker = _components?.SelectedMarker;
+        ComponentDataRowViewModel? data = _components?.SelectedDataRow;
+        // A marker GROUP is a heading rather than a thing: nothing can be done TO it, and everything that can
+        // be done on the row it heads is the component's. So it offers what the component offers — without
+        // which right-clicking "Climb boxes (4)" produced a menu holding one item, on exactly the row where
+        // adding a climb box is the obvious thing to want.
+        bool onComponent = _components?.Selected != null
+            || _components?.SelectedChild is MarkerGroupRowViewModel;
 
         AddCollisionItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
+        AddMarkerItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
         EditCollisionItem.Visibility = collision != null ? Visibility.Visible : Visibility.Collapsed;
         RemoveCollisionItem.Visibility = collision != null ? Visibility.Visible : Visibility.Collapsed;
         EditCollisionItem.IsEnabled = collision is { IsReadOnly: false };
         EditCollisionItem.ToolTip = collision?.ReadOnlyReason;
+
+        EditMarkerItem.Visibility = marker != null ? Visibility.Visible : Visibility.Collapsed;
+        RemoveMarkerItem.Visibility = marker != null ? Visibility.Visible : Visibility.Collapsed;
+        EditMarkerItem.IsEnabled = marker is { HasFields: true };
+        EditMarkerItem.ToolTip = marker is { HasFields: false }
+            ? $"{marker.Label} is placed by its frame and carries nothing else to type."
+            : null;
+        EditDataRowItem.Visibility = data != null ? Visibility.Visible : Visibility.Collapsed;
+        EditDataRowItem.Header = data == null ? "Row…" : data.Label + "…";
+
+        if (AddMarkerItem.Items.Count == 0) FillAddMarker();
+    }
+
+    // The roles a marker can be added as, built once: the four whose frame the toolkit can mint. The two it
+    // cannot are deliberately absent rather than shown greyed — a wiper is a bone on all 148 shipped ones and
+    // a light is a slot rather than a row, and neither is a thing this menu can do anything about.
+    private void FillAddMarker()
+    {
+        foreach (CarMarkerRole role in Car.AddableRoles)
+        {
+            var item = new MenuItem { Header = Capitalized(Car.Words(role)), Tag = role };
+            item.Click += AddMarker_Click;
+            AddMarkerItem.Items.Add(item);
+        }
+    }
+
+    private static string Capitalized(string words) =>
+        words.Length == 0 ? words : char.ToUpperInvariant(words[0]) + words[1..];
+
+    private void AddMarker_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: CarMarkerRole role } && Component() is { } row)
+        {
+            AddMarkerRequested?.Invoke(row, role);
+        }
+    }
+
+    private void EditMarker_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedMarker is { } row) EditMarkerRequested?.Invoke(row);
+    }
+
+    private void RemoveMarker_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedMarker is { } row) RemoveMarkerRequested?.Invoke(row);
+    }
+
+    private void EditDataRow_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedDataRow is { } row) EditDataRowRequested?.Invoke(row);
     }
 
     private void AddCollision_Click(object sender, RoutedEventArgs e)
     {
-        if (_components?.Selected is { } row) AddCollisionRequested?.Invoke(row);
+        if (Component() is { } row) AddCollisionRequested?.Invoke(row);
     }
+
+    /// <summary>The component the menu acts on: the selected row, or — on a marker group's heading — the
+    /// component that heading belongs to.</summary>
+    private ComponentRowViewModel? Component() =>
+        _components?.Selected
+        ?? (_components?.SelectedChild as MarkerGroupRowViewModel)?.Component;
 
     private void EditCollision_Click(object sender, RoutedEventArgs e)
     {

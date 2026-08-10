@@ -164,11 +164,7 @@ public sealed partial class Car
     {
         ArgumentException.ThrowIfNullOrEmpty(extracted);
 
-        IReadOnlyList<string> files;
-        try { files = SdsManifest.Load(extracted).GetFiles("PREFAB"); }
-        catch (Exception ex) when (ex is IOException or SdsFormatException) { return null; }
-
-        foreach (string file in files)
+        foreach (string file in PrefabFiles(extracted))
         {
             PrefabFile prefab;
             try { prefab = PrefabFile.Load(file); }
@@ -223,5 +219,13 @@ public sealed partial class Car
             return Stitch(prefab, staged.Frame, lod, previous, file, extracted);
         }
         return null;
+    }
+
+    /// <summary>The prefab files an archive's manifest lists, or nothing at all when it cannot be read — an
+    /// archive whose manifest will not open carries no car as far as this layer is concerned.</summary>
+    private static IReadOnlyList<string> PrefabFiles(string extracted)
+    {
+        try { return SdsManifest.Load(extracted).GetFiles("PREFAB"); }
+        catch (Exception ex) when (ex is IOException or SdsFormatException) { return []; }
     }
 }

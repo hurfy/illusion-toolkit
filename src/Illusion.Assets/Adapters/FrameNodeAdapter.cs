@@ -38,6 +38,10 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
     /// and in the prefab, and the prefab is the copy the game reads. Every route that moves a frame — the
     /// gizmo, the modal keys, the property panel — comes through this setter, so this is the one place the
     /// two copies can be kept from drifting apart.
+    /// </para>
+    /// <para>
+    /// A Dummy or a Point is recorded for the same reason: a car's climb boxes and seats say where they are
+    /// in a prefab row as well, and the row is the copy the game reads.
     /// </para></summary>
     public Matrix4x4 LocalTransform
     {
@@ -46,6 +50,10 @@ public sealed class FrameNodeAdapter : IFrameNode, IPropertySource, IMaterialLis
         {
             _frame.LocalTransform = value;
             if (_frame is FrameObjectCollision stub) _document.MarkCollisionStubMoved(stub);
+            else if (_frame is FrameObjectDummy or FrameObjectPoint)
+            {
+                _document.MarkMarkerFrameMoved(_frame);
+            }
         }
     }
 

@@ -32,7 +32,7 @@ internal static class FramePropertyCatalog
         if (o is FrameObjectModel m) AddModel(m, c);
         if (o is FrameObjectLight l) AddLight(l, c);
         if (o is FrameObjectCamera cam) AddCamera(cam, c);
-        if (o is FrameObjectDummy d) AddDummy(d, c);
+        if (o is FrameObjectDummy d) AddDummy(d, node, c);
         if (o is FrameObjectFrame f) AddFrame(f, c);
         if (o is FrameObjectArea a) AddArea(a, c);
         if (o is FrameObjectSector s) AddSector(s, c);
@@ -204,12 +204,19 @@ internal static class FramePropertyCatalog
         }
     }
 
-    private static void AddDummy(FrameObjectDummy d, GroupCollector c)
+    /// <summary>
+    /// A Dummy's own box. Resizing one is recorded on the document, exactly as MOVING one is: on a car a
+    /// climb box states its box in a prefab row as well and the game reads the ROW, so a box changed here and
+    /// nowhere else is a box that changes in the editor and not in the game.
+    /// </summary>
+    private static void AddDummy(FrameObjectDummy d, FrameNodeAdapter node, GroupCollector c)
     {
         c.AddType("Dummy", Vec3Desc("Dummy.BoundsMin", "Bounds min",
-            () => d.Bounds.Min, v => { var b = d.Bounds; b.Min = v; d.Bounds = b; }));
+            () => d.Bounds.Min,
+            v => { var b = d.Bounds; b.Min = v; d.Bounds = b; node.Document.MarkMarkerFrameMoved(d); }));
         c.AddType("Dummy", Vec3Desc("Dummy.BoundsMax", "Bounds max",
-            () => d.Bounds.Max, v => { var b = d.Bounds; b.Max = v; d.Bounds = b; }));
+            () => d.Bounds.Max,
+            v => { var b = d.Bounds; b.Max = v; d.Bounds = b; node.Document.MarkMarkerFrameMoved(d); }));
     }
 
     private static void AddFrame(FrameObjectFrame f, GroupCollector c)

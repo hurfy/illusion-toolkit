@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows.Data;
 using System.Windows.Media;
+using Illusion.Assets.Cars;
 
 namespace Illusion.Views;
 
@@ -82,9 +83,49 @@ public static class ComponentKindIcons
         [Bare] = PaletteInk.Slate,
     };
 
+    // A marker is not a panel of the car, it is something the car hangs off a bone — so it gets its own set
+    // of glyphs on the same 12x12 grid. Each says what the thing IS: a chair, a step, a can, a pipe, a blade,
+    // a lamp.
+    private static readonly Dictionary<CarMarkerRole, Geometry> MarkerGlyphs = new()
+    {
+        // A chair in profile: back, seat, front leg.
+        [CarMarkerRole.Seat] = Parse("M3.6,2.6 L3.6,7.4 L9.8,7.4 M3.6,9.6 L3.6,7.4 M9.8,7.4 L9.8,9.6"),
+        // Two steps — the shape of the thing a player climbs.
+        [CarMarkerRole.ClimbBox] = Parse("M1.6,9.6 L1.6,6.6 L6,6.6 L6,3.4 L10.4,3.4 L10.4,9.6 Z"),
+        // A can with its handle and its cap.
+        [CarMarkerRole.FuelTank] = Parse("M3,3.6 L9,3.6 L9,9.6 L3,9.6 Z M4.6,3.6 L4.6,2.4 L7.4,2.4 L7.4,3.6"),
+        // A pipe with its plume — the same reading the exhaust PART gets, because it is the same thing.
+        [CarMarkerRole.ExhaustEmitter] =
+            Parse("M1.6,7.4 L7,7.4 L7,9 L1.6,9 Z M7.8,8.2 C9,8.2 9,6.6 10.2,6.6 M8.4,5.4 C9.4,5.4 9.4,4 10.4,4"),
+        // An arm with its blade, on its pivot.
+        [CarMarkerRole.Wiper] = Parse("M2.6,9.4 L9,3 M7.8,2.2 L9.8,4.2 M2.6,9.4 L4.4,9.4"),
+        // A lamp throwing light.
+        [CarMarkerRole.Light] =
+            Parse("M3.8,6 A2.2,2.2 0 1 1 8.2,6 A2.2,2.2 0 1 1 3.8,6 Z M6,1.6 L6,2.8 M6,9.2 L6,10.4 "
+                + "M1.6,6 L2.8,6 M9.2,6 L10.4,6"),
+    };
+
+    private static readonly Dictionary<CarMarkerRole, Brush> MarkerTints = new()
+    {
+        [CarMarkerRole.Seat] = PaletteInk.Periwinkle,
+        [CarMarkerRole.ClimbBox] = PaletteInk.Sage,
+        [CarMarkerRole.FuelTank] = PaletteInk.Brass,
+        [CarMarkerRole.ExhaustEmitter] = PaletteInk.Peach,
+        [CarMarkerRole.Wiper] = PaletteInk.Cornflower,
+        [CarMarkerRole.Light] = PaletteInk.Gold,
+    };
+
     /// <summary>The icon for a part kind, in the words the format's reader gives it.</summary>
     public static Geometry Glyph(string? kind) =>
         kind != null && Glyphs.TryGetValue(kind, out Geometry? found) ? found : Plate;
+
+    /// <summary>The icon for a marker role.</summary>
+    public static Geometry MarkerGlyph(CarMarkerRole role) =>
+        MarkerGlyphs.TryGetValue(role, out Geometry? found) ? found : Plate;
+
+    /// <summary>The colour for a marker role.</summary>
+    public static Brush MarkerTint(CarMarkerRole role) =>
+        MarkerTints.TryGetValue(role, out Brush? found) ? found : PaletteInk.Ash;
 
     /// <summary>The colour for a part kind. Unnamed kinds — the numeric ones — share the neutral grey.</summary>
     public static Brush Tint(string? kind) =>
@@ -113,6 +154,26 @@ public sealed class ComponentTintConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         ComponentKindIcons.Tint(value as string);
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Marker role to its icon, for the rows under a component.</summary>
+public sealed class MarkerGlyphConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        ComponentKindIcons.MarkerGlyph(value is CarMarkerRole role ? role : CarMarkerRole.Seat);
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>Marker role to its colour.</summary>
+public sealed class MarkerTintConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        ComponentKindIcons.MarkerTint(value is CarMarkerRole role ? role : CarMarkerRole.Seat);
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

@@ -57,6 +57,7 @@ public sealed class CarComponent
     private readonly List<CarComponent> _children = [];
     private readonly List<CarMarker> _markers = [];
     private readonly List<CarCollision> _collisions = [];
+    private readonly List<CarComponentRow> _rows = [];
 
     internal CarComponent(
         ComponentId id, string name, ulong boneHash, int boneJoint, bool boneResolves,
@@ -130,6 +131,18 @@ public sealed class CarComponent
     public IReadOnlyList<CarMarker> Markers => _markers;
 
     /// <summary>
+    /// The prefab rows that name this component's OWN bone — its door points, its window record, its axle.
+    ///
+    /// <para>
+    /// A component is written down more than once, and only the deform part is this component's own struct:
+    /// the door row beside it says where the handle and the lock are, the window row how deep the pane sits
+    /// and whether it rolls down. Nothing in the format ties them together, so the toolkit does, and they are
+    /// shown here rather than in a list the modder would have to count rows in.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<CarComponentRow> Rows => _rows;
+
+    /// <summary>
     /// What this component is solid with — its own collision, its glass, its zones — by role and shape, with
     /// every size and position stated in the component's OWN space.
     ///
@@ -143,6 +156,8 @@ public sealed class CarComponent
     internal void AddChild(CarComponent child) => _children.Add(child);
 
     internal void AddMarker(CarMarker marker) => _markers.Add(marker);
+
+    internal void AddRow(CarComponentRow row) => _rows.Add(row);
 
     internal void AddCollision(CarCollision collision) => _collisions.Add(collision);
 

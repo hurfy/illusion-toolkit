@@ -14,7 +14,7 @@ namespace Illusion.ViewModels;
 /// half of one — those are the file's accidents and the aggregate's business.
 /// </para>
 /// </summary>
-public sealed class CollisionRowViewModel : INotifyPropertyChanged
+public sealed class CollisionRowViewModel : INotifyPropertyChanged, IComponentChildRow
 {
     internal CollisionRowViewModel(CarCollision collision, ComponentRowViewModel component)
     {
@@ -44,6 +44,10 @@ public sealed class CollisionRowViewModel : INotifyPropertyChanged
     /// <summary>A collision's rows follow their component through the panel's search, so narrowing the tree
     /// to a door does not empty that door of everything it is made of.</summary>
     public bool HasSearchMatch => Component.HasSearchMatch;
+
+    /// <summary>A collision is not a frame: a self-describing volume has none at all, and the mirror stub of
+    /// a solid one is a copy the modder is deliberately never shown.</summary>
+    public ulong FrameHash => 0;
 
     private bool _isSelected;
 

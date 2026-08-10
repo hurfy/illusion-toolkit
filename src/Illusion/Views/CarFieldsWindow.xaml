@@ -1,0 +1,47 @@
+<Window x:Class="Illusion.Views.CarFieldsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Row"
+        Width="560" SizeToContent="Height" MaxHeight="720"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Component tree → right-click a marker or one of a component's own rows → the data it carries.
+
+         The fields are BUILT from what the row holds rather than spelled here, because they differ per role:
+         a seat carries its number, its type, its group and where the occupant sits; a climb box two corners;
+         a window a depth and a flag; an axle a type and three masses. Each one carries its own label, its own
+         hint and the address it is written back through, so this window never has to know which of the
+         prefab's four parallel lists it is editing.
+
+         Same shell as ComponentCollisionWindow: 24px-inset content over a hairline-topped command bar. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- what this is -->
+            <RowDefinition Height="*" />     <!-- the fields -->
+            <RowDefinition Height="Auto" />  <!-- command bar -->
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="Caption" Grid.Row="0" Style="{StaticResource DimLabel}" TextWrapping="Wrap"
+                   Margin="24,20,24,0" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+            <StackPanel x:Name="Fields" Margin="24,0,24,20" />
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Background="{StaticResource FillHairline}"
+                BorderBrush="{StaticResource EdgeFaint}" BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock x:Name="FootNote" DockPanel.Dock="Left" Style="{StaticResource DimLabel}"
+                           MaxWidth="280" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" Click="Cancel_Click" />
+                    <Button Style="{StaticResource AccentButton}" MinWidth="92" Height="32" Content="Apply"
+                            IsDefault="True" Click="Accept_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

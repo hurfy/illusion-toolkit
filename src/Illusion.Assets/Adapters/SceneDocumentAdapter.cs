@@ -141,6 +141,26 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     /// </summary>
     public void MarkCollisionStubMoved(FrameObjectCollision stub) => _movedCollisionStubs.Add(stub);
 
+    private readonly HashSet<FrameObjectBase> _movedMarkerFrames = new();
+
+    /// <summary>
+    /// Records that a helper frame has been moved, so the next save carries it through to the row the game
+    /// actually reads.
+    /// <para>
+    /// The same trap the collision stubs set, in two more places: a climb box is stated by its ROW and the
+    /// game never reads the Dummy, and a seat's row carries the position its Dummy stands at on 212 of the
+    /// 213 shipped seats. Only the frames that MOVED are carried over — 18 of the 280 shipped climb-box rows
+    /// already disagree with their Dummy, and rewriting those from a frame nobody touched would change cars
+    /// nobody asked about.
+    /// </para>
+    /// </summary>
+    public void MarkMarkerFrameMoved(FrameObjectBase frame) => _movedMarkerFrames.Add(frame);
+
+    /// <summary>Why the last save could not carry a moved marker through to the row the game reads, or null
+    /// when it could. The drag is still held and the next save will try again; this is what a host tells the
+    /// modder so that "I moved it and nothing happened" is a sentence rather than a mystery.</summary>
+    public string? MarkerRowsRefused { get; private set; }
+
     /// <summary>
     /// This archive's car collision, as the PREFAB describes it — every deformable part's volumes, resolved
     /// against the frame graph. Empty for an archive that is not a car. Read fresh each time: the prefab lives
@@ -180,11 +200,22 @@ public sealed class SceneDocumentAdapter : ISceneDocument
                 MafiaEnvironment.ExtractedDir(SourceArchive), _movedCollisionStubs);
             _movedCollisionStubs.Clear();
         }
-        // A climb box is stated in the prefab row and only there; the Dummy is where it is EDITED. Without
-        // this, moving or scaling one changed what the editor draws and nothing the game climbs — which is
-        // exactly how a newly added climb box turned out to be unclimbable. Costs one prefab read per save
-        // and writes only when a box actually moved.
-        Prefabs.CarClimbBoxes.SyncFromFrames(MafiaEnvironment.ExtractedDir(SourceArchive), _frame);
+        // A climb box is stated in the prefab row and only there, and a seat states where its occupant sits
+        // beside the Dummy that shows it; either way the frame is where it is EDITED. Without this, moving or
+        // scaling one changed what the editor draws and nothing the game reads — which is exactly how a newly
+        // added climb box turned out to be unclimbable. Through the aggregate, which is the one path from a
+        // change to a car's bytes, and only for the frames that actually moved.
+        if (_movedMarkerFrames.Count > 0)
+        {
+            Cars.Car.SyncMarkers(
+                MafiaEnvironment.ExtractedDir(SourceArchive), _frame, _movedMarkerFrames, out string? lost);
+            // Cleared only when the rows were actually written. A save can be refused — the prefab has to
+            // survive being written and read back, and it refuses outright if another editor has written the
+            // file since — and forgetting the drag anyway is how a marker moves in the editor and nowhere
+            // else. Held instead, so the next save carries it.
+            if (lost == null) _movedMarkerFrames.Clear();
+            MarkerRowsRefused = lost;
+        }
         if (_nameTableDirty)
         {
             // Must run AFTER SaveFrameResource: WriteToStream ran UpdateFrameData, so FrameObjects order and the
