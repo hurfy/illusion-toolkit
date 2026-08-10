@@ -750,6 +750,15 @@ internal static class ProbeRunner
                 CarComponentProbes.RunCarComponentsProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // The carry-verbatim guarantee: every shipped car read through the Car aggregate, saved again
+            // with no edit, and compared byte for byte with the file it came from — plus what a save that DID
+            // change something reports, which has to name the field rather than a byte offset. Every save is
+            // redirected into a scratch mirror, so the game's folders are never written to. Optional arg = the
+            // car to focus on. Output: %TEMP%\illusion_car_roundtrip.txt
+            case "--probe-car-roundtrip":
+                CarRoundTripProbes.RunCarRoundTripProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt

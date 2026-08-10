@@ -18,7 +18,7 @@ public sealed partial class Car
     /// same place in the rig keeps its identity, whatever its bone is now called.</param>
     public static Car Stitch(
         PrefabFile prefab, FrameResource? frames, int lod = 0, Car? previous = null,
-        string? prefabPath = null)
+        string? prefabPath = null, string? extracted = null)
     {
         ArgumentNullException.ThrowIfNull(prefab);
 
@@ -115,7 +115,7 @@ public sealed partial class Car
         List<CarMarker> markers = car == null ? [] : HangMarkers(car, rig, byBone, body, faults);
         List<CarComponent> roots = [.. components.Where(c => c.Parent == null)];
 
-        return new Car(prefab, frames, prefabPath, lod, components, roots, body, markers, faults,
+        return new Car(prefab, frames, prefabPath, extracted, lod, components, roots, body, markers, faults,
             byBone, byAnchor);
     }
 

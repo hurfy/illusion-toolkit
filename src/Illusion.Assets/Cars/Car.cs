@@ -35,7 +35,7 @@ public sealed partial class Car
     private readonly Dictionary<long, ComponentId> _byAnchor;
 
     private Car(
-        PrefabFile prefab, FrameResource? frames, string? prefabPath, int lod,
+        PrefabFile prefab, FrameResource? frames, string? prefabPath, string? extracted, int lod,
         List<CarComponent> components, List<CarComponent> roots, CarComponent? body,
         List<CarMarker> markers, List<CarFault> faults,
         Dictionary<ulong, CarComponent> byBone, Dictionary<long, ComponentId> byAnchor)
@@ -43,6 +43,7 @@ public sealed partial class Car
         Prefab = prefab;
         Frames = frames;
         PrefabPath = prefabPath;
+        Extracted = extracted;
         Lod = lod;
         Components = components;
         Roots = roots;
@@ -62,6 +63,13 @@ public sealed partial class Car
 
     /// <summary>Where the prefab came from, when it came from disk.</summary>
     public string? PrefabPath { get; }
+
+    /// <summary>
+    /// The archive's extracted working copy this car was read out of, or null when it was stitched in memory
+    /// — which is what a bridge push does. It is where <see cref="Save"/> writes, and the reason a car
+    /// stitched in memory has nothing to write to.
+    /// </summary>
+    public string? Extracted { get; }
 
     /// <summary>
     /// Which level of detail the components were measured at. A component's EXISTENCE is LOD-scoped — 4882
@@ -144,7 +152,7 @@ public sealed partial class Car
                 // A car whose frame resource cannot be opened still stitches: every part becomes a component
                 // whose bone does not resolve, which is a diagnosis rather than a crash.
             }
-            return Stitch(prefab, frames, lod, previous, file);
+            return Stitch(prefab, frames, lod, previous, file, extracted);
         }
         return null;
     }
