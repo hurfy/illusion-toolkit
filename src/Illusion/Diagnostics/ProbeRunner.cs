@@ -770,6 +770,13 @@ internal static class ProbeRunner
                 ComponentTreeProbes.RunComponentTreeProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // What survives past fifty metres: how many levels each car carries, how far the bone palette
+            // falls between them, which bones keep geometry at the far one, and what the aggregate stitches
+            // when it is read there. The far level is a SHELL, and the switch rests on that being true.
+            // Optional arg = the car to focus on. Output: %TEMP%\illusion_car_lod.txt
+            case "--probe-car-lod":
+                CarLodProbes.RunCarLodProbe(args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // The carry-verbatim guarantee: every shipped car read through the Car aggregate, saved again
             // with no edit, and compared byte for byte with the file it came from — plus what a save that DID
             // change something reports, which has to name the field rather than a byte offset. Every save is

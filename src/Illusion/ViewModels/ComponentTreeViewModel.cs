@@ -90,6 +90,54 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// that is not a car has no components to show and shows the frames whatever the switch last said.</summary>
     public bool ShowsComponents => HasCar && !_isRaw;
 
+    // ── the level of detail ──
+
+    private int _lod;
+
+    /// <summary>
+    /// Which level of detail the tree lists — the whole car at once, never one component.
+    ///
+    /// <para>
+    /// The far level is a SHELL rather than a second copy of the car: 4882 of the 5046 bones that carry
+    /// geometry near carry none far, and the tree there is three rows on the average car. That emptiness is
+    /// the answer the switch exists to give — what survives past fifty metres — and not a fault.
+    /// </para>
+    /// <para>
+    /// Moving it re-stitches the car at the new level. The car itself is the same car at either level — the
+    /// components, the lookups and the faults do not move — so the SELECTION survives on its own: the
+    /// viewport never lets go of the bone, and the panel re-resolves it onto the new rows the way it does
+    /// after any other rebuild. A component this level does not draw simply has no row to light.
+    /// </para>
+    /// <para>
+    /// NOT remembered per archive, unlike <see cref="IsRaw"/>: a far level is a thing a modder looks at
+    /// rather than works in, and reopening a car onto its shell would read as half the car having gone
+    /// missing.
+    /// </para>
+    /// </summary>
+    public int Lod
+    {
+        get => _lod;
+        set
+        {
+            // The near level is always reachable, whatever the read last said: a car that failed to stitch
+            // reports no levels at all, and a switch that could not be put back would leave the tree on a
+            // level nothing can be seen at for the rest of the session.
+            if (_lod == value || value < 0 || (value > 0 && value >= Lods)) return;
+            _lod = value;
+            // Through the ordinary read, so a switch takes exactly the path a scene change does — and with
+            // the current car as the previous stitch, which is what carries the identities across.
+            Refresh(_document);
+            Raise(nameof(Lod));
+        }
+    }
+
+    /// <summary>How many levels this car carries: 2 on 82 of the 85 shipped cars, 1 on the other 3.</summary>
+    public int Lods => Car?.Lods ?? 0;
+
+    /// <summary>Whether there is a second level to switch to at all. False on a car carrying one, where the
+    /// switch is shown disabled rather than hidden — a level that does not exist is not offered.</summary>
+    public bool CanSwitchLod => Lods > 1;
+
     // ── reading the car ──
 
     /// <summary>
@@ -106,6 +154,16 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// one — an empty stage, or a district holding a dozen archives at once.</param>
     public void Refresh(ISceneDocument? document)
     {
+        // A car that is not the one the switch was moved on opens on its NEAR level. The level of detail is
+        // a look at what survives past fifty metres rather than a setting, and the next archive may not even
+        // carry a far level to carry it into — 3 of the 85 shipped cars ship one.
+        int wasLod = _lod;
+        if (!string.Equals(
+                document?.SourceArchive.Name, _archive, StringComparison.OrdinalIgnoreCase))
+        {
+            _lod = 0;
+        }
+
         // A document already known to carry no car is not asked again: on a district the scene changes
         // constantly and the question would cost a manifest read every time, for an answer that cannot have
         // changed while the same document is staged.
@@ -113,16 +171,35 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         {
             if (Car == null && _document == null) return;
             Adopt(null, null, noCar: false);
+            if (_lod != wasLod) Raise(nameof(Lod));
             return;
         }
         if (_documentHasNoCar && ReferenceEquals(document, _document)) return;
 
-        Car? read = null;
         bool failed = false;
+        Car? read = Read(document, ref failed);
+        // The car may have lost the level out from under the switch — a bridge push can leave one where it
+        // had two. Reading again at the near level costs a stitch on the rare push that does it, and the
+        // alternative is a tree of a level that is not there, which draws as a car with nothing in it.
+        if (read != null && _lod > 0 && _lod >= read.Lods)
+        {
+            _lod = 0;
+            read = Read(document, ref failed);
+        }
+        // A failure is not an answer. Memoing one would turn a working copy that was locked for a moment —
+        // by a build, by a virus scanner — into a car that has no components for the rest of the session.
+        Adopt(read, document, noCar: !failed && read == null);
+        // Only when the level really moved under the read — the switch's own setter raises its own change,
+        // and a scene change on an unmoved switch must not send the panel round the rebuild again.
+        if (_lod != wasLod) Raise(nameof(Lod));
+    }
+
+    private Car? Read(ISceneDocument document, ref bool failed)
+    {
         try
         {
-            read = Assets.Cars.Car.ReadStaged(
-                document, previous: ReferenceEquals(document, _document) ? Car : null);
+            return Assets.Cars.Car.ReadStaged(
+                document, _lod, previous: ReferenceEquals(document, _document) ? Car : null);
         }
         catch (Exception)
         {
@@ -134,10 +211,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
             // The faults of a car that reads only PARTLY are a different thing entirely: those are the
             // aggregate's, and they come back as rows.
             failed = true;
+            return null;
         }
-        // A failure is not an answer. Memoing one would turn a working copy that was locked for a moment —
-        // by a build, by a virus scanner — into a car that has no components for the rest of the session.
-        Adopt(read, document, noCar: !failed && read == null);
     }
 
     // Everything is settled BEFORE the first notification goes out. A listener that reacts to the switch
@@ -181,6 +256,10 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Raise(nameof(Roots));
         Raise(nameof(RootsView));
         Raise(nameof(ShowsComponents));
+        // How many levels there are to switch between belongs to the car that has just arrived, and so does
+        // whether the switch is offered at all — a car carrying one level shows it disabled.
+        Raise(nameof(Lods));
+        Raise(nameof(CanSwitchLod));
         Raise(nameof(Selected));
         RaiseChild();
         Raise(nameof(Faults));
@@ -192,14 +271,41 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Raise(nameof(IsComponents));
     }
 
-    // The rows, nested off the aggregate's own parent links. Roots come out in the order the aggregate
-    // produced them — deform parts in the prefab's file order, then the bare components in rig order — so two
-    // reads of the same car list it the same way round.
+    /// <summary>
+    /// The rows, nested off the aggregate's own parent links. Roots come out in the order the aggregate
+    /// produced them — deform parts in the prefab's file order, then the bare components in rig order — so
+    /// two reads of the same car list it the same way round.
+    ///
+    /// <para>
+    /// This is the ONE place the level of detail decides anything: the aggregate describes the whole car at
+    /// either level, and the tree lists the components that are drawn at the one on screen
+    /// (<see cref="Car.DrawnHere"/>). A component whose parent is not drawn here stands at the top rather
+    /// than disappearing under it — the far level keeps a door and drops the body panel it hangs off often
+    /// enough that hiding the survivors would empty a tree that has something in it.
+    /// </para>
+    /// </summary>
     private List<ComponentRowViewModel> Build(Car car, Dictionary<long, bool> folded)
     {
         var roots = new List<ComponentRowViewModel>();
-        foreach (CarComponent component in car.Roots) roots.Add(Row(car, component, parent: null, folded));
+        foreach (CarComponent component in car.Roots) Walk(car, component, parent: null, roots, folded);
         return roots;
+    }
+
+    // Down the aggregate's own tree, listing what this level draws. A component the level does not draw is
+    // skipped and its children are offered to the nearest one above it that IS drawn — to the top when there
+    // is none — so a door that survives past fifty metres is in the tree even where the panel it hangs off is
+    // not. At the near level nothing is skipped and this is the walk that was here before.
+    private void Walk(
+        Car car, CarComponent component, ComponentRowViewModel? parent, List<ComponentRowViewModel> roots,
+        Dictionary<long, bool> folded)
+    {
+        ComponentRowViewModel? under = parent;
+        if (car.DrawnHere(component))
+        {
+            under = Row(car, component, parent, folded);
+            if (parent == null) roots.Add(under); else parent.AddChild(under);
+        }
+        foreach (CarComponent child in component.Children) Walk(car, child, under, roots, folded);
     }
 
     private ComponentRowViewModel Row(
@@ -242,7 +348,6 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
             foreach (CarMarker marker in byRole) group.Add(new MarkerRowViewModel(marker, row));
             row.AddMarkerGroup(group);
         }
-        foreach (CarComponent child in component.Children) row.AddChild(Row(car, child, row, folded));
         return row;
     }
 

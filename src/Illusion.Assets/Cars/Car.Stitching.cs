@@ -84,11 +84,18 @@ public sealed partial class Car
         // corpus, each already carrying a live hit box. They are shootable parts of the car that had nowhere
         // to be edited. The 101 bones with no geometry — the rig roots, the hinge bones of tracked vehicles —
         // are not things of the car and mint nothing.
+        //
+        // Geometry ANYWHERE, not geometry at the level being read. A car is one car whichever level is on
+        // screen: the stitching, the identities, the markers and the faults are the same at both, and what
+        // the level decides is only how much each component DRAWS here (Pieces below, and HasGeometry off
+        // it). Asking this per level instead would make three quarters of the car cease to exist on a
+        // switch — and with it the lookups, the diagnosis and the parent lists that are the car's, not the
+        // level's.
         foreach ((ulong bone, string name) in rig.BoneNames)
         {
             if (byBone.ContainsKey(bone) || handleBones.Contains(bone)) continue;
             int pieces = rig.Pieces.GetValueOrDefault(bone);
-            if (pieces == 0) continue;
+            if (pieces == 0 && !rig.Drawn.Contains(bone)) continue;
 
             int joint = rig.JointOfBone.TryGetValue(bone, out int at) ? at : -1;
             var component = new CarComponent(
@@ -121,11 +128,11 @@ public sealed partial class Car
 
         // ── what did not stitch, beyond what the passes above already named ──
         if (car != null) MatchRows(car, byBone, components, rig, faults);
-        LostGeometry(rig, byBone, handleBones, previous, lod, byAnchor, faults);
+        LostGeometry(rig, byBone, handleBones, previous, byAnchor, faults);
         OffTheNameTable(rig, components, body, faults);
 
-        var stitched = new Car(prefab, frames, prefabPath, extracted, lod, components, roots, body, markers,
-            faults, byBone, byAnchor);
+        var stitched = new Car(prefab, frames, prefabPath, extracted, lod, rig.Lods, components, roots, body,
+            markers, faults, byBone, byAnchor);
         // What the prefab file holds right now, so a later save can tell whether somebody else has written it
         // in the meantime — four other modules still write this same file directly.
         stitched.RememberPrefabOnDisk();
@@ -281,9 +288,8 @@ public sealed partial class Car
 
         foreach ((string label, ulong bone) in BoneRows(car))
         {
-            // Drawn ANYWHERE, not drawn at this level. A component's existence is LOD-scoped and 4882 of 5046
-            // bones carry nothing at the far level, so asking byBone alone would turn a switch to LOD 1 into
-            // one long fault about a car nobody has touched.
+            // Drawn ANYWHERE, not drawn at this level: a bone is a component of the car whichever level is
+            // on screen, and 4882 of 5046 of them carry nothing at the far one.
             if (bone == 0 || byBone.ContainsKey(bone) || rig.Drawn.Contains(bone)) continue;
             faults.Add(new CarFault(CarFaultKind.RowWithoutComponent,
                 $"{label} names {Named(bone, rig)}, which is no component of this car",
@@ -363,7 +369,7 @@ public sealed partial class Car
     /// </para>
     /// </summary>
     private static void LostGeometry(
-        Rig rig, Dictionary<ulong, CarComponent> byBone, HashSet<ulong> handleBones, Car? previous, int lod,
+        Rig rig, Dictionary<ulong, CarComponent> byBone, HashSet<ulong> handleBones, Car? previous,
         Dictionary<long, ComponentId> byAnchor, List<CarFault> faults)
     {
         var said = new HashSet<ulong>();
@@ -378,9 +384,11 @@ public sealed partial class Car
                 + "left", ShipsThisWay: true));
         }
 
-        // Against the previous stitch, and only at the SAME level: a component that has geometry at LOD 0 and
-        // none at LOD 1 is 96.7 % of them, and calling that a loss would make the far level one long fault.
-        if (previous == null || previous.Lod != lod) return;
+        // Against the previous stitch, at EITHER level. A component is minted from geometry the car draws
+        // anywhere rather than from geometry at the level on screen, so the two stitches are comparable
+        // however the switch has moved between them — and a loss that lands while the modder happens to be
+        // looking at the far level is exactly the one they would otherwise never be told about.
+        if (previous == null) return;
         foreach (CarComponent was in previous.Components)
         {
             int joint = was.BoneJoint;
@@ -393,9 +401,11 @@ public sealed partial class Car
             // the new rig at the old joint number would then report a component that has merely moved down a
             // row — still drawn, still in the tree — as having lost everything.
             ulong bone = Fnv64.Hash(rig.BonesByJoint[joint]);
-            // Only geometry loss. A bone some part has since claimed as a deform handle stopped being a
-            // component for a reason of its own, and naming that a lost panel would be a false alarm.
-            if (rig.Pieces.GetValueOrDefault(bone) > 0 || rig.Pieces.GetValueOrDefault(was.BoneHash) > 0
+            // Only geometry loss, and DRAWN ANYWHERE rather than drawn here: a bone that carries nothing at
+            // the far level is 96.7 % of them and has lost nothing. A bone some part has since claimed as a
+            // deform handle stopped being a component for a reason of its own, and naming that a lost panel
+            // would be a false alarm.
+            if (rig.Drawn.Contains(bone) || rig.Drawn.Contains(was.BoneHash)
                 || handleBones.Contains(bone) || !said.Add(bone))
             {
                 continue;
@@ -583,6 +593,18 @@ public sealed partial class Car
         internal Dictionary<ulong, int> Pieces { get; } = [];
 
         /// <summary>
+        /// How many levels of detail the car's model is drawn at — what a switch can be offered between.
+        ///
+        /// <para>
+        /// A level needs BOTH halves to be read: the index buffer that says which faces are drawn at it, and
+        /// the remap table that says which bone each split belongs to there. The two agree on every level of
+        /// every shipped car, so the smaller of them is a belt on a car something has been done to rather
+        /// than a reading of its own.
+        /// </para>
+        /// </summary>
+        internal int Lods { get; set; }
+
+        /// <summary>
         /// Bones that hold a seat in the split table and no face anywhere in it. Not a per-level question —
         /// the split table is one block shared by both levels, so a bone with no face range at all is drawn
         /// at neither.
@@ -665,6 +687,10 @@ public sealed partial class Car
         try { levels = car.GetBlendInfoObject().BoneIndexInfos ?? []; }
         catch (Exception) { return; }
         if (levels.Length == 0) return;
+
+        // How many levels there are to switch between, before anything is read at one of them.
+        try { rig.Lods = Math.Min(levels.Length, car.GetGeometry().LOD?.Length ?? 0); }
+        catch (Exception) { rig.Lods = levels.Length; }
 
         // ── the SEAT pass, which is not a per-level question ──
         //

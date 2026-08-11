@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Illusion.Assets.Cars;
+using Illusion.Scene;
 using Illusion.ViewModels;
 
 namespace Illusion.Views;
@@ -74,6 +75,13 @@ public partial class ComponentTreeView : UserControl
         bool empty = ComponentTree.Items.Count == 0;
         EmptyComponents.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         ComponentTree.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+        // Two ways to have no rows, and they are different answers. A far level draws 3 % of the car, so a
+        // car with nothing at all there is a shell that is empty rather than a search that matched nothing —
+        // and telling the modder to check their search term would send them looking for a fault they have
+        // not got.
+        EmptyHint.Text = _components is { Lod: > 0 } && string.IsNullOrWhiteSpace(SceneSearch.Query)
+            ? "Nothing in this car is drawn at this level of detail"
+            : "Nothing in this car matched the search";
     }
 
     // A click selects the component under it — through the view-model, which hands the bone to the viewport
@@ -219,6 +227,25 @@ public partial class ComponentTreeView : UserControl
             : null;
 
         if (AddMarkerItem.Items.Count == 0) FillAddMarker();
+
+        // …and at a FAR level none of it acts. The tree there lists the two or three components the car
+        // still draws past fifty metres, which is a look at the car rather than a place to work on it: the
+        // lists a change is written into — a new part's parent, the components a collision can hang off —
+        // are the car's and not the level's, so choosing from what a shell happens to show would write a
+        // link the modder would never have picked from the near tree. Greyed with the reason rather than
+        // hidden, so the way to make the edit is one click away instead of a mystery.
+        if (_components is not { Lod: > 0 }) return;
+        foreach (MenuItem item in new[]
+                 {
+                     GrantPartItem, RemovePartItem, AddCollisionItem, EditCollisionItem, RemoveCollisionItem,
+                     AddMarkerItem, EditMarkerItem, RemoveMarkerItem, EditDataRowItem, EditDamageItem,
+                     EditHandleItem,
+                 })
+        {
+            item.IsEnabled = false;
+            item.ToolTip = "This is the car's far level of detail — a shell of what is drawn past fifty "
+                + "metres. Switch to Near to change anything.";
+        }
     }
 
     // The roles a marker can be added as, built once: the four whose frame the toolkit can mint. The two it

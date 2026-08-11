@@ -1046,13 +1046,27 @@ internal static class ComponentTreeProbes
     /// </summary>
     private static void Render(FileInfo car, Action<string, bool, string> check, StringBuilder sb)
     {
+        if (!Stage(car, out ScenePanel? panel, out _) || panel == null) return;
+        // Open, because the shut strip is one line and cannot fail: what a picture is for here is whether a
+        // fault's title, its line and the tree still share a panel 340 px wide.
+        panel.Components.FaultsOpen = true;
+        Snapshot(panel, "illusion_component_tree.png", "the component tree draws", check, sb);
+    }
+
+    /// <summary>
+    /// A picture of the panel as it stands, at the width the editor gives it.
+    ///
+    /// <para>
+    /// Shared with <see cref="CarLodProbes"/>, which photographs the same panel at the far level of detail —
+    /// one harness rather than two, because the part most likely to need a fix is the dispatcher pump below,
+    /// and two copies of it stop being comparable the moment one of them is corrected.
+    /// </para>
+    /// </summary>
+    internal static void Snapshot(
+        ScenePanel panel, string pngName, string what, Action<string, bool, string> check, StringBuilder sb)
+    {
         try
         {
-            if (!Stage(car, out ScenePanel? panel, out _) || panel == null) return;
-            // Open, because the shut strip is one line and cannot fail: what a picture is for here is whether
-            // a fault's title, its line and the tree still share a panel 340 px wide.
-            panel.Components.FaultsOpen = true;
-
             const double width = 340, height = 900;
             panel.Background = new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20));
@@ -1079,11 +1093,11 @@ internal static class ComponentTreeProbes
             bitmap.Render(panel);
             var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
             encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
-            string path = Path.Combine(Path.GetTempPath(), "illusion_component_tree.png");
+            string path = Path.Combine(Path.GetTempPath(), pngName);
             using (FileStream file = File.Create(path)) encoder.Save(file);
 
-            check("the component tree draws", new FileInfo(path).Length > 0, path);
-            sb.AppendLine($"rendered {car.Name} -> {path}");
+            check(what, new FileInfo(path).Length > 0, path);
+            sb.AppendLine($"rendered -> {path}");
         }
         catch (Exception ex)
         {
@@ -1098,8 +1112,13 @@ internal static class ComponentTreeProbes
     /// The real scene panel around one staged archive — the same shape the resource editor builds: an
     /// archive's frame roots under an SDS wrapper, and a panel attached to the viewport that holds them.
     /// No window is shown, so no D3D surface is ever created.
+    ///
+    /// <para>
+    /// Shared with <see cref="CarLodProbes"/>, which asks the same panel what it does when the level of
+    /// detail moves — one harness rather than two that can drift apart.
+    /// </para>
     /// </summary>
-    private static bool Stage(FileInfo archive, out ScenePanel? panel, out D3DImageHost? host)
+    internal static bool Stage(FileInfo archive, out ScenePanel? panel, out D3DImageHost? host)
     {
         panel = null;
         host = null;

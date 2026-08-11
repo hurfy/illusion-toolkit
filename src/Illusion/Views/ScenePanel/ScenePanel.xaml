@@ -20,6 +20,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="1*" MinHeight="80" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="2*" MinHeight="60" />
@@ -74,13 +75,23 @@
                          ToolTip="The file: frames, the name table and the resource envelopes" />
         </UniformGrid>
 
+        <!-- Which level of detail the tree lists, for the whole car at once. The far level is a SHELL rather
+             than a second copy of the car — 4882 of the 5046 bones that draw near draw nothing far — so the
+             tree there is three rows on the average car, and that emptiness is the answer this switch exists
+             to give. The segments are built from the car's own level count, because "Far" is a name for the
+             last of two and would be a lie on a car carrying three. Disabled rather than hidden on the 3
+             shipped cars that carry a single level: a level that does not exist is not offered, and saying so
+             is better than a switch that comes and goes. Only beside the component tree — the frame tree
+             lists frames, which have no level. -->
+        <UniformGrid x:Name="LodSwitch" Grid.Row="3" Columns="2" Margin="8,0,8,6" Visibility="Collapsed" />
+
         <!-- The diagnosis. The editor opens every car, including the ones it cannot fully understand — those
              are the cars it is most needed for — so what did not stitch is said the moment the car opens,
              rather than found one component at a time. Shut by default: the count IS the diagnosis being
              available, and a list that opens itself takes the tree's room to repeat what has been read.
              Each line leads to the component it is about; the ones that have none — a door row naming a bone
              nothing claims — exist only here, which is the whole reason for a list beside the tinted rows. -->
-        <Border x:Name="FaultStrip" Grid.Row="3" Margin="8,0,8,6" CornerRadius="6"
+        <Border x:Name="FaultStrip" Grid.Row="4" Margin="8,0,8,6" CornerRadius="6"
                 Background="{StaticResource FillCard}" BorderBrush="{StaticResource EdgeFaint}"
                 BorderThickness="1" Visibility="Collapsed">
             <StackPanel>
@@ -176,13 +187,13 @@
             </StackPanel>
         </Border>
 
-        <v:SceneTreeView x:Name="Tree" Grid.Row="4" />
-        <v:ComponentTreeView x:Name="ComponentTree" Grid.Row="4" Visibility="Collapsed" />
+        <v:SceneTreeView x:Name="Tree" Grid.Row="5" />
+        <v:ComponentTreeView x:Name="ComponentTree" Grid.Row="5" Visibility="Collapsed" />
 
-        <GridSplitter Grid.Row="5" Height="4" HorizontalAlignment="Stretch"
+        <GridSplitter Grid.Row="6" Height="4" HorizontalAlignment="Stretch"
                       VerticalAlignment="Center" ResizeBehavior="PreviousAndNext"
                       Background="{StaticResource Splitter}" />
 
-        <v:ScenePropertyTabs x:Name="Tabs" Grid.Row="6" />
+        <v:ScenePropertyTabs x:Name="Tabs" Grid.Row="7" />
     </Grid>
 </UserControl>

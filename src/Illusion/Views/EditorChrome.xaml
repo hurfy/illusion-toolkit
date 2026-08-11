@@ -229,6 +229,15 @@
                                 </MultiTrigger.Conditions>
                                 <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHot}" />
                             </MultiTrigger>
+                            <!-- Greyed, and LAST so it wins over the accent above: the level-of-detail switch
+                                 is disabled on the cars that carry a single level, and a segmented control
+                                 that looks live and ignores every click reads as a bug rather than as an
+                                 answer. -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
+                                <Setter Property="Foreground" Value="{StaticResource TextFaint}" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>

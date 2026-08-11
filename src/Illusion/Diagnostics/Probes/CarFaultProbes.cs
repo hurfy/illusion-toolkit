@@ -344,9 +344,10 @@ internal static class CarFaultProbes
     {
         sb.AppendLine("\n\n════ what must stay quiet ════");
 
-        // The far level. Rows are LOD-independent — an axle row names the same bone at both — while the bare
-        // components they resolve against are not, so testing a row against "did this mint a component HERE"
-        // would report most of the car's rows the moment the switch moved.
+        // The far level. A car is the same car at either level — the components, the lookups and the faults
+        // are the car's, and what the level decides is only how much each component DRAWS there — so nothing
+        // in the diagnosis may move with the switch. 4882 of 5046 bones draw nothing at the far level, and
+        // any fault path that asked "does this draw HERE" would report most of the car the moment it moved.
         foreach (string name in new[] { "half_track_pha", focus })
         {
             Car? near = Open(folder, name, lod: 0);
@@ -355,11 +356,14 @@ internal static class CarFaultProbes
 
             int rowsNear = near.Faults.Count(f => f.Kind == CarFaultKind.RowWithoutComponent);
             int rowsFar = far.Faults.Count(f => f.Kind == CarFaultKind.RowWithoutComponent);
+            int drawnFar = far.Components.Count(c => c.HasGeometry);
             sb.AppendLine($"  {name}: {near.Components.Count} components at LOD 0 and "
-                + $"{far.Components.Count} at LOD 1, row faults {rowsNear} → {rowsFar}");
+                + $"{far.Components.Count} at LOD 1 of which {drawnFar} draw there, "
+                + $"row faults {rowsNear} → {rowsFar}");
             check($"switching {name} to the far level says nothing new about its rows",
-                rowsNear == rowsFar && far.Components.Count < near.Components.Count,
-                $"{rowsNear} near, {rowsFar} far");
+                rowsNear == rowsFar && far.Components.Count == near.Components.Count
+                && far.Faults.Count == near.Faults.Count,
+                $"{rowsNear} near, {rowsFar} far, {far.Faults.Count} faults against {near.Faults.Count}");
         }
 
         // And a car whose frame resource could not be opened. It stitches on purpose (Car.ReadFrom catches
@@ -470,15 +474,17 @@ internal static class CarFaultProbes
                     !blind.Faults.Any(f => f.Kind == CarFaultKind.BareComponentLostGeometry
                         && f.Component == bare.Id),
                     "a car opened cold claimed to know");
-                // The far level is where this check would do its damage if it were not LOD-scoped: 4882 of
-                // 5046 components have no geometry there, so a comparison across a switch would report the
-                // whole car as lost. The dead SEAT below is a different question and rightly still answered
-                // there — the split table is one block, shared by both levels.
-                check("…and never across a LOD switch, where 96.7 % of components have no counterpart",
-                    !far.Faults.Any(f => f.Kind == CarFaultKind.BareComponentLostGeometry
-                        && f.Component.IsSet),
-                    $"{far.Faults.Count(f => f.Kind == CarFaultKind.BareComponentLostGeometry && f.Component.IsSet)} "
-                    + "components called lost at the far level");
+                // The far level is where this check would do its damage if it asked whether a bone draws
+                // HERE: 4882 of 5046 draw nothing there, and a comparison across a switch would report the
+                // whole car as lost. It asks whether the bone draws ANYWHERE, so the one loss this test made
+                // is reported at either level and nothing else is — which is what a modder who happened to be
+                // looking at the far level when the push landed needs it to do.
+                int lostFar = far.Faults.Count(f =>
+                    f.Kind == CarFaultKind.BareComponentLostGeometry && f.Component.IsSet);
+                check("…and across a LOD switch it reports that one loss and no others",
+                    lostFar == 1 && far.Faults.Any(f =>
+                        f.Kind == CarFaultKind.BareComponentLostGeometry && f.Component == bare.Id),
+                    $"{lostFar} components called lost at the far level");
             }
         }
 

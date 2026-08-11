@@ -20,7 +20,9 @@
 
     <Grid>
         <!-- The honest empty state: a search that matched nothing is a tree with no rows rather than an
-             empty box, which reads as a panel that failed. Shares the frame tree's placard shape. -->
+             empty box, which reads as a panel that failed. Shares the frame tree's placard shape. The line
+             underneath is set in code, because there are two ways to have no rows and they are not the same
+             answer — nothing matched what was typed, or nothing of this car is drawn at the level chosen. -->
         <StackPanel x:Name="EmptyComponents" HorizontalAlignment="Center" VerticalAlignment="Center"
                     Visibility="Collapsed">
             <Path Width="46" Height="46" Stretch="Uniform" Fill="Transparent" Stroke="{StaticResource StageGlyph}"
@@ -28,7 +30,8 @@
                   StrokeEndLineCap="Round" Data="{StaticResource IconMesh}" HorizontalAlignment="Center" />
             <TextBlock Text="No components" Foreground="{StaticResource TextMuted}"
                        FontSize="12.5" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,16,0,0" />
-            <TextBlock Text="Nothing in this car matched the search" Foreground="{StaticResource TextGhost}"
+            <TextBlock x:Name="EmptyHint" Text="Nothing in this car matched the search"
+                       Foreground="{StaticResource TextGhost}"
                        FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,0" TextAlignment="Center" />
         </StackPanel>
 

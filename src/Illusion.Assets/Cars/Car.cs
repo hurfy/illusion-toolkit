@@ -38,7 +38,7 @@ public sealed partial class Car
     private readonly Dictionary<long, List<CarFault>> _faultsById;
 
     private Car(
-        PrefabFile prefab, FrameResource? frames, string? prefabPath, string? extracted, int lod,
+        PrefabFile prefab, FrameResource? frames, string? prefabPath, string? extracted, int lod, int lods,
         List<CarComponent> components, List<CarComponent> roots, CarComponent? body,
         List<CarMarker> markers, List<CarFault> faults,
         Dictionary<ulong, CarComponent> byBone, Dictionary<long, ComponentId> byAnchor)
@@ -48,6 +48,7 @@ public sealed partial class Car
         PrefabPath = prefabPath;
         Extracted = extracted;
         Lod = lod;
+        Lods = lods;
         Components = components;
         Roots = roots;
         Body = body;
@@ -90,6 +91,41 @@ public sealed partial class Car
     /// same component keeps the same <see cref="ComponentId"/> across a switch.
     /// </summary>
     public int Lod { get; }
+
+    /// <summary>
+    /// How many levels of detail this car is drawn at: 2 on 82 of the 85 shipped cars, 1 on the other 3, and
+    /// 0 when the archive carries no frame graph to read one from.
+    ///
+    /// <para>
+    /// What the switch is offered from — a car carrying one level is not offered a second, because there is
+    /// nothing there to show. The near level is the one the assembly is authored against; a far level is a
+    /// SHELL and shows only what is drawn at it.
+    /// </para>
+    /// </summary>
+    public int Lods { get; }
+
+    /// <summary>
+    /// Whether a component is one the TREE lists at the level this car was read at.
+    ///
+    /// <para>
+    /// A car is one car whichever level is on screen — the components, the lookups, the markers and the
+    /// faults are all the same at both — and what the level decides is only which of them are DRAWN there.
+    /// The far level is a shell: 4882 of the 5046 bones that draw near draw nothing far, and about three
+    /// components per car survive, which is the answer a level switch exists to give rather than a fault.
+    /// </para>
+    /// <para>
+    /// The near level lists everything, because the ASSEMBLY is authored against it: the prefab carries one
+    /// deform-part list, and a part whose own bone happens to draw nothing there — a window's pane, on the
+    /// focus car — is still a thing the modder edits. And the <see cref="Body"/> is listed at every level,
+    /// because it is not a panel but the car itself: every marker and every row whose own component is not
+    /// drawn here hangs off it, and the body's own bone draws at the far level on 0 of 82 two-level cars.
+    /// </para>
+    /// </summary>
+    public bool DrawnHere(CarComponent component)
+    {
+        ArgumentNullException.ThrowIfNull(component);
+        return Lod == 0 || component.HasGeometry || ReferenceEquals(component, Body);
+    }
 
     /// <summary>Every component, deform parts first in file order, then the bare ones in rig order.</summary>
     public IReadOnlyList<CarComponent> Components { get; }

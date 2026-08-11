@@ -45,7 +45,7 @@ public partial class ScenePanel : UserControl
     private SelectionViewModel _selection = null!;
     private ComponentTreeViewModel _components = null!;
 
-    // True while the switch is being set to match the view-model, so the Checked handler does not read its
+    // True while a switch is being set to match the view-model, so the Checked handler does not read its
     // own write back as the user having clicked it.
     private bool _syncingMode;
 
@@ -123,6 +123,18 @@ public partial class ScenePanel : UserControl
             // The same rule the switch follows: whatever moves the view-model is what the panel reacts to, so
             // a click and anything else that opens the diagnosis take exactly the same path.
             if (e.PropertyName == nameof(ComponentTreeViewModel.FaultsOpen)) { ApplyFaults(); return; }
+            // The level of detail is the same deal, one row further down, and it takes the whole path a
+            // re-stitch takes: the tree can come back empty — or the read can fail and leave no car at all,
+            // which is what ApplyTreeMode is for — and the selection has to be resolved onto the new rows,
+            // because the viewport still holds the bone and a component this level does not draw has no row
+            // to light. Scrolled, since moving the switch is a deliberate act.
+            if (e.PropertyName == nameof(ComponentTreeViewModel.Lod))
+            {
+                ComponentTree.Refresh();
+                ApplyTreeMode();
+                ShowSelectionInTree(scroll: true);
+                return;
+            }
             if (e.PropertyName != nameof(ComponentTreeViewModel.IsRaw)) return;
             ApplyTreeMode();
             // Moving the switch is a deliberate act, so the tree that just took the row scrolls to the
@@ -269,7 +281,94 @@ public partial class ScenePanel : UserControl
         ComponentsMode.IsChecked = !_components.IsRaw;
         RawMode.IsChecked = _components.IsRaw;
         _syncingMode = false;
+        ApplyLodSwitch();
         ApplyFaults();
+    }
+
+    // ── Near | Far ──
+
+    /// <summary>
+    /// The level-of-detail switch: one segment per level the car carries, the one being listed lit.
+    ///
+    /// <para>
+    /// The segments are built from the car rather than written into the XAML, because the names only work
+    /// against a count: "Far" is the second of two and would be a lie on a car carrying three. It sits beside
+    /// the component tree alone — the frame tree lists frames, which have no level — and a car carrying a
+    /// single level shows it DISABLED rather than not at all, so that the answer is "there is only one" and
+    /// not a switch that comes and goes between archives.
+    /// </para>
+    /// </summary>
+    private void ApplyLodSwitch()
+    {
+        if (_components == null) return;
+        int levels = Math.Max(1, _components.Lods);
+        if (LodSwitch.Children.Count != levels)
+        {
+            LodSwitch.Children.Clear();
+            LodSwitch.Columns = levels;
+            for (int level = 0; level < levels; level++)
+            {
+                var segment = new RadioButton
+                {
+                    GroupName = "CarLod",
+                    Style = (Style)FindResource("SegmentButton"),
+                    Content = LodName(level, levels),
+                    Tag = level,
+                    Margin = new Thickness(level == 0 ? 0 : 2, 0, level == levels - 1 ? 0 : 2, 0),
+                    ToolTip = LodHint(level, levels),
+                };
+                // …and it has to be shown while the switch is DISABLED, which is the state that most needs
+                // explaining: WPF suppresses a tooltip on a disabled element unless told otherwise.
+                ToolTipService.SetShowOnDisabled(segment, true);
+                segment.Checked += Lod_Changed;
+                LodSwitch.Children.Add(segment);
+            }
+        }
+
+        LodSwitch.Visibility =
+            _components.HasCar && _components.ShowsComponents && !_hierarchyDisowned
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        // A car carrying one level: the switch is there, greyed, saying so. The segments carry the tooltip
+        // themselves — a disabled UniformGrid has no hit-testing of its own, so a tooltip on the panel would
+        // be a sentence nothing can be hovered to read.
+        LodSwitch.IsEnabled = _components.CanSwitchLod;
+        foreach (RadioButton segment in LodSwitch.Children.OfType<RadioButton>())
+        {
+            segment.ToolTip = _components.CanSwitchLod
+                ? LodHint(segment.Tag is int at ? at : 0, LodSwitch.Children.Count)
+                : "This car is drawn at a single level of detail — there is no far level to switch to.";
+        }
+
+        _syncingMode = true;
+        foreach (RadioButton segment in LodSwitch.Children.OfType<RadioButton>())
+        {
+            segment.IsChecked = segment.Tag is int level && level == _components.Lod;
+        }
+        _syncingMode = false;
+    }
+
+    // The first level is the car up close, the last is what is still drawn past fifty metres. No shipped car
+    // carries a third, and one that did would be numbered rather than misnamed.
+    private static string LodName(int level, int levels) =>
+        level == 0 ? "Near"
+        : level == levels - 1 ? "Far"
+        : "LOD " + level.ToString(CultureInfo.InvariantCulture);
+
+    private static string LodHint(int level, int levels) =>
+        level == 0
+            ? "The car up close — the level its assembly is authored against, and the only one that draws "
+              + "every component."
+            : "What is still drawn at this distance. Nearly nothing is: 96.7 % of the bones that draw up "
+              + "close draw nothing here, so this tree is a shell rather than a second copy of the car."
+              + (level == levels - 1 ? "" : " Level " + level.ToString(CultureInfo.InvariantCulture) + ".");
+
+    // The user moved the level switch. Everything that follows hangs off the view-model's own change, above,
+    // so a level restored for any other reason takes exactly the path a click does.
+    private void Lod_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncingMode || _components == null) return;
+        if (sender is RadioButton { Tag: int level }) _components.Lod = level;
     }
 
     // ── the diagnosis ──
