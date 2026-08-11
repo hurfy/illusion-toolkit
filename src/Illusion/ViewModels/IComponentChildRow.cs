@@ -23,12 +23,13 @@ public interface IComponentChildRow
     bool HasSearchMatch { get; }
 
     /// <summary>
-    /// FNV64 of the frame this row IS, or 0 when it is not a frame at all.
+    /// FNV64 of the frame the viewport takes hold of for this row, or 0 when it has none.
     ///
     /// <para>
-    /// A marker has one — its Dummy or its Point — and selecting the row hands that frame to the viewport, so
-    /// that the next thing the modder does can be to drag it. A collision has none: a self-describing volume
-    /// is not a frame, and the mirror stub of a solid one is a copy the modder is deliberately never shown.
+    /// A marker's is its own Dummy or Point. A SOLID collision's is its mirror stub, which stands exactly
+    /// where the volume does — handed over so the gizmo moves the collision rather than the part that carries
+    /// it, while the stub itself is still never listed as a row. Glass, zones and the headings that are
+    /// statements about a component have none at all, and fall back to the component's bone.
     /// </para>
     /// </summary>
     ulong FrameHash { get; }

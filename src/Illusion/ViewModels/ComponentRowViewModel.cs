@@ -148,6 +148,14 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     /// of the car that had nowhere to be edited before the component view.</summary>
     public bool IsBare => Component.IsBare;
 
+    /// <summary>Whether this is the car's BODY — the one part every shipped car has exactly one of, and where
+    /// every marker whose bone no component owns hangs. It is the one component whose deform part cannot be
+    /// taken away.</summary>
+    public bool IsBody => Component.PartType == BodyPartType;
+
+    /// <summary>The engine's own part kind for the body.</summary>
+    private const uint BodyPartType = 1;
+
     /// <summary>Whether the bone the part names is actually in this car. False is the signature of a rename
     /// made in Blender, and the row is shown broken rather than dropped.</summary>
     public bool IsBroken => !Component.BoneResolves;

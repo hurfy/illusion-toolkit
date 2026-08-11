@@ -49,6 +49,13 @@
                      inherits in principle and measurably does not reach a ContextMenu's items — the component
                      tree probe reads it back as False there — so the reason was written and never readable. -->
                 <ContextMenu Opened="Menu_Opened">
+                    <!-- The two halves of a component's own deform part. A BARE component is offered one —
+                         a light, a plate or a wiper made damageable — and one that has a part is offered
+                         the way back out, because a grant a modder cannot take back is a one-way door.
+                         Exactly one of the two is ever shown. -->
+                    <MenuItem x:Name="GrantPartItem" Header="Make damageable…" Click="GrantPart_Click" />
+                    <MenuItem x:Name="RemovePartItem" Header="Remove deform part"
+                              ToolTipService.ShowOnDisabled="True" Click="RemovePart_Click" />
                     <MenuItem x:Name="AddCollisionItem" Header="Add collision…" Click="AddCollision_Click" />
                     <!-- The roles are filled in from the aggregate rather than spelled here: the two it
                          cannot mint are absent rather than greyed, because a wiper is a bone on all 148

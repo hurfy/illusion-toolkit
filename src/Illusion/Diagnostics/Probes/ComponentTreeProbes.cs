@@ -72,6 +72,7 @@ internal static class ComponentTreeProbes
             CheckCollisions(car, Check, sb);
             CheckMarkers(car, Check, sb);
             CheckDamage(car, Check, sb);
+            CheckDeformPart(car, Check, sb);
             CheckRemembered(car, Check, sb);
             CheckNotACar(folder, Check, sb);
             CheckRestitch(car, Check, sb);
@@ -345,25 +346,49 @@ internal static class ComponentTreeProbes
             hull != null && hull.IsReadOnly && hull.ReadOnlyReason is { Length: > 0 },
             hull == null ? "this car carries no hull" : hull.ReadOnlyReason ?? "no reason");
 
-        // Selecting a collision: the tree's highlight is the collision's, and the viewport stays on the
-        // component's bone — a self-describing volume has no frame at all, and the mirror stub of a solid one
-        // is a copy the modder is deliberately never shown.
-        CollisionRowViewModel? first =
-            collisions.FirstOrDefault(c => !c.Component.IsBroken && !c.Component.IsBare);
+        // Selecting a collision: the tree's highlight is the collision's, and the viewport takes hold of the
+        // thing that can be DRAGGED to place it. A solid's is its mirror stub, which stands exactly where the
+        // volume does; handing the component's bone over instead is what made "I select the box and the whole
+        // door moves" — the gizmo was on the part all along.
+        CollisionRowViewModel? first = collisions.FirstOrDefault(
+            c => !c.Component.IsBroken && !c.Component.IsBare && c.HasHandle);
         if (first != null)
         {
             components.Select(first);
-            check("selecting a collision lights its own row and leaves the viewport on its component",
+            check("selecting a solid collision lights its row and puts the gizmo on the collision itself",
                 ReferenceEquals(components.SelectedCollision, first) && first.IsSelected
                 && components.Selected == null
-                && host!.SelectedNode?.Source is BoneNodeAdapter bone
-                && bone.BoneName == first.Component.Name,
+                && host!.SelectedNode?.Source is FrameNodeAdapter handle
+                && Fnv64.Hash(handle.Frame.Name?.String ?? "") == first.FrameHash,
                 $"{first.Label} → {host!.SelectedNode?.Name ?? "(nothing)"}");
 
             components.Select(first.Component);
             check("…and selecting a component again clears it, so the menu acts on exactly one row",
                 components.SelectedCollision == null && !first.IsSelected
                 && ReferenceEquals(components.Selected, first.Component), "");
+        }
+
+        // Glass and zones describe themselves inside the prefab and name no record for a stub to mirror — 1049
+        // of 1049 shipped ones. There is nothing to drag, so the selection falls back to the component's bone
+        // and the row says as much rather than letting a modder move the part by mistake.
+        CollisionRowViewModel? selfDescribing = collisions.FirstOrDefault(
+            c => !c.Component.IsBroken && !c.HasHandle);
+        sb.AppendLine($"  {collisions.Count(c => c.HasHandle)} of {collisions.Count} collisions have a handle "
+            + "in the viewport; the rest are placed by their numbers");
+        // A hull is read-only for its SIZE and draggable all the same: the cooker cannot re-cook it at another
+        // size, but the stub that places it moves like any other.
+        check("every solid has a handle — hulls included — and no self-describing volume pretends to",
+            collisions.All(c => c.HasHandle == (c.Collision.Role == Assets.Cars.CarCollisionRole.Body)),
+            $"{collisions.Count(c => c.HasHandle)} handles over "
+            + $"{collisions.Count(c => c.Collision.Role == Assets.Cars.CarCollisionRole.Body)} solids");
+        if (selfDescribing != null)
+        {
+            components.Select(selfDescribing);
+            check("a collision with nothing to drag falls back to its component's bone",
+                ReferenceEquals(components.SelectedCollision, selfDescribing)
+                && host!.SelectedNode?.Source is BoneNodeAdapter bone
+                && bone.BoneName == selfDescribing.Component.Name,
+                $"{selfDescribing.Label} → {host!.SelectedNode?.Name ?? "(nothing)"}");
         }
 
         // The menu offers what the row can actually do. An item shown while it cannot do anything is a
@@ -613,6 +638,84 @@ internal static class ComponentTreeProbes
                         m => (m.Header as string) == "Add collision…" && m.Visibility == Visibility.Visible),
                     $"{menu.Items.OfType<MenuItem>().Count(m => m.Visibility == Visibility.Visible)} items offered");
             }
+        }
+        sb.AppendLine();
+    }
+
+    // ── the grant and the demotion, on the menu ──
+
+    /// <summary>
+    /// Whether a bare component is OFFERED a deform part and one that has a part is offered the way back out.
+    ///
+    /// <para>
+    /// Exactly one of the two is ever shown, because a component either has a part or it does not — and the
+    /// body is the one component that has a part and cannot give it up, so it is shown greyed with the reason
+    /// rather than silently missing. The reason has to be readable, which WPF suppresses on a disabled item
+    /// unless the item asks for it.
+    /// </para>
+    /// </summary>
+    private static void CheckDeformPart(FileInfo car, Action<string, bool, string> check, StringBuilder sb)
+    {
+        sb.AppendLine("════ a bare component is offered a deform part, and a full one the way back ════");
+        if (!Stage(car, out ScenePanel? panel, out _)) return;
+        ComponentTreeViewModel components = panel!.Components;
+        if (components.Car == null) { check("the car stitched", false, ""); return; }
+
+        List<ComponentRowViewModel> rows = [.. components.Roots.SelectMany(r => r.SelfAndDescendants())];
+        ComponentRowViewModel? bare = rows.FirstOrDefault(r => r.IsBare);
+        ComponentRowViewModel? part = rows.FirstOrDefault(r => !r.IsBare && !r.IsBody);
+        ComponentRowViewModel? body = components.BodyRow;
+
+        IReadOnlyList<ComponentRowViewModel> parents = components.Parentable();
+        sb.AppendLine($"  {rows.Count(r => r.IsBare)} bare components, {parents.Count} that a new part "
+            + $"could hang off, body \"{body?.Name}\"");
+        check("every component a new part could hang off has a deform part of its own",
+            parents.Count > 0 && parents.All(r => !r.IsBare)
+            && parents.Count == rows.Count(r => !r.IsBare),
+            $"{parents.Count} of {rows.Count(r => !r.IsBare)}");
+        check("the body is among them, since that is where a component with no obvious owner belongs",
+            body != null && parents.Contains(body), body?.Name ?? "there is no body");
+
+        ContextMenu? menu = panel.ComponentTree.ComponentTree.ContextMenu;
+        MenuItem? grant = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Make damageable…");
+        MenuItem? remove = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Remove deform part");
+        if (menu == null || grant == null || remove == null)
+        {
+            check("the menu carries both halves of a component's deform part", false, "");
+            return;
+        }
+
+        if (bare != null)
+        {
+            components.Select(bare);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("a bare component is offered a deform part and not offered to lose one",
+                grant.Visibility == Visibility.Visible && remove.Visibility == Visibility.Collapsed,
+                $"{bare.Name}: grant {grant.Visibility}, remove {remove.Visibility}");
+        }
+        if (part != null)
+        {
+            components.Select(part);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("a component that has a part is offered the way back out of it",
+                remove is { Visibility: Visibility.Visible, IsEnabled: true }
+                && grant.Visibility == Visibility.Collapsed,
+                $"{part.Name}: grant {grant.Visibility}, remove {remove.Visibility}");
+        }
+        if (body != null)
+        {
+            components.Select(body);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("the body is shown the item greyed with the reason rather than not at all",
+                remove is { Visibility: Visibility.Visible, IsEnabled: false }
+                && remove.ToolTip is string { Length: > 10 },
+                remove.ToolTip as string ?? "no reason");
+            // A reason on a disabled item is a reason nobody can read unless the item asks for it.
+            check("…and that reason can be read at all, which WPF suppresses by default",
+                ToolTipService.GetShowOnDisabled(remove),
+                $"ShowOnDisabled: {ToolTipService.GetShowOnDisabled(remove)}");
         }
         sb.AppendLine();
     }

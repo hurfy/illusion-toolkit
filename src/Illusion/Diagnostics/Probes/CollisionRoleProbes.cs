@@ -349,6 +349,15 @@ internal static class CollisionRoleProbes
             && Approx(stub.LocalTransform.Translation, volume.Transform.Translation, 1e-4f),
             stub == null ? "no stub" : Print(stub.LocalTransform.Translation));
 
+        // …and the collision KNOWS about that stub, which is what a viewport takes hold of to place the box by
+        // eye. Without it the gizmo landed on the component's bone and dragging the new collision moved the
+        // whole part instead — on the body, the whole car.
+        CarCollision? placed = bodyAgain?.Collisions.LastOrDefault();
+        check("a solid names the handle the viewport drags to place it",
+            placed is { HasHandle: true } && stub?.Name?.String is { Length: > 0 } name
+            && placed.Handle == Illusion.Formats.Hashing.Fnv64.Hash(name),
+            placed == null ? "no collision" : $"handle 0x{placed.Handle:X16}");
+
         // ── glass on a door: the space conversion is the thing that must NOT be visible ──
         Car? glassCar = Car.ReadFrom(mirror);
         CarComponent? door = Pick(glassCar, "door");
@@ -384,6 +393,10 @@ internal static class CollisionRoleProbes
             Print(pageVolume?.Size ?? default));
         check("glass mints no ItemDesc record", ShapeCount(mirror) == glassShapes,
             $"{glassShapes} → {ShapeCount(mirror)}");
+        // …and no handle either, because there is no frame in the corpus for one: glass is placed by its
+        // numbers, and saying so is what keeps a modder from dragging the door instead.
+        check("glass has nothing to drag, and says so rather than pretending",
+            paneBack is { HasHandle: false }, $"handle {paneBack?.Handle ?? 0}");
         check("the matrix went into the space of the part the door hangs off, and the modder never sees it",
             pageVolume != null && paneBack != null
             && !Approx(pageVolume.Transform.Translation, paneAt, 1e-2f)

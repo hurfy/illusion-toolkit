@@ -810,6 +810,16 @@ internal static class ProbeRunner
                 CarDamageProbes.RunCarDamageProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // Giving a bare component a deform part and taking it away again: what the 1698 shipped parts
+            // hold in the fields the toolkit does not interpret — which is what a minted one has to carry —
+            // what else in the file indexes a part by its position, and then the grant and the demotion
+            // written, saved and read back off the archive. The focus car's working copy is mirrored into the
+            // temp directory, so the game's folders are never written to. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_car_parts.txt
+            case "--probe-car-parts":
+                CarPartProbes.RunCarPartsProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt

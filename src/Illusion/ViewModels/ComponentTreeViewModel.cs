@@ -6,6 +6,7 @@ using Illusion.Assets.Adapters;
 using Illusion.Assets.Cars;
 using Illusion.Domain;
 using Illusion.Formats.Hashing;
+using Illusion.Formats.Prefab;
 using Illusion.Scene;
 using Illusion.Settings;
 using Illusion.Viewport;
@@ -551,13 +552,21 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public ComponentHandleRowViewModel? SelectedHandle => SelectedChild as ComponentHandleRowViewModel;
 
     /// <summary>
-    /// Points the menu at one of a component's child rows, and the viewport at the frame it is.
+    /// Points the menu at one of a component's child rows, and the viewport at the thing that row IS.
     ///
     /// <para>
     /// A MARKER is a frame — a Dummy or a Point — so selecting its row hands that frame over, and the next
-    /// thing the modder does can be to drag it. A collision has none: a self-describing volume is not a frame
-    /// at all and the mirror stub of a solid one is a copy the modder is deliberately never shown, so the
-    /// component's own bone is what the gizmo, the property tabs and Delete stay pointed at instead.
+    /// thing the modder does can be to drag it. A SOLID collision is handed its mirror stub for the same
+    /// reason: the stub stands exactly where the volume does, so the gizmo takes hold of the collision instead
+    /// of the part that carries it. The stub is still not shown as a row of its own — it is a handle, not a
+    /// thing of the car.
+    /// </para>
+    /// <para>
+    /// Everything else here — glass and zones, which name no record and have no frame anywhere in the corpus,
+    /// and the headings that are statements about a component rather than things of their own — falls back to
+    /// the component's bone, so the property tabs still describe what was clicked. That bone is the WHOLE
+    /// part, and dragging it moves the part rather than the row: a collision with no handle says so out loud
+    /// rather than letting a modder discover it by moving a door with the box they meant to nudge.
     /// </para>
     /// </summary>
     public void Select(IComponentChildRow? row)
@@ -571,6 +580,12 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         SelectedChild = row;
         row.IsSelected = true;
         RaiseChild();
+        if (row is CollisionRowViewModel { HasHandle: false } noHandle)
+        {
+            _viewport.RaiseNotice(
+                $"{noHandle.Label} has no handle to drag — every shipped one of its kind is placed by its "
+                + "numbers. Use \"Size and position…\" on its row; the gizmo would move the whole part.");
+        }
     }
 
     private void RaiseChild()
@@ -610,6 +625,11 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
 
         CarEdit? edit = car.AddCollision(fresh.Component, role, shape, size, position, out refusal);
         if (edit == null) return;
+        // A solid's mirror stub joined the frame graph, and the graph is what the viewport draws FROM — but a
+        // frame the graph holds and the scene tree does not is one the gizmo cannot take hold of. Without this
+        // the new collision could not be dragged until the archive was reopened, and selecting its row fell
+        // back to the component's bone, which drags the whole part.
+        ShowFrames(edit.After);
         Commit(car, edit, ref refusal);
         // The layer goes on once the collision is really there: one that exists and is invisible reads as
         // "nothing happened", and looking at where the box landed is the whole reason for typing a position
@@ -654,6 +674,84 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
 
         CarEdit? edit = car.RemoveCollision(collision, out refusal);
         if (edit == null) return;
+        // …and a stub that has left the graph has to leave the scene tree, or its row stays behind as a handle
+        // that holds nothing.
+        ShowFrames(edit.After);
+        Commit(car, edit, ref refusal);
+    }
+
+    // ── the deform part itself ──
+
+    /// <summary>
+    /// The components a new part could hang off — every one that has a deform part of its own, since there is
+    /// nothing for a part to hang off a bare component.
+    ///
+    /// <para>
+    /// In the tree's own order, so the list a modder picks from reads the way the tree they picked from does.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<ComponentRowViewModel> Parentable()
+    {
+        var rows = new List<ComponentRowViewModel>();
+        foreach (ComponentRowViewModel root in Roots) Collect(root, rows);
+        return rows;
+    }
+
+    private static void Collect(ComponentRowViewModel row, List<ComponentRowViewModel> into)
+    {
+        if (!row.IsBare) into.Add(row);
+        foreach (ComponentRowViewModel child in row.Children) Collect(child, into);
+    }
+
+    /// <summary>The row the body is on — where a component with no obvious owner belongs, and what the
+    /// parent list opens on.</summary>
+    public ComponentRowViewModel? BodyRow => Car?.Body is { } body ? RowOf(body.Id) : null;
+
+    /// <summary>
+    /// Gives a bare component a deform part of its own, making it damageable.
+    ///
+    /// <para>
+    /// The aggregate derives everything but the kind and the parent — the flag word, the crumple thresholds,
+    /// the tuning block, all three copies of the parent link, and the half of the struct nobody has read.
+    /// </para>
+    /// </summary>
+    public void GrantDeformPart(
+        ComponentRowViewModel? row, CarPartTemplate kind, ComponentRowViewModel? parent,
+        out string? refusal)
+    {
+        refusal = null;
+        if (row == null || parent == null) { refusal = "no car is open"; return; }
+        // Both rows are found again in the SAME re-read: two rereads would leave the parent pointing into a
+        // stitch the component is no longer part of.
+        if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh)
+            || RowOf(parent.Id) is not { } freshParent)
+        {
+            refusal = "that component is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.GrantDeformPart(fresh.Component, kind, freshParent.Component, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>Takes a component's deform part away, demoting it back to a bare component — the bone, the
+    /// geometry and the hit boxes stay exactly as they were.</summary>
+    public void RemoveDeformPart(ComponentRowViewModel? row, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
+        {
+            refusal = "that component is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.RemoveDeformPart(fresh.Component, out refusal);
+        if (edit == null) return;
+        // A solid collision the part carried took its mirror stub out of the frame graph with it, and a stub
+        // the graph no longer holds has to leave the scene tree or its row stays behind holding nothing.
+        ShowFrames(edit.After);
         Commit(car, edit, ref refusal);
     }
 
@@ -866,6 +964,14 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// writing it and reading it back before a byte reaches a file — so a refusal here means nothing was
     /// written, and leaving the edit in memory would let the next save carry it in unnoticed.
     /// </para>
+    /// <para>
+    /// And the SCENE TREE comes back with it, which is not a nicety. Three of the intents above put a frame
+    /// into the tree before the save is attempted, because a frame the graph holds and the tree does not is
+    /// one the gizmo cannot take hold of — so a refusal that only restored the aggregate would leave a row
+    /// for a stub the rollback has just dropped, or take away the row of a collision that is still in the car
+    /// and let the modder Build it believing it gone. A save IS refused in practice: four other modules write
+    /// the same prefab directly, and the aggregate refuses outright when one of them got there first.
+    /// </para>
     /// </summary>
     private void Commit(Car car, CarEdit edit, ref string? refusal)
     {
@@ -874,6 +980,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         {
             refusal = string.Join("; ", saved.Lost);
             car.Restore(edit.Before);
+            ShowFrames(edit.Before);
+            Restitch();
             return;
         }
 

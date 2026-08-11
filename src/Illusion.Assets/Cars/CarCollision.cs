@@ -67,7 +67,7 @@ public sealed class CarCollision
 {
     internal CarCollision(
         CarCollisionRole role, CarCollisionShape shape, Vector3 size, Matrix4x4 placement,
-        ComponentId component, int partIndex, int volumeIndex, string? readOnlyReason)
+        ComponentId component, int partIndex, int volumeIndex, string? readOnlyReason, ulong handle = 0)
     {
         Role = role;
         Shape = shape;
@@ -77,6 +77,7 @@ public sealed class CarCollision
         PartIndex = partIndex;
         VolumeIndex = volumeIndex;
         ReadOnlyReason = readOnlyReason;
+        Handle = handle;
     }
 
     /// <summary>What this collision is: the car's solid, a pane of glass, or a zone.</summary>
@@ -115,6 +116,27 @@ public sealed class CarCollision
 
     /// <summary>Why this collision cannot be edited, or null when it can be.</summary>
     public string? ReadOnlyReason { get; }
+
+    /// <summary>
+    /// FNV64 of the frame that stands where this collision does — the handle a modder drags to place it — or
+    /// 0 when it has none.
+    ///
+    /// <para>
+    /// A SOLID has one: the mirror stub the toolkit mints beside its shape record. The modder is never told
+    /// what it is, and never sees it as a frame of its own; it is handed to the viewport so that selecting a
+    /// collision row puts the gizmo on the volume rather than on the whole part. Dragging it writes through to
+    /// the prefab on the next save, which is the copy the game reads.
+    /// </para>
+    /// <para>
+    /// Glass and zones have none, and cannot be given one: they describe themselves inside the prefab and
+    /// name no record for a stub to mirror — every one of the 1049 shipped ones is written that way. Those are
+    /// placed by their numbers instead.
+    /// </para>
+    /// </summary>
+    public ulong Handle { get; }
+
+    /// <summary>Whether the viewport has something to drag for this collision.</summary>
+    public bool HasHandle => Handle != 0;
 
     /// <summary>Whether editing is refused — a cooked hull, or a component whose bone does not resolve.</summary>
     public bool IsReadOnly => ReadOnlyReason != null;

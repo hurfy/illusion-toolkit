@@ -263,6 +263,9 @@ internal sealed class CarPartController
     {
         FrameObjectDummy => "Dummy",
         FrameObjectPoint => "Point",
+        // A collision stub, which is what a minted solid volume hangs its handle on. Named the way the
+        // collision path has always named one, so the two ways of adding a box produce the same row.
+        FrameObjectCollision => "Collision",
         _ => "Frame",
     };
 }

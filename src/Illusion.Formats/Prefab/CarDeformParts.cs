@@ -251,7 +251,7 @@ public sealed partial class PrefabFile
     }
 
     /// <summary>The part kinds, as the reference toolkit reads <c>S_InitDeformPart.Unk0</c>.</summary>
-    private static string PartKindName(uint type) => type switch
+    public static string PartKindName(uint type) => type switch
     {
         0 => "normal", 1 => "body", 2 => "wheel", 3 => "lid", 4 => "door", 5 => "window",
         6 => "cover", 7 => "bumper", 12 => "exhaust", 13 => "motor", 14 => "tyre", 15 => "snow",

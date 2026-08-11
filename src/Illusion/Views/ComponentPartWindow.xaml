@@ -1,0 +1,67 @@
+<Window x:Class="Illusion.Views.ComponentPartWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Illusion.Views"
+        Title="Make damageable"
+        Width="560" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+    <!-- Component tree → right-click a bare component → Make damageable…
+
+         TWO questions and no more: what kind of part it is, and which component it hangs off. Everything
+         else a deform part holds — the flag word, the crumple thresholds, the whole tuning block, the three
+         copies of the parent link, and the half of the struct nobody has read — is derived from those two
+         answers and from a measured template, and none of it is on this window.
+
+         The paragraph above the questions is the OFFER: what the component gains by taking a part, said
+         before the modder has to choose anything, because a bare component is a thing they have never had to
+         think about having one. Same shell as ComponentCollisionWindow. -->
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />  <!-- content -->
+            <RowDefinition Height="Auto" />  <!-- command bar -->
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="24,20,24,20">
+
+            <TextBlock x:Name="GainLabel" Style="{StaticResource DimLabel}" Margin="0,0,0,18"
+                       TextWrapping="Wrap" />
+
+            <!-- WHAT IT IS. Pre-filled with "normal", which is what a licence plate, a light and a wiper all
+                 are: the kind that carries no other meaning. -->
+            <TextBlock Style="{StaticResource DimLabel}" Text="What it is" Margin="0,0,0,4" />
+            <v:DropDownField x:Name="KindBox" DisplayPath="Title" SelectionChanged="Kind_Changed"
+                             ToolTip="The engine's own part kind. It decides the numbers the part starts with." />
+            <TextBlock x:Name="KindHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+                       TextWrapping="Wrap" />
+
+            <!-- The parent, which is the nesting the tree shows and the link the file writes three times. -->
+            <TextBlock x:Name="ParentCaption" Style="{StaticResource DimLabel}" Text="It hangs off"
+                       Margin="0,0,0,4" />
+            <v:DropDownField x:Name="ParentBox" DisplayPath="Title" SelectionChanged="Parent_Changed"
+                             ToolTip="Which component this one belongs to — a window hangs off its door, a plate off the body." />
+            <TextBlock x:Name="ParentHint" Style="{StaticResource DimLabel}" Margin="0,6,0,0"
+                       TextWrapping="Wrap" />
+
+            <TextBlock x:Name="ErrorLabel" Foreground="{StaticResource StatusErrorText}" FontSize="11.5"
+                       Margin="0,12,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
+                BorderThickness="0,1,0,0" Padding="24,14">
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"
+                           TextWrapping="Wrap" VerticalAlignment="Center"
+                           Text="The bone and its geometry are not touched. Then Build." />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
+                            Content="Cancel" Click="Cancel_Click" />
+                    <Button Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                            Content="Give it a part" IsDefault="True" Click="Accept_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

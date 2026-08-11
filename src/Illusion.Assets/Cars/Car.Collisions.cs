@@ -117,7 +117,8 @@ public sealed partial class Car
                 shape == CarCollisionShape.Hull
                     ? "a cooked hull cannot be resized — the cooker the toolkit ships only cooks triangle "
                         + "meshes, so this shape cannot be made again at another size"
-                    : null);
+                    : null,
+                HandleOf(record));
         }
 
         // Glass and zones describe themselves, in the space of the part their part hangs off. Restating that
@@ -141,6 +142,18 @@ public sealed partial class Car
             role, CarCollisionShape.Box, volume.Size, placement,
             component.Id, part.Index, volume.Index, readOnly);
     }
+
+    /// <summary>
+    /// The frame that stands where a solid's shape does — the handle the viewport hands its gizmo, found the
+    /// way the graph itself links the two: the record's own FILE hash is what the mirror stub names.
+    /// </summary>
+    /// <returns>The stub's name hash, or 0 when the archive carries no stub for this record — which is the
+    /// case for a shape some other writer placed without one.</returns>
+    private ulong HandleOf(CarShapeRecord record) =>
+        _stubsByFile.TryGetValue(record.Shape.Hash, out FrameObjectCollision? stub)
+        && stub.Name?.String is { Length: > 0 } name
+            ? Fnv64.Hash(name)
+            : 0;
 
     private void ReadShapes()
     {
@@ -507,13 +520,20 @@ public sealed partial class Car
     private static Vector3 Extents(CarCollisionRole role, Vector3 fullSize) =>
         role == CarCollisionRole.Body ? new Vector3(0.01f) : fullSize;
 
-    /// <summary>How many volumes of the whole car name one shape record — what decides whether removing a
-    /// collision may take the record with it.</summary>
-    private int NamesOf(ulong dataHash)
+    /// <summary>
+    /// How many volumes of the whole car name one shape record — what decides whether removing a collision
+    /// may take the record with it.
+    /// </summary>
+    /// <param name="besides">A part to leave out of the count, or -1 to count them all. Removing one VOLUME
+    /// asks whether it is the last naming the record; removing a whole PART asks whether anything outside
+    /// that part names it, and a component whose own two volumes share a record answers those two
+    /// differently.</param>
+    private int NamesOf(ulong dataHash, int besides = -1)
     {
         int found = 0;
         foreach (CarDeformPart part in Prefab.CarDeformParts)
         {
+            if (part.Index == besides) continue;
             foreach (CarPhysicsVolume volume in part.Volumes)
             {
                 if (volume.ShapeHash == dataHash) found++;

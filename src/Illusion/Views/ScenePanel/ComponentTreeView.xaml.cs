@@ -120,6 +120,12 @@ public partial class ComponentTreeView : UserControl
 
     private void ShowInRaw_Click(object sender, RoutedEventArgs e) => ShowInRawRequested?.Invoke();
 
+    /// <summary>A bare component asked to be made damageable — the host puts the question and applies it.</summary>
+    public event Action<ComponentRowViewModel>? GrantPartRequested;
+
+    /// <summary>A component asked for its deform part to be taken away, demoting it back to bare.</summary>
+    public event Action<ComponentRowViewModel>? RemovePartRequested;
+
     /// <summary>A component was asked for one more collision — the host puts the question and applies it.</summary>
     public event Action<ComponentRowViewModel>? AddCollisionRequested;
 
@@ -167,6 +173,22 @@ public partial class ComponentTreeView : UserControl
         bool onComponent = _components?.Selected != null
             || _components?.SelectedChild is MarkerGroupRowViewModel
             || _components?.SelectedChild is ComponentHandleRowViewModel { HasFields: false };
+
+        // A component either has a deform part or it does not, so exactly one of the two items is ever
+        // offered — a bare one the grant, and one with a part the way back out of it. The body is the
+        // exception on the removing side: every car has exactly one, and every marker whose bone no
+        // component owns hangs off it, so it is shown with the reason rather than silently missing.
+        ComponentRowViewModel? component = Component();
+        bool bare = component is { IsBare: true };
+        GrantPartItem.Visibility = onComponent && bare ? Visibility.Visible : Visibility.Collapsed;
+        RemovePartItem.Visibility = onComponent && !bare && component != null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RemovePartItem.IsEnabled = component is { IsBody: false };
+        RemovePartItem.ToolTip = component is { IsBody: true }
+            ? $"\"{component.Name}\" is this car's body. Every shipped car has exactly one, and the markers "
+                + "of every bone no component owns hang off it."
+            : null;
 
         AddCollisionItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
         AddMarkerItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
@@ -251,6 +273,16 @@ public partial class ComponentTreeView : UserControl
     private void AddCollision_Click(object sender, RoutedEventArgs e)
     {
         if (Component() is { } row) AddCollisionRequested?.Invoke(row);
+    }
+
+    private void GrantPart_Click(object sender, RoutedEventArgs e)
+    {
+        if (Component() is { IsBare: true } row) GrantPartRequested?.Invoke(row);
+    }
+
+    private void RemovePart_Click(object sender, RoutedEventArgs e)
+    {
+        if (Component() is { IsBare: false } row) RemovePartRequested?.Invoke(row);
     }
 
     /// <summary>The component the menu acts on: the selected row, or — on one of the rows that is a statement

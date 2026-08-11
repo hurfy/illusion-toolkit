@@ -96,6 +96,8 @@ public partial class ScenePanel : UserControl
 
         ComponentTree.Attach(_components);
         ComponentTree.ShowInRawRequested += () => _components.IsRaw = true;
+        ComponentTree.GrantPartRequested += GrantPart;
+        ComponentTree.RemovePartRequested += RemovePart;
         ComponentTree.AddCollisionRequested += AddCollision;
         ComponentTree.EditCollisionRequested += EditCollision;
         ComponentTree.RemoveCollisionRequested += RemoveCollision;
@@ -317,6 +319,58 @@ public partial class ScenePanel : UserControl
     {
         if (_syncingMode || _components == null) return;
         _components.IsRaw = ReferenceEquals(sender, RawMode);
+    }
+
+    // ── A bare component's own deform part ──
+
+    /// <summary>
+    /// Asks what kind of part a bare component should be given and which component it hangs off, then hands
+    /// the answer to the aggregate.
+    ///
+    /// <para>
+    /// The dialog stays open on a refusal and says why in place, for the reason the collision one does: the
+    /// modder is still standing in front of the choice that caused it.
+    /// </para>
+    /// </summary>
+    private void GrantPart(ComponentRowViewModel row)
+    {
+        IReadOnlyList<ComponentRowViewModel> parents = _components.Parentable();
+        if (parents.Count == 0)
+        {
+            _viewport.RaiseNotice(
+                "this car has no component with a deform part for a new one to hang off", isError: true);
+            return;
+        }
+
+        var dialog = new ComponentPartWindow(row.Name, parents, _components.BodyRow)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.GrantDeformPart(row, dialog.Kind, dialog.HangsOff, out string? refusal);
+            if (refusal == null)
+            {
+                // The one thing the new part does NOT have. Every one of the 1698 shipped parts carries at
+                // least one collision volume, so a component left without one is a shape no car in the game
+                // is written as — and the modder would find that out by shooting at it.
+                _viewport.RaiseNotice($"\"{row.Name}\" has no collision yet, and every shipped part has one — "
+                    + "give it one with \"Add collision…\" on its row.");
+                return;
+            }
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    /// <summary>Takes a component's deform part away, demoting it back to bare. Nothing is asked — the row
+    /// the menu was opened on IS the answer, and the bone and its geometry are not touched.</summary>
+    private void RemovePart(ComponentRowViewModel row)
+    {
+        _components.RemoveDeformPart(row, out string? refusal);
+        if (refusal != null)
+        {
+            _viewport.RaiseNotice("the deform part was not taken away: " + refusal, isError: true);
+        }
     }
 
     // ── Collision by role and shape ──

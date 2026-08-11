@@ -45,9 +45,22 @@ public sealed class CollisionRowViewModel : INotifyPropertyChanged, IComponentCh
     /// to a door does not empty that door of everything it is made of.</summary>
     public bool HasSearchMatch => Component.HasSearchMatch;
 
-    /// <summary>A collision is not a frame: a self-describing volume has none at all, and the mirror stub of
-    /// a solid one is a copy the modder is deliberately never shown.</summary>
-    public ulong FrameHash => 0;
+    /// <summary>
+    /// The frame the viewport takes hold of when this row is clicked, so that the gizmo moves the COLLISION
+    /// rather than the whole part it belongs to.
+    ///
+    /// <para>
+    /// A solid's is its mirror stub. The modder is still never shown it as a row of its own — it is a handle,
+    /// not a thing of the car — but handing it over is what makes a collision draggable at all: without it the
+    /// selection landed on the component's bone, and dragging that moved the door, or on the body, the whole
+    /// car. Glass and zones have no such frame anywhere in the corpus and are placed by their numbers, which
+    /// is what <see cref="HasHandle"/> is for.
+    /// </para>
+    /// </summary>
+    public ulong FrameHash => Collision.Handle;
+
+    /// <summary>Whether there is anything in the viewport to drag for this collision.</summary>
+    public bool HasHandle => Collision.HasHandle;
 
     private bool _isSelected;
 
