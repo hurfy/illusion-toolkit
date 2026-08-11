@@ -55,7 +55,7 @@ public sealed partial class Car
                 Identify(previous, byAnchor, Anchor(joint, part.Index)),
                 found ?? (bone == 0 ? "(no bone)" : Hex(bone)), bone, joint, resolves,
                 part.Index, part.PartType, part.Kind, rig.Pieces.GetValueOrDefault(bone),
-                Handles(part, rig), Damage(part));
+                Handles(prefab, part, rig), Damage(part), DamageFields(prefab, part));
             components.Add(component);
             componentOfPart[part.Index] = component;
 
@@ -93,7 +93,8 @@ public sealed partial class Car
             int joint = rig.JointOfBone.TryGetValue(bone, out int at) ? at : -1;
             var component = new CarComponent(
                 Identify(previous, byAnchor, Anchor(joint, partIndex: -1)), name, bone, joint,
-                boneResolves: true, partIndex: -1, partType: 0, kind: BareKind, pieces, [], damage: null);
+                boneResolves: true, partIndex: -1, partType: 0, kind: BareKind, pieces, [],
+                damage: null, damageFields: []);
             components.Add(component);
             byBone[bone] = component;
         }
@@ -165,16 +166,24 @@ public sealed partial class Car
         return id;
     }
 
-    private static IReadOnlyList<CarHandle> Handles(CarDeformPart part, Rig rig)
+    private static IReadOnlyList<CarHandle> Handles(PrefabFile prefab, CarDeformPart part, Rig rig)
     {
         if (part.Handles.Count == 0) return [];
+        // The handle's own numbers are addressed FLAT across the car, the way a collision volume is — so the
+        // address is worked out here, once, and never again by whoever edits the handle. The BASE is asked for
+        // once per part rather than once per handle: resolving it walks every part before this one, and a car
+        // with 1698 parts and 1402 handles would otherwise walk the part list 1402 times over.
+        int flat = prefab.CarHandleIndex(part.Index, 0);
         var result = new List<CarHandle>(part.Handles.Count);
         foreach (CarDeformHandle handle in part.Handles)
         {
             result.Add(new CarHandle(
                 handle.Index, handle.JointName,
                 rig.BoneNames.TryGetValue(handle.JointName, out string? name) ? name : Hex(handle.JointName),
-                handle.Range, handle.Intensity, handle.CRadius));
+                handle.Range, handle.Intensity, handle.CRadius)
+            {
+                Fields = HandleFields(prefab, flat + handle.Index),
+            });
         }
         return result;
     }

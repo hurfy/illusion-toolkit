@@ -173,6 +173,83 @@ public sealed partial class PrefabFile
         }
     }
 
+    // ── flat addressing, so a handle is reached the way a collision volume is ──
+
+    /// <summary>How many deform handles the whole car has, counted across every deformable part.</summary>
+    public int CarHandleCount()
+    {
+        List<Native.Model.PrefabDeformPartW>? parts = DeformParts();
+        return parts?.Sum(p => p.SmDeformBones.Count) ?? 0;
+    }
+
+    /// <summary>Which part and which of its handles a flat index means, or null when it is past the end.</summary>
+    public (int Part, int Handle)? CarHandleAt(int flat)
+    {
+        List<Native.Model.PrefabDeformPartW>? parts = DeformParts();
+        if (parts == null || flat < 0) return null;
+        int seen = 0;
+        for (int part = 0; part < parts.Count; part++)
+        {
+            int here = parts[part].SmDeformBones.Count;
+            if (flat < seen + here) return (part, flat - seen);
+            seen += here;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The flat index of a part's handle — the inverse of <see cref="CarHandleAt"/>.
+    /// </summary>
+    /// <param name="handle">Which of that part's handles. A COUNT is allowed, naming the seat one more would
+    /// take, so that a caller can address the end of a part's list; anything past that is -1 rather than an
+    /// address inside the NEXT part's handles, which is how a modder ends up tuning a panel they never opened.</param>
+    /// <returns>-1 when there is no such part or no such handle.</returns>
+    public int CarHandleIndex(int part, int handle)
+    {
+        List<Native.Model.PrefabDeformPartW>? parts = DeformParts();
+        if (parts == null || part < 0 || part >= parts.Count) return -1;
+        if (handle < 0 || handle > parts[part].SmDeformBones.Count) return -1;
+        int seen = 0;
+        for (int i = 0; i < part; i++) seen += parts[i].SmDeformBones.Count;
+        return seen + handle;
+    }
+
+    private float GetHandleValue(CarValueSlot slot, int flat, int axis)
+    {
+        if (Handle(flat) is not { } handle) return float.NaN;
+        return slot switch
+        {
+            CarValueSlot.DeformHandleIntensity => handle.Intensity,
+            CarValueSlot.DeformHandleRadius => handle.CRadius,
+            _ => axis switch { 0 => handle.Range.X, 1 => handle.Range.Y, _ => handle.Range.Z },
+        };
+    }
+
+    private bool SetHandleValue(CarValueSlot slot, int flat, int axis, float value)
+    {
+        if (Handle(flat) is not { } handle) return false;
+        switch (slot)
+        {
+            case CarValueSlot.DeformHandleIntensity: handle.Intensity = value; return true;
+            case CarValueSlot.DeformHandleRadius: handle.CRadius = value; return true;
+            default:
+                handle.Range = axis switch
+                {
+                    0 => handle.Range with { X = value },
+                    1 => handle.Range with { Y = value },
+                    _ => handle.Range with { Z = value },
+                };
+                return true;
+        }
+    }
+
+    private Native.Model.PrefabSmDeformBoneW? Handle(int flat)
+    {
+        if (CarHandleAt(flat) is not { } at) return null;
+        List<Native.Model.PrefabDeformPartW>? parts = DeformParts();
+        return parts?[at.Part].SmDeformBones[at.Handle];
+    }
+
     /// <summary>The part kinds, as the reference toolkit reads <c>S_InitDeformPart.Unk0</c>.</summary>
     private static string PartKindName(uint type) => type switch
     {

@@ -50,18 +50,30 @@ public sealed record CarField(
     /// <summary>Which row of that slot's list. Flat across the car, the way the slot itself is addressed.</summary>
     internal int At { get; init; }
 
+    /// <summary>
+    /// Which part of the addressed value this field is: an axis of a point, or the BIT a flag lives in inside a
+    /// word that holds several. Zero — the whole value — for everything else.
+    ///
+    /// <para>
+    /// A <see cref="CarFieldKind.Point"/> ignores it and writes all three axes; nothing else has ever needed
+    /// more than the first. A flag does: five of a deform part's flags share one word, and each has to be
+    /// written without disturbing the other thirty-one bits — including the meanings nobody has named yet.
+    /// </para>
+    /// </summary>
+    internal int Axis { get; init; }
+
     /// <summary>The value as a row shows it.</summary>
     public string Text => Kind switch
     {
         CarFieldKind.Flag => Number != 0f ? "yes" : "no",
         CarFieldKind.Count => ((int)Number).ToString(CultureInfo.InvariantCulture),
-        CarFieldKind.Point => $"{Axis(Point.X)}, {Axis(Point.Y)}, {Axis(Point.Z)}",
+        CarFieldKind.Point => $"{Shown(Point.X)}, {Shown(Point.Y)}, {Shown(Point.Z)}",
         _ => Number.ToString("0.###", CultureInfo.InvariantCulture),
     };
 
     public override string ToString() => $"{Label} {Text}";
 
-    private static string Axis(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string Shown(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
 }
 
 /// <summary>

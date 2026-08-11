@@ -900,10 +900,16 @@ public sealed partial class Car
 
     // ── snapshots ──
 
-    /// <summary>Everything the named structures hold right now, as bytes — see <see cref="CarState"/>
-    /// for why an undo is this rather than a reversed derivation.</summary>
+    /// <summary>
+    /// Everything the named structures hold right now, as bytes — see <see cref="CarState"/> for why an undo is
+    /// this rather than a reversed derivation.
+    /// </summary>
+    /// <param name="boxes">Whether the model's per-piece hit boxes are part of this state. False for an intent
+    /// that cannot have changed one, and that is not a nicety: restoring a state that carries them writes them
+    /// back over the live model and marks the FRAME GRAPH dirty, so an undo of a mass would demand — and get —
+    /// a rewritten frame resource for an edit that never touched geometry.</param>
     private CarState Snapshot(
-        IReadOnlyList<string> shapeFiles, IReadOnlyList<FrameObjectBase> frames)
+        IReadOnlyList<string> shapeFiles, IReadOnlyList<FrameObjectBase> frames, bool boxes = true)
     {
         var shapes = new List<(string, byte[]?)>(shapeFiles.Count);
         foreach (string path in shapeFiles) shapes.Add((path, ShapeBytes(path)));
@@ -917,7 +923,7 @@ public sealed partial class Car
                 frame is FrameObjectDummy dummy ? dummy.Bounds : null));
         }
 
-        return new CarState(Prefab.ToBytes(), shapes, placed, CopyBoxes());
+        return new CarState(Prefab.ToBytes(), shapes, placed, boxes ? CopyBoxes() : null);
     }
 
     /// <summary>The model's hit boxes as they stand, copied rather than referenced — the array is rewritten

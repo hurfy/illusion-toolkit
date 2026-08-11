@@ -13,6 +13,8 @@
         <v:ComponentTintConverter x:Key="ComponentTint" />
         <v:MarkerGlyphConverter x:Key="MarkerGlyph" />
         <v:MarkerTintConverter x:Key="MarkerTint" />
+        <v:DamageGlyphConverter x:Key="DamageGlyph" />
+        <v:HandleGlyphConverter x:Key="HandleGlyph" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
 
@@ -40,6 +42,12 @@
                      the frame tree's own menu, and a car opening on its components would otherwise hide the
                      only path to those behind a switch nobody has been told about. The selected component's
                      frame is what the frame tree lands on, so the way back is one click. -->
+                <!-- Three of these items are DISABLED precisely when they have a reason to give — a cooked hull
+                     that cannot be resized, a marker that carries nothing to type, a component that does not
+                     crumple — and WPF drops a tooltip on a disabled element unless it is told not to, so each
+                     of those three asks for ShowOnDisabled. Set on the ITEMS and not on this menu: the property
+                     inherits in principle and measurably does not reach a ContextMenu's items — the component
+                     tree probe reads it back as False there — so the reason was written and never readable. -->
                 <ContextMenu Opened="Menu_Opened">
                     <MenuItem x:Name="AddCollisionItem" Header="Add collision…" Click="AddCollision_Click" />
                     <!-- The roles are filled in from the aggregate rather than spelled here: the two it
@@ -47,12 +55,19 @@
                          shipped ones and a light is a slot rather than a row. -->
                     <MenuItem x:Name="AddMarkerItem" Header="Add marker" />
                     <MenuItem x:Name="EditCollisionItem" Header="Size and position…"
-                              Click="EditCollision_Click" />
+                              ToolTipService.ShowOnDisabled="True" Click="EditCollision_Click" />
                     <MenuItem x:Name="RemoveCollisionItem" Header="Remove collision"
                               Click="RemoveCollision_Click" />
-                    <MenuItem x:Name="EditMarkerItem" Header="Marker data…" Click="EditMarker_Click" />
+                    <MenuItem x:Name="EditMarkerItem" Header="Marker data…"
+                              ToolTipService.ShowOnDisabled="True" Click="EditMarker_Click" />
                     <MenuItem x:Name="RemoveMarkerItem" Header="Remove marker" Click="RemoveMarker_Click" />
                     <MenuItem x:Name="EditDataRowItem" Header="Row…" Click="EditDataRow_Click" />
+                    <!-- What this component does when it is hit, and how far it caves in. Both act on the row
+                         beneath the component rather than on the component itself, because both are the
+                         component's own deform part and a bare one has neither. -->
+                    <MenuItem x:Name="EditDamageItem" Header="Damage…" Click="EditDamage_Click" />
+                    <MenuItem x:Name="EditHandleItem" Header="Crumple…"
+                              ToolTipService.ShowOnDisabled="True" Click="EditHandle_Click" />
                     <Separator />
                     <MenuItem Header="Show in Raw tree" Click="ShowInRaw_Click" />
                 </ContextMenu>
@@ -190,6 +205,82 @@
                         </Path>
                     </Grid>
                 </HierarchicalDataTemplate>
+
+                <!-- What this component does when it is HIT: its own mass, resistance, speed window, energy
+                     and centre of mass, its effect group and its flags. The row says the part KIND beside it,
+                     which is the one thing the component's name cannot tell the modder — a cover names doorBL
+                     on seven shipped cars, and bumpers name bones called rezerva and krytmotoru. -->
+                <DataTemplate DataType="{x:Type vm:ComponentDamageRowViewModel}">
+                    <Grid ToolTip="{Binding Tip}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                              Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stroke="{Binding Kind, Converter={StaticResource ComponentTint}}"
+                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Data="{Binding Kind, Converter={StaticResource DamageGlyph}}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                   Foreground="{StaticResource TextMuted}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="2" Text="{Binding Summary}"
+                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   VerticalAlignment="Center" Margin="8,0,4,0" />
+                    </Grid>
+                </DataTemplate>
+
+                <!-- One bone this component crumples AROUND, with how far it travels — or the plain statement
+                     that it crumples around none, which is how 1093 of the 1698 shipped parts are written and
+                     is therefore worth saying rather than showing as an empty list.
+                     A handle is NOT a component: deform_doorFL beside doorFL reads as two doors. -->
+                <DataTemplate DataType="{x:Type vm:ComponentHandleRowViewModel}">
+                    <Grid ToolTip="{Binding Tip}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Path Grid.Column="0" Width="12" Height="12" Stretch="Uniform"
+                              Fill="Transparent" StrokeThickness="1.15" StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Stroke="{StaticResource TextFaint}"
+                              VerticalAlignment="Center" Margin="0,0,7,0" SnapsToDevicePixels="True"
+                              Data="{Binding Label, Converter={StaticResource HandleGlyph}}">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Setter Property="Opacity" Value="1" />
+                                    <Style.Triggers>
+                                        <!-- The statement that there are none is the same mark, drawn faint:
+                                             one question, two answers, rather than two unrelated rows. -->
+                                        <DataTrigger Binding="{Binding HasFields}" Value="False">
+                                            <Setter Property="Opacity" Value="0.45" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
+                        <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasFields}" Value="False">
+                                            <Setter Property="Foreground" Value="{StaticResource TextGhost}" />
+                                            <Setter Property="FontStyle" Value="Italic" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Grid.Column="2" Text="{Binding Summary}"
+                                   Foreground="{StaticResource TextFaint}" FontSize="10.5"
+                                   VerticalAlignment="Center" Margin="8,0,4,0" />
+                    </Grid>
+                </DataTemplate>
 
                 <!-- A collision of that component: what it is, what form it takes, and how big.
                      By ROLE and SHAPE — never the stored type, never whose bone space the matrix is in, and

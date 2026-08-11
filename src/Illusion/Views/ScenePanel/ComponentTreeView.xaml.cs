@@ -141,6 +141,12 @@ public partial class ComponentTreeView : UserControl
     /// <summary>One of a component's own prefab rows was asked for new values.</summary>
     public event Action<ComponentDataRowViewModel>? EditDataRowRequested;
 
+    /// <summary>A component's own damage parameters were asked for new values.</summary>
+    public event Action<ComponentDamageRowViewModel>? EditDamageRequested;
+
+    /// <summary>One of its deform handles was asked for new crumple parameters.</summary>
+    public event Action<ComponentHandleRowViewModel>? EditHandleRequested;
+
     // Which items the menu offers depends on what is under the cursor: a component can be given a collision
     // or a marker, and each of its child rows can be edited or taken away. An item that is shown while it
     // cannot do anything is a promise the menu does not keep — a read-only collision (a cooked hull) can only
@@ -154,8 +160,13 @@ public partial class ComponentTreeView : UserControl
         // be done on the row it heads is the component's. So it offers what the component offers — without
         // which right-clicking "Climb boxes (4)" produced a menu holding one item, on exactly the row where
         // adding a climb box is the obvious thing to want.
+        //
+        // The row that says a component does not crumple is the same case for the same reason: it is a
+        // statement about the component and carries nothing of its own, so right-clicking it would otherwise
+        // open a menu in which nothing at all can be done.
         bool onComponent = _components?.Selected != null
-            || _components?.SelectedChild is MarkerGroupRowViewModel;
+            || _components?.SelectedChild is MarkerGroupRowViewModel
+            || _components?.SelectedChild is ComponentHandleRowViewModel { HasFields: false };
 
         AddCollisionItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
         AddMarkerItem.Visibility = onComponent ? Visibility.Visible : Visibility.Collapsed;
@@ -172,6 +183,18 @@ public partial class ComponentTreeView : UserControl
             : null;
         EditDataRowItem.Visibility = data != null ? Visibility.Visible : Visibility.Collapsed;
         EditDataRowItem.Header = data == null ? "Row…" : data.Label + "…";
+
+        ComponentDamageRowViewModel? damage = _components?.SelectedDamage;
+        ComponentHandleRowViewModel? handle = _components?.SelectedHandle;
+        EditDamageItem.Visibility = damage != null ? Visibility.Visible : Visibility.Collapsed;
+        EditHandleItem.Visibility = handle != null ? Visibility.Visible : Visibility.Collapsed;
+        // The row that says a component does not crumple has nothing to type. It is shown greyed rather than
+        // hidden, because "nothing can be done here" is the answer the row itself is making.
+        EditHandleItem.IsEnabled = handle is { HasFields: true };
+        EditHandleItem.ToolTip = handle is { HasFields: false }
+            ? $"\"{handle.Component.Name}\" has no deform handle, so there is nothing to tune. Adding one "
+                + "means adding a deform_ bone in Blender."
+            : null;
 
         if (AddMarkerItem.Items.Count == 0) FillAddMarker();
     }
@@ -215,16 +238,31 @@ public partial class ComponentTreeView : UserControl
         if (_components?.SelectedDataRow is { } row) EditDataRowRequested?.Invoke(row);
     }
 
+    private void EditDamage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedDamage is { } row) EditDamageRequested?.Invoke(row);
+    }
+
+    private void EditHandle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_components?.SelectedHandle is { Handle: not null } row) EditHandleRequested?.Invoke(row);
+    }
+
     private void AddCollision_Click(object sender, RoutedEventArgs e)
     {
         if (Component() is { } row) AddCollisionRequested?.Invoke(row);
     }
 
-    /// <summary>The component the menu acts on: the selected row, or — on a marker group's heading — the
-    /// component that heading belongs to.</summary>
+    /// <summary>The component the menu acts on: the selected row, or — on one of the rows that is a statement
+    /// ABOUT a component rather than a thing of its own — the component it is a statement about.</summary>
     private ComponentRowViewModel? Component() =>
         _components?.Selected
-        ?? (_components?.SelectedChild as MarkerGroupRowViewModel)?.Component;
+        ?? (_components?.SelectedChild as MarkerGroupRowViewModel)?.Component
+        ?? (_components?.SelectedChild as ComponentHandleRowViewModel) switch
+        {
+            { HasFields: false } row => row.Component,
+            _ => null,
+        };
 
     private void EditCollision_Click(object sender, RoutedEventArgs e)
     {

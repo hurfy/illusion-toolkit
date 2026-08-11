@@ -71,6 +71,7 @@ internal static class ComponentTreeProbes
             CheckSelection(car, Check, sb);
             CheckCollisions(car, Check, sb);
             CheckMarkers(car, Check, sb);
+            CheckDamage(car, Check, sb);
             CheckRemembered(car, Check, sb);
             CheckNotACar(folder, Check, sb);
             CheckRestitch(car, Check, sb);
@@ -508,6 +509,125 @@ internal static class ComponentTreeProbes
         }
         sb.AppendLine();
     }
+
+    // ── what a component does when it is hit, and how it crumples ──
+
+    /// <summary>
+    /// Whether the damage model has a place on the row it belongs to: one damage row per component with a
+    /// deform part, one row per deform handle, and — on the 1093 of 1698 parts that carry no handle — the row
+    /// that says the component does not crumple rather than an empty list. A bare component has neither, and
+    /// the reading order puts what a component IS above what it is made of.
+    /// </summary>
+    private static void CheckDamage(FileInfo car, Action<string, bool, string> check, StringBuilder sb)
+    {
+        sb.AppendLine("════ damage and crumple, on the component ════");
+        if (!Stage(car, out ScenePanel? panel, out _)) return;
+        ComponentTreeViewModel components = panel!.Components;
+        if (components.Car is not { } stitched) { check("the car stitched", false, ""); return; }
+
+        List<ComponentRowViewModel> rows = [.. components.Roots.SelectMany(r => r.SelfAndDescendants())];
+        List<ComponentDamageRowViewModel> damage = [.. rows.Select(r => r.Damage).OfType<ComponentDamageRowViewModel>()];
+        List<ComponentHandleRowViewModel> handles = [.. rows.SelectMany(r => r.HandleRows)];
+        int parts = rows.Count(r => !r.IsBare);
+        int crumpling = handles.Count(h => h.HasFields);
+        int silent = handles.Count(h => !h.HasFields);
+
+        sb.AppendLine($"  {rows.Count} components ({parts} with a deform part): {damage.Count} damage rows, "
+            + $"{crumpling} handle rows, {silent} \"does not crumple\" rows");
+        sb.AppendLine("  e.g. " + string.Join("  ", damage.Take(4).Select(d => $"{d.Component.Name}: {d.Summary}")));
+        sb.AppendLine("  handles: " + string.Join("  ", handles.Take(6).Select(h => $"{h.Label} [{h.Summary}]")));
+
+        check("every component with a deform part has its damage parameters under it, and no bare one does",
+            damage.Count == parts && parts > 0 && damage.All(d => d.HasFields && d.Fields.Count > 0), $"{damage.Count} of {parts}");
+        check("the damage row says the part KIND, which the component's name cannot",
+            damage.All(d => d.Kind.Length > 0 && d.Summary.Contains(d.Kind, StringComparison.Ordinal)), "");
+        check("every deform handle the aggregate read has a row under its component",
+            crumpling == stitched.Components.Sum(c => c.Handles.Count) && crumpling > 0,
+            $"{crumpling} rows over {stitched.Components.Sum(c => c.Handles.Count)} handles");
+        check("and every one carries its three numbers",
+            handles.Where(h => h.HasFields).All(h => h.Handle?.Fields.Count == 3), "");
+        // The empty state is the commoner answer of the two and is a row rather than a silence.
+        check("a component with a deform part and no handle says it does not crumple",
+            silent == stitched.Components.Count(c => !c.IsBare && !c.Crumples) && silent > 0,
+            $"{silent} rows");
+        check("…and that row is the only one under a component with nothing to type",
+            handles.Where(h => !h.HasFields).All(h => h.Handle == null && h.Tip.Length > 20), "");
+
+        // What a component IS comes above what it is made of. Asked of the rows the tree actually binds, since
+        // that is the order the modder reads and it is assembled by rank rather than by call order.
+        ComponentRowViewModel? rich = rows.FirstOrDefault(
+            r => r.Damage != null && r.HandleRows.Count > 0 && r.Collisions.Count > 0);
+        if (rich != null)
+        {
+            List<object> bound = [.. rich.ChildrenView.Cast<object>()];
+            sb.AppendLine($"  \"{rich.Name}\" binds: " + string.Join(" · ", bound.Select(Kind)));
+            int first = bound.FindIndex(o => o is ComponentDamageRowViewModel);
+            int handle = bound.FindIndex(o => o is ComponentHandleRowViewModel);
+            int collision = bound.FindIndex(o => o is CollisionRowViewModel);
+            check("the damage row comes first, its handles next, and what it is made of after them",
+                first == 0 && handle > first && collision > handle, string.Join(" · ", bound.Select(Kind)));
+        }
+
+        // Selecting either row leaves the viewport on the component's own bone: a handle names a bone the tree
+        // shows no row for, and the gizmo, the property tabs and Delete all follow the viewport's selection.
+        ContextMenu? menu = panel.ComponentTree.ComponentTree.ContextMenu;
+        MenuItem? damageItem = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Damage…");
+        MenuItem? handleItem = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Crumple…");
+        ComponentHandleRowViewModel? real = handles.FirstOrDefault(h => h.HasFields);
+        if (menu != null && damage.Count > 0 && real != null)
+        {
+            components.Select(damage[0]);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("on the damage row the menu offers its parameters and nothing a component takes",
+                damageItem?.Visibility == Visibility.Visible
+                && handleItem?.Visibility == Visibility.Collapsed
+                && ReferenceEquals(components.SelectedDamage, damage[0]), "");
+
+            components.Select(real);
+            menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+            check("on a handle it offers the crumple parameters",
+                handleItem is { Visibility: Visibility.Visible, IsEnabled: true }
+                && damageItem?.Visibility == Visibility.Collapsed
+                && ReferenceEquals(components.SelectedHandle, real), "");
+
+            ComponentHandleRowViewModel? empty = handles.FirstOrDefault(h => !h.HasFields);
+            if (empty != null)
+            {
+                components.Select(empty);
+                menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+                check("and on the row that says a component does not crumple it says why instead",
+                    handleItem is { IsEnabled: false } && handleItem.ToolTip is string { Length: > 10 },
+                    handleItem?.ToolTip as string ?? "no reason");
+                // …and that reason is actually READABLE. WPF drops a tooltip on a disabled element unless it is
+                // told not to, so a reason written onto a greyed item is a reason nobody can ever see — which
+                // is what every one of these items was until the menu asked for ShowOnDisabled.
+                check("…and a disabled item's reason can be read at all, which WPF suppresses by default",
+                    ToolTipService.GetShowOnDisabled(handleItem!),
+                    $"ShowOnDisabled: {ToolTipService.GetShowOnDisabled(handleItem!)}");
+                // The row is a statement ABOUT the component and carries nothing of its own, so the menu falls
+                // back to what the component offers rather than opening with nothing in it.
+                check("…and the menu still offers what the component itself takes, rather than nothing at all",
+                    menu.Items.OfType<MenuItem>().Any(
+                        m => (m.Header as string) == "Add collision…" && m.Visibility == Visibility.Visible),
+                    $"{menu.Items.OfType<MenuItem>().Count(m => m.Visibility == Visibility.Visible)} items offered");
+            }
+        }
+        sb.AppendLine();
+    }
+
+    /// <summary>What a bound row IS, in one word — for the line that shows the reading order.</summary>
+    private static string Kind(object row) => row switch
+    {
+        ComponentDamageRowViewModel => "damage",
+        ComponentHandleRowViewModel handle => handle.HasFields ? "handle" : "no-crumple",
+        CollisionRowViewModel => "collision",
+        ComponentDataRowViewModel => "row",
+        MarkerGroupRowViewModel => "markers",
+        ComponentRowViewModel => "component",
+        _ => "?",
+    };
 
     // ── the switch's position is remembered per archive ──
 

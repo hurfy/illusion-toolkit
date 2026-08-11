@@ -62,7 +62,7 @@ public sealed class CarComponent
     internal CarComponent(
         ComponentId id, string name, ulong boneHash, int boneJoint, bool boneResolves,
         int partIndex, uint partType, string kind, int pieces,
-        IReadOnlyList<CarHandle> handles, CarDamage? damage)
+        IReadOnlyList<CarHandle> handles, CarDamage? damage, IReadOnlyList<CarField> damageFields)
     {
         Id = id;
         Name = name;
@@ -75,6 +75,7 @@ public sealed class CarComponent
         Pieces = pieces;
         Handles = handles;
         Damage = damage;
+        DamageFields = damageFields;
     }
 
     /// <summary>Who this is, for as long as the archive is open. See <see cref="ComponentId"/>.</summary>
@@ -120,6 +121,27 @@ public sealed class CarComponent
 
     /// <summary>What it takes to move this component, or null when it has no deform part.</summary>
     public CarDamage? Damage { get; }
+
+    /// <summary>
+    /// The same, as numbers a modder can edit where the component sits — its mass and centre of mass, its
+    /// resistance, its speed window, its energy start and drop, its effect group and its named flags.
+    ///
+    /// <para>
+    /// Empty on a bare component, which has no deform part for any of them to be on. Non-empty and SHORTER
+    /// than usual on a part the file carries no tuning block for: the centre of mass, the effect group and the
+    /// flags are on the part itself and are always there, while the six tuning numbers are not.
+    /// </para>
+    /// <para>
+    /// The two labelled "of this component" are deliberately not called <c>Mass</c> and <c>Centre of mass</c>:
+    /// the car CLASS carries a mass and a centre of mass of its own in its EDS record, which the Tuning tab
+    /// shows, and they are different quantities on the same car.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<CarField> DamageFields { get; }
+
+    /// <summary>Whether this component crumples at all. 1093 of the 1698 shipped parts do not, so it is the
+    /// commoner answer of the two and is worth stating rather than showing as an empty list.</summary>
+    public bool Crumples => Handles.Count > 0;
 
     /// <summary>The component this one hangs off — a window's door, a patch's bonnet.</summary>
     public CarComponent? Parent { get; internal set; }
@@ -185,8 +207,14 @@ public sealed class CarComponent
 /// 249 carry two or more; a handle is never also some part's own bone (0 of 1402).
 /// </para>
 /// </summary>
+/// <param name="Index">Its place in its part's own handle list.</param>
 public sealed record CarHandle(int Index, ulong BoneHash, string Name, Vector3 Range, float Intensity,
-    float Radius);
+    float Radius)
+{
+    /// <summary>Its three numbers as a modder edits them — the range, the intensity and the radius, each
+    /// carrying the address it is written back through.</summary>
+    public IReadOnlyList<CarField> Fields { get; init; } = [];
+}
 
 /// <summary>
 /// A component's own damage parameters — the damage model's, per deform part.

@@ -799,6 +799,17 @@ internal static class ProbeRunner
                 CarMarkerProbes.RunCarMarkersProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // What a component does when it is HIT: the census of what the shipped parts carry (which flag bits
+            // they set, how many crumple at all, which have no tuning block), then every damage parameter and
+            // every handle number written, saved and read back off the archive — plus the proof that a flag
+            // moves one bit of a thirty-two-bit word, that an edit leaves every other component as it was, and
+            // the refusals. The focus car's working copy is mirrored into the temp directory, so the game's
+            // folders are never written to. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_car_damage.txt
+            case "--probe-car-damage":
+                CarDamageProbes.RunCarDamageProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt

@@ -103,6 +103,8 @@ public partial class ScenePanel : UserControl
         ComponentTree.EditMarkerRequested += EditMarker;
         ComponentTree.RemoveMarkerRequested += RemoveMarker;
         ComponentTree.EditDataRowRequested += EditDataRow;
+        ComponentTree.EditDamageRequested += EditDamage;
+        ComponentTree.EditHandleRequested += EditHandle;
         // An edit rebuilds the rows around a car that has gained or lost something, and the selection has to
         // be resolved onto the new rows — the same treatment a scene change gets, minus the scroll.
         _components.CarEdited += () =>
@@ -419,6 +421,53 @@ public partial class ScenePanel : UserControl
         while (dialog.ShowDialog() == true)
         {
             _components.SetDataRow(row, dialog.Values, out string? refusal);
+            if (refusal == null) return;
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    // ── Damage: what a component does when it is hit ──
+
+    /// <summary>
+    /// A component's own damage parameters. The caption states the PART KIND, because that is the one thing
+    /// the component's name cannot tell the modder — a cover names <c>doorBL</c> on seven shipped cars — and
+    /// this is the moment they are about to change how it behaves.
+    /// </summary>
+    private void EditDamage(ComponentDamageRowViewModel row)
+    {
+        var dialog = new CarFieldsWindow(
+            $"Damage on {row.Component.Name}",
+            $"\"{row.Component.Name}\" is a {row.Kind} — the file's own word for it, not a reading of its "
+            + "name. These are what it takes to move THIS panel when it is hit. The car's own mass and centre "
+            + "of mass are a different pair of numbers, in the Tuning tab.",
+            row.Fields)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.SetDamage(row, dialog.Values, out string? refusal);
+            if (refusal == null) return;
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    /// <summary>One deform handle: how far the bone travels, how hard it resists, and over what radius the
+    /// panel follows it.</summary>
+    private void EditHandle(ComponentHandleRowViewModel row)
+    {
+        if (row.Handle is not { } handle) return;
+        var dialog = new CarFieldsWindow(
+            $"Crumple around {handle.Name}",
+            $"\"{row.Component.Name}\" caves in around the bone \"{handle.Name}\" when it is hit. These three "
+            + "numbers are the whole of how far and how hard.",
+            handle.Fields)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.SetHandle(row, dialog.Values, out string? refusal);
             if (refusal == null) return;
             dialog = dialog.Again(refusal);
         }

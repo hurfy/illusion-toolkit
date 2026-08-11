@@ -25,11 +25,14 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     private readonly List<CollisionRowViewModel> _collisions = [];
     private readonly List<ComponentDataRowViewModel> _data = [];
     private readonly List<MarkerGroupRowViewModel> _markers = [];
+    private readonly List<ComponentHandleRowViewModel> _handles = [];
+    private ComponentDamageRowViewModel? _damage;
 
     /// <summary>
-    /// What the tree actually binds, in the order a modder reads the component: what it is made of first —
-    /// its collisions, then the prefab rows that name its own bone, then the markers that hang off it grouped
-    /// by role — and last the components hanging under it.
+    /// What the tree actually binds, in the order a modder reads the component: what it IS first — how it
+    /// behaves when hit and how it crumples — then what it is made of: its collisions, the prefab rows that
+    /// name its own bone, and the markers that hang off it grouped by role. The components hanging under it come
+    /// last.
     ///
     /// <para>
     /// A child component comes last because it is a thing of its own that happens to hang here: a window under
@@ -37,6 +40,29 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     /// </para>
     /// </summary>
     private readonly List<object> _rows = [];
+
+    /// <summary>
+    /// Where each kind of row sits in that reading order. The rows are INSERTED by rank rather than appended,
+    /// so the order holds however the tree happens to fill them in — six kinds of child row is more arithmetic
+    /// than is worth keeping in the caller's head, and getting it wrong is a tree that reads differently
+    /// depending on what a car happens to carry.
+    /// </summary>
+    private static int Rank(object row) => row switch
+    {
+        ComponentDamageRowViewModel => 0,
+        ComponentHandleRowViewModel => 1,
+        CollisionRowViewModel => 2,
+        ComponentDataRowViewModel => 3,
+        MarkerGroupRowViewModel => 4,
+        _ => 5,
+    };
+
+    private void Insert(object row)
+    {
+        int rank = Rank(row);
+        int at = _rows.FindIndex(existing => Rank(existing) > rank);
+        _rows.Insert(at < 0 ? _rows.Count : at, row);
+    }
 
     internal ComponentRowViewModel(
         CarComponent component, ComponentRowViewModel? parent, IReadOnlyList<CarFault> faults)
@@ -63,6 +89,23 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
 
     /// <summary>The markers that hang off this component's bone, grouped by role.</summary>
     public IReadOnlyList<MarkerGroupRowViewModel> MarkerGroups => _markers;
+
+    /// <summary>What this component does when it is hit, or null on a bare one — which has no deform part for
+    /// any of it to be on.</summary>
+    public ComponentDamageRowViewModel? Damage => _damage;
+
+    /// <summary>
+    /// The rows about how this component crumples: one per deform handle — or, on a component that has none, the
+    /// single row that says so, which is how 1093 of the 1698 shipped parts are written.
+    ///
+    /// <para>
+    /// Called <c>HandleRows</c> and not <c>Handles</c> on purpose. It is NOT
+    /// <see cref="CarComponent.Crumples"/> restated: a component that crumples around nothing has one row here
+    /// and no handle, so a count of these is never a count of handles. Ask <see cref="IComponentChildRow"/>'s
+    /// own <c>HasFields</c> to tell the two apart.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<ComponentHandleRowViewModel> HandleRows => _handles;
 
     private ICollectionView? _childrenView;
 
@@ -154,28 +197,37 @@ public sealed class ComponentRowViewModel : INotifyPropertyChanged
     internal void AddChild(ComponentRowViewModel child)
     {
         _children.Add(child);
-        _rows.Add(child);
+        Insert(child);
     }
 
-    // The three below are inserted at a computed place rather than appended, so the reading order holds
-    // however the tree happens to fill them in: collisions, then the component's own rows, then the marker
-    // groups, and the child components after all of them.
     internal void AddCollision(CollisionRowViewModel collision)
     {
         _collisions.Add(collision);
-        _rows.Insert(_collisions.Count - 1, collision);
+        Insert(collision);
     }
 
     internal void AddData(ComponentDataRowViewModel row)
     {
         _data.Add(row);
-        _rows.Insert(_collisions.Count + _data.Count - 1, row);
+        Insert(row);
     }
 
     internal void AddMarkerGroup(MarkerGroupRowViewModel group)
     {
         _markers.Add(group);
-        _rows.Insert(_collisions.Count + _data.Count + _markers.Count - 1, group);
+        Insert(group);
+    }
+
+    internal void AddDamage(ComponentDamageRowViewModel row)
+    {
+        _damage = row;
+        Insert(row);
+    }
+
+    internal void AddHandle(ComponentHandleRowViewModel row)
+    {
+        _handles.Add(row);
+        Insert(row);
     }
 
     /// <summary>Opens every branch above this row, so a row selected from the viewport is one the tree can

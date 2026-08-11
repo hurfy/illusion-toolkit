@@ -127,14 +127,18 @@ public sealed partial class Car
         }
     }
 
+    /// <param name="axis">Which part of the addressed value this is — an axis, or the BIT a flag lives in
+    /// inside a word that holds several. Zero, the whole value, for all but the deform-part flags.</param>
     private static CarField Number(
-        PrefabFile prefab, string label, string hint, CarFieldKind kind, CarValueSlot slot, int index)
+        PrefabFile prefab, string label, string hint, CarFieldKind kind, CarValueSlot slot, int index,
+        int axis = 0)
     {
-        float value = prefab.GetCarValue(slot, index);
+        float value = prefab.GetCarValue(slot, index, axis);
         return new CarField(label, hint, kind, float.IsNaN(value) ? 0f : value, Vector3.Zero)
         {
             Slot = slot,
             At = index,
+            Axis = axis,
         };
     }
 
@@ -211,7 +215,23 @@ public sealed partial class Car
         return new CarEdit($"{row.Label} changed", before, Snapshot([], []));
     }
 
-    /// <summary>Puts every field where it belongs, refusing the whole set rather than half of it.</summary>
+    /// <summary>
+    /// Puts every field where it belongs, refusing the whole set rather than half of it — and writing only the
+    /// ones whose value is not already there.
+    ///
+    /// <para>
+    /// The skip is not an optimisation, it is what keeps this from undoing somebody else's edit. A field was
+    /// read when the row was BUILT, and the fields come back from a dialog the modder may have had open for a
+    /// while; meanwhile the Prefab tab writes the very same numbers straight to the working copy and re-stitches
+    /// nothing. Writing all of them back would put every value the modder did not touch to what it was when the
+    /// row was built — silently reverting that other edit and reporting success. Writing only what differs makes
+    /// an untouched field mean "leave it alone", which is what it says on screen.
+    /// </para>
+    /// <para>
+    /// The finiteness check stays ahead of the skip: a value that is not a number is refused even when the file
+    /// happens to hold the same nonsense.
+    /// </para>
+    /// </summary>
     private bool Write(IReadOnlyList<CarField> fields, ref string? refusal)
     {
         foreach (CarField field in fields)
@@ -222,10 +242,8 @@ public sealed partial class Car
                 return false;
             }
             bool ok = field.Kind == CarFieldKind.Point
-                ? Prefab.SetCarValue(field.Slot, field.At, 0, field.Point.X)
-                    && Prefab.SetCarValue(field.Slot, field.At, 1, field.Point.Y)
-                    && Prefab.SetCarValue(field.Slot, field.At, 2, field.Point.Z)
-                : Prefab.SetCarValue(field.Slot, field.At, 0, field.Number);
+                ? Put(field, 0, field.Point.X) && Put(field, 1, field.Point.Y) && Put(field, 2, field.Point.Z)
+                : Put(field, field.Axis, field.Number);
             if (!ok)
             {
                 refusal = $"the prefab would not take \"{field.Label}\" — that row is no longer there";
@@ -233,6 +251,15 @@ public sealed partial class Car
             }
         }
         return true;
+    }
+
+    /// <summary>One number of one field, written only when the prefab does not already hold it. A slot that
+    /// answers NaN is one this car has no row for, and saying so is the caller's refusal.</summary>
+    private bool Put(CarField field, int axis, float value)
+    {
+        float has = Prefab.GetCarValue(field.Slot, field.At, axis);
+        if (float.IsNaN(has)) return false;
+        return has == value || Prefab.SetCarValue(field.Slot, field.At, axis, value);
     }
 
     /// <summary>

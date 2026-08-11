@@ -98,6 +98,21 @@ public enum CarValueSlot
     DeformPartFlags,
 
     /// <summary>
+    /// ONE BIT of that flag word, addressed by the <c>axis</c> argument: reads 0 or 1 and writes only that
+    /// bit, leaving the other thirty-one exactly as they were.
+    ///
+    /// <para>
+    /// It exists because <see cref="DeformPartFlags"/> is a <c>uint</c> travelling through a <c>float</c>. A
+    /// float carries 24 bits of mantissa, so a flag word with anything set above the 24th bit does not
+    /// survive the trip — and the highest meaning the reference toolkit names is already 0x40000. Reading a
+    /// word, flipping a bit in it and writing it back through this API would therefore be a silent way to
+    /// lose the bits nobody has named yet, which is precisely the half of the struct the carry-verbatim rule
+    /// is about.
+    /// </para>
+    /// </summary>
+    DeformPartFlagBit,
+
+    /// <summary>
     /// Which EFFECT GROUP a deformable part belongs to — what a shot on it draws.
     /// <para>
     /// Measured, then confirmed in game three times over. Parts sharing this number share their impact
@@ -126,6 +141,18 @@ public enum CarValueSlot
     DeformMass,
     DeformEnergyStart,
     DeformEnergyDrop,
+
+    /// <summary>
+    /// How far one deform handle may travel, per axis — the bone a panel crumples AROUND. Indexed FLAT across
+    /// the whole car, the way a collision volume is: a handle belongs to a part, and one number addresses it.
+    /// </summary>
+    DeformHandleRange,
+
+    /// <summary>How hard that handle resists.</summary>
+    DeformHandleIntensity,
+
+    /// <summary>Over what radius the panel follows it.</summary>
+    DeformHandleRadius,
 
     /// <summary>Where a collision volume sits, in the space of the bone its part is. Indexed FLAT across the
     /// whole car — a volume belongs to a part, but the panel addresses everything by one number.</summary>
@@ -409,6 +436,11 @@ public sealed partial class PrefabFile
         {
             return GetVolumeValue(slot, index, axis);
         }
+        if (slot is CarValueSlot.DeformHandleRange or CarValueSlot.DeformHandleIntensity
+            or CarValueSlot.DeformHandleRadius)
+        {
+            return GetHandleValue(slot, index, axis);
+        }
         if (Wire.Prefabs.FirstOrDefault(p => p.CarInit.Count > 0) is not { } entry) return float.NaN;
         Native.Model.PrefabCarInitW car = entry.CarInit[0];
         Native.Model.PrefabOtherInitW? other = car.Other.Count > 0 ? car.Other[0] : null;
@@ -469,6 +501,8 @@ public sealed partial class PrefabFile
 
             CarValueSlot.DeformPartType when Deform(car) is { } d && In(index, d.Count) => d[index].PartType,
             CarValueSlot.DeformPartFlags when Deform(car) is { } d && In(index, d.Count) => d[index].Flags,
+            CarValueSlot.DeformPartFlagBit when Deform(car) is { } d && In(index, d.Count)
+                && In(axis, 32) => (d[index].Flags >> axis) & 1u,
             CarValueSlot.DeformPartEffectGroup when Deform(car) is { } d && In(index, d.Count) => d[index].Unk19,
             CarValueSlot.DeformCentreOfMass when Deform(car) is { } d && In(index, d.Count)
                 => Axis(d[index].CentreOfMass, axis),
@@ -489,6 +523,11 @@ public sealed partial class PrefabFile
         if (slot is CarValueSlot.CollisionVolumePosition or CarValueSlot.CollisionVolumeSize)
         {
             return SetVolumeValue(slot, index, axis, value);
+        }
+        if (slot is CarValueSlot.DeformHandleRange or CarValueSlot.DeformHandleIntensity
+            or CarValueSlot.DeformHandleRadius)
+        {
+            return SetHandleValue(slot, index, axis, value);
         }
         if (Wire.Prefabs.FirstOrDefault(p => p.CarInit.Count > 0) is not { } entry) return false;
         Native.Model.PrefabCarInitW car = entry.CarInit[0];
@@ -562,8 +601,22 @@ public sealed partial class PrefabFile
 
             case CarValueSlot.DeformPartType when Deform(car) is { } d && In(index, d.Count):
                 d[index].PartType = (uint)Math.Max(0, value); return true;
+            // REFUSED when the word being replaced is too wide for the float it travelled out through, because
+            // then the value coming back was already rounded and writing it would clear bits nobody chose to
+            // clear. Measured over the shipped cars: 438 parts set bit 31 and the widest word is 0x80000508, so
+            // the raw whole-word row would silently drop bit 3 on every one of them. A caller that wants one
+            // flag should address it through DeformPartFlagBit, which cannot round anything.
             case CarValueSlot.DeformPartFlags when Deform(car) is { } d && In(index, d.Count):
+                if (!Exact(d[index].Flags)) return false;
                 d[index].Flags = (uint)Math.Max(0, value); return true;
+            // Only the one bit moves. Everything else in the word is carried, including the meanings nobody
+            // has named — see the slot for why this is not a read, a flip and a write through a float.
+            case CarValueSlot.DeformPartFlagBit when Deform(car) is { } d && In(index, d.Count)
+                && In(axis, 32):
+                d[index].Flags = value != 0f
+                    ? d[index].Flags | (1u << axis)
+                    : d[index].Flags & ~(1u << axis);
+                return true;
             case CarValueSlot.DeformPartEffectGroup when Deform(car) is { } d && In(index, d.Count):
                 d[index].Unk19 = (byte)Math.Clamp(value, 0, byte.MaxValue); return true;
             case CarValueSlot.DeformCentreOfMass when Deform(car) is { } d && In(index, d.Count):
@@ -584,6 +637,14 @@ public sealed partial class PrefabFile
     }
 
     private static bool In(int index, int count) => index >= 0 && index < count;
+
+    /// <summary>Whether a 32-bit word survives the <c>float</c> this API carries values in. It does up to the
+    /// 24th bit and not reliably above it, which is why a flag is addressed one bit at a time.</summary>
+    private static bool Exact(uint word)
+    {
+        float narrowed = word;
+        return (double)narrowed == word;
+    }
 
     /// <summary>The damage model's parts, or null when this car carries none.</summary>
     private static List<Native.Model.PrefabDeformPartW>? Deform(Native.Model.PrefabCarInitW car) =>

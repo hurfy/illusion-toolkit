@@ -115,6 +115,21 @@ public static class ComponentKindIcons
         [CarMarkerRole.Light] = PaletteInk.Gold,
     };
 
+    /// <summary>The mark a hit leaves — for the row that says what a component does when it is shot.</summary>
+    private static readonly Geometry Impact = Parse(
+        "M6,6 L6,2.2 M6,6 L9.4,3.6 M6,6 L9.8,6.8 M6,6 L7.2,9.8 M6,6 L3.2,9.2 M6,6 L2.2,5.2");
+
+    /// <summary>A panel caving in, with the blow pressing into it — for a deform handle's row.</summary>
+    private static readonly Geometry Crumple = Parse(
+        "M3,2.2 C3,4.8 5.6,5.2 5.6,6 C5.6,6.8 3,7.2 3,9.8 M10.2,6 L7,6 M8.4,4.4 L7,6 L8.4,7.6");
+
+    /// <summary>The icon for the row carrying a component's damage parameters.</summary>
+    public static Geometry DamageGlyph() => Impact;
+
+    /// <summary>The icon for one of a component's deform handles — and for the row that says it has none, which
+    /// is the same statement drawn faint.</summary>
+    public static Geometry HandleGlyph() => Crumple;
+
     /// <summary>The icon for a part kind, in the words the format's reader gives it.</summary>
     public static Geometry Glyph(string? kind) =>
         kind != null && Glyphs.TryGetValue(kind, out Geometry? found) ? found : Plate;
@@ -137,6 +152,28 @@ public static class ComponentKindIcons
         geometry.Freeze();      // shared by every row — frozen so WPF may reuse it across threads
         return geometry;
     }
+}
+
+/// <summary>The damage row's icon — a lookup with no argument, so that the geometry stays beside the others
+/// rather than being spelled a second time in XAML.</summary>
+public sealed class DamageGlyphConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        ComponentKindIcons.DamageGlyph();
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>A deform handle's icon, the same either way: a component that does not crumple is drawn the same
+/// mark, faint, which is what makes the two rows read as one question with two answers.</summary>
+public sealed class HandleGlyphConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        ComponentKindIcons.HandleGlyph();
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
 }
 
 /// <summary>Part kind to its icon, for the component tree's rows.</summary>

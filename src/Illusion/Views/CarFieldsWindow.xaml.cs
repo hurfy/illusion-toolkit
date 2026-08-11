@@ -183,13 +183,26 @@ public sealed partial class CarFieldsWindow : Window
             }
             if (row.Field.Kind == CarFieldKind.Point)
             {
-                if (!Read(row.Boxes[0], out float x) || !Read(row.Boxes[1], out float y)
-                    || !Read(row.Boxes[2], out float z))
+                // PER AXIS, not per row. A point is three boxes and the check above is all-or-nothing, so
+                // nudging X alone would re-read Y and Z from their own four-decimal text and move them too:
+                // a centre of mass at 0.317383 becomes 0.3174 because the modder typed in the box beside it.
+                Vector3 point = row.Field.Point;
+                for (int axis = 0; axis < 3; axis++)
                 {
-                    Fail($"Every part of \"{row.Field.Label}\" has to be a number.");
-                    return;
+                    if (string.Equals(row.Boxes[axis].Text, row.Shown[axis], StringComparison.Ordinal)) continue;
+                    if (!Read(row.Boxes[axis], out float typed))
+                    {
+                        Fail($"Every part of \"{row.Field.Label}\" has to be a number.");
+                        return;
+                    }
+                    point = axis switch
+                    {
+                        0 => point with { X = typed },
+                        1 => point with { Y = typed },
+                        _ => point with { Z = typed },
+                    };
                 }
-                values.Add(row.Field with { Point = new Vector3(x, y, z) });
+                values.Add(row.Field with { Point = point });
                 continue;
             }
             if (!Read(row.Boxes[0], out float number))

@@ -207,6 +207,21 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         var row = new ComponentRowViewModel(component, parent, car.FaultsOf(component.Id));
         if (folded.TryGetValue(component.Id.Value, out bool wasFolded) && wasFolded) row.IsExpanded = false;
         _rowsById[component.Id.Value] = row;
+        // What the component IS before what it is made of: how it behaves when hit, then how it crumples. A
+        // bare component has neither — there is no deform part for them to be on — and one with a part but no
+        // handle gets the row that says it does not crumple, which is the commoner answer of the two.
+        if (component.DamageFields.Count > 0) row.AddDamage(new ComponentDamageRowViewModel(row));
+        if (component.Crumples)
+        {
+            foreach (CarHandle handle in component.Handles)
+            {
+                row.AddHandle(new ComponentHandleRowViewModel(handle, row));
+            }
+        }
+        else if (!component.IsBare)
+        {
+            row.AddHandle(new ComponentHandleRowViewModel(handle: null, row));
+        }
         foreach (CarCollision collision in component.Collisions)
         {
             row.AddCollision(new CollisionRowViewModel(collision, row));
@@ -528,6 +543,13 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// <summary>The selected child when it is one of the component's own prefab rows.</summary>
     public ComponentDataRowViewModel? SelectedDataRow => SelectedChild as ComponentDataRowViewModel;
 
+    /// <summary>The selected child when it is the component's damage parameters.</summary>
+    public ComponentDamageRowViewModel? SelectedDamage => SelectedChild as ComponentDamageRowViewModel;
+
+    /// <summary>The selected child when it is one of the component's deform handles — or the row that says it
+    /// has none, which carries nothing to type.</summary>
+    public ComponentHandleRowViewModel? SelectedHandle => SelectedChild as ComponentHandleRowViewModel;
+
     /// <summary>
     /// Points the menu at one of a component's child rows, and the viewport at the frame it is.
     ///
@@ -557,6 +579,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Raise(nameof(SelectedCollision));
         Raise(nameof(SelectedMarker));
         Raise(nameof(SelectedDataRow));
+        Raise(nameof(SelectedDamage));
+        Raise(nameof(SelectedHandle));
     }
 
     /// <summary>Raised after an edit has been written and the car re-stitched, so the panel can rebuild the
@@ -670,6 +694,46 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Commit(car, edit, ref refusal);
     }
 
+    // ── damage ──
+
+    /// <summary>
+    /// Writes a component's own damage parameters — its mass and centre of mass, its resistance, its speed
+    /// window, its energy start and drop, its effect group and its flags.
+    /// </summary>
+    public void SetDamage(
+        ComponentDamageRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
+    {
+        refusal = null;
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Reread(row.Component.Id) is not (Car car, ComponentRowViewModel fresh))
+        {
+            refusal = "that component is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.SetDamage(fresh.Component, fields, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>Writes one deform handle's crumple parameters — how far it travels, how hard it resists, and
+    /// over what radius the panel follows it.</summary>
+    public void SetHandle(
+        ComponentHandleRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
+    {
+        refusal = null;
+        if (row?.Handle == null) { refusal = "no car is open"; return; }
+        if (Handle(row) is not (Car car, CarComponent component, CarHandle handle))
+        {
+            refusal = "that deform handle is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.SetHandle(component, handle, fields, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
     /// <summary>Gives a component one more marker: the helper frame is minted on its bone and the prefab row
     /// that names it written beside it.</summary>
     public void AddMarker(ComponentRowViewModel? row, CarMarkerRole role, out string? refusal)
@@ -770,6 +834,16 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         CarMarker? found = fresh.Component.Markers.FirstOrDefault(
             m => m.Role == role && m.Index == index);
         return found == null ? null : (car, found);
+    }
+
+    /// <summary>And for a deform handle, found again by its place in its component's own handle list — which is
+    /// how the prefab addresses it, and therefore the only pair a re-read can be trusted to reproduce.</summary>
+    private (Car Car, CarComponent Component, CarHandle Handle)? Handle(ComponentHandleRowViewModel row)
+    {
+        if (row.Handle is not { } was) return null;
+        if (Reread(row.Component.Id) is not (Car car, ComponentRowViewModel fresh)) return null;
+        CarHandle? found = fresh.Component.Handles.FirstOrDefault(h => h.Index == was.Index);
+        return found == null ? null : (car, fresh.Component, found);
     }
 
     /// <summary>And for one of a component's own-bone rows, found again by its kind and its place in that
