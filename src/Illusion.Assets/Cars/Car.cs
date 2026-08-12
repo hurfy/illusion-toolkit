@@ -33,6 +33,7 @@ namespace Illusion.Assets.Cars;
 public sealed partial class Car
 {
     private readonly Dictionary<ulong, CarComponent> _byBone;
+    private readonly Dictionary<ulong, string> _bones;
     private readonly Dictionary<long, CarComponent> _byId;
     private readonly Dictionary<long, ComponentId> _byAnchor;
     private readonly Dictionary<long, List<CarFault>> _faultsById;
@@ -41,7 +42,8 @@ public sealed partial class Car
         PrefabFile prefab, FrameResource? frames, string? prefabPath, string? extracted, int lod, int lods,
         List<CarComponent> components, List<CarComponent> roots, CarComponent? body,
         List<CarMarker> markers, List<CarFault> faults,
-        Dictionary<ulong, CarComponent> byBone, Dictionary<long, ComponentId> byAnchor)
+        Dictionary<ulong, CarComponent> byBone, Dictionary<ulong, string> bones,
+        Dictionary<long, ComponentId> byAnchor)
     {
         Prefab = prefab;
         Frames = frames;
@@ -55,6 +57,7 @@ public sealed partial class Car
         Markers = markers;
         Faults = faults;
         _byBone = byBone;
+        _bones = bones;
         _byAnchor = byAnchor;
         _byId = components.ToDictionary(c => c.Id.Value);
         _faultsById = faults.Where(f => f.Component.IsSet)
@@ -175,6 +178,18 @@ public sealed partial class Car
     /// Unambiguous on 85 of 85 cars, so it is a straight lookup and not a disambiguation.</summary>
     public CarComponent? ComponentOfBone(ulong boneHash) =>
         boneHash != 0 && _byBone.TryGetValue(boneHash, out CarComponent? found) ? found : null;
+
+    /// <summary>
+    /// Every bone the archive's rig holds, by the FNV64 of its name — which is a WIDER set than the
+    /// components: the 101 rig roots and hinge bones carry no geometry and mint none, and a bone a part has
+    /// claimed as a crumple handle is a list on that part rather than a component of its own.
+    ///
+    /// <para>
+    /// It is what says whether a name has to be minted or merely pointed at, which is the whole question
+    /// <see cref="AddComponent"/> turns on.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<ulong, string> Bones => _bones;
 
     /// <summary>The component an identity names, or null when this car has no such component.</summary>
     public CarComponent? ComponentById(ComponentId id) =>

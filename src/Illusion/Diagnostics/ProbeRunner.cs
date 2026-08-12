@@ -837,6 +837,17 @@ internal static class ProbeRunner
                 CarPartProbes.RunCarPartsProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // The two intents that reach into the RIG: adding a component whose bone would have to be minted,
+            // and removing one outright, which means taking its bone away. Both are offered and both refuse
+            // today — so this measures that the refusals say what a modder can do instead, that they state the
+            // ceilings against this car's own numbers, and above all that every file of the working copy is
+            // byte for byte what it was afterwards. The focus car is mirrored into the temp directory, so the
+            // game's folders are never written to. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_car_rig.txt
+            case "--probe-car-rig":
+                CarRigProbes.RunCarRigProbe(
+                    args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What a car PART names: for every kind of part the shipped cars carry, whether the hash on the
             // other end is a bone, a Dummy, a Point or a plain frame — i.e. what "add a part" would have to
             // mint. Optional arg = the car. Output: %TEMP%\illusion_car_items.txt

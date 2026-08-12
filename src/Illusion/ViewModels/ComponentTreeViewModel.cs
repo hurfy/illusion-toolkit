@@ -998,6 +998,61 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Commit(car, edit, ref refusal);
     }
 
+    /// <summary>
+    /// Adds a component to the car: a bone, the kind of part it carries, and which component it hangs off.
+    ///
+    /// <para>
+    /// Offered whatever bone is named, and refused by the aggregate when that bone would have to be MINTED —
+    /// which is every bone Blender has not made yet. The refusal is the aggregate's and is shown where the
+    /// modder typed the name; nothing here decides it, so the day the rig writer lands this method does not
+    /// change.
+    /// </para>
+    /// </summary>
+    public void AddComponent(
+        string bone, CarPartTemplate kind, ComponentRowViewModel? parent, out string? refusal)
+    {
+        refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
+        if (parent == null) { refusal = "no car is open"; return; }
+        if (Reread(parent.Id) is not (Car car, ComponentRowViewModel freshParent))
+        {
+            refusal = "that component is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.AddComponent(bone, kind, freshParent.Component, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
+    /// <summary>
+    /// Takes a component off the car altogether — which means taking its bone away, and is refused with the
+    /// reason.
+    ///
+    /// <para>
+    /// Offered rather than greyed, and it takes the same path every other intent takes: the aggregate is
+    /// asked, and it answers. A refusal that never travels the path is one nothing can measure — and this one
+    /// has to be measurable, since what it promises is that the archive is left byte for byte as it was.
+    /// </para>
+    /// </summary>
+    public void RemoveComponent(ComponentRowViewModel? row, out string? refusal)
+    {
+        refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
+        if (row == null) { refusal = "no car is open"; return; }
+        if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
+        {
+            refusal = "that component is no longer there";
+            return;
+        }
+
+        CarEdit? edit = car.RemoveComponent(fresh.Component, out refusal);
+        if (edit == null) return;
+        Commit(car, edit, ref refusal);
+    }
+
     /// <summary>Takes a component's deform part away, demoting it back to a bare component — the bone, the
     /// geometry and the hit boxes stay exactly as they were.</summary>
     public void RemoveDeformPart(ComponentRowViewModel? row, out string? refusal)

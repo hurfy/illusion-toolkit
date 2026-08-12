@@ -128,6 +128,13 @@ public partial class ComponentTreeView : UserControl
 
     private void ShowInRaw_Click(object sender, RoutedEventArgs e) => ShowInRawRequested?.Invoke();
 
+    /// <summary>One more component was asked for — the host puts the question and applies it. The row it
+    /// carries is what the parent list opens on, since a new component usually hangs off what was clicked.</summary>
+    public event Action<ComponentRowViewModel?>? AddComponentRequested;
+
+    /// <summary>A component asked to be taken off the car altogether, bone and all.</summary>
+    public event Action<ComponentRowViewModel>? RemoveComponentRequested;
+
     /// <summary>A bare component asked to be made damageable — the host puts the question and applies it.</summary>
     public event Action<ComponentRowViewModel>? GrantPartRequested;
 
@@ -188,6 +195,14 @@ public partial class ComponentTreeView : UserControl
         // component owns hangs off it, so it is shown with the reason rather than silently missing.
         ComponentRowViewModel? component = Component();
         bool bare = component is { IsBare: true };
+        // Adding a component is offered wherever the tree is, including on a row beneath a component and on
+        // no row at all: it is about the car, not about what was clicked. Taking one away is about the row,
+        // and is offered on every component — the body included, since the reason it gives is the same reason
+        // for all of them and greying it would hide a sentence a modder needs.
+        AddComponentItem.Visibility = _components?.Car != null ? Visibility.Visible : Visibility.Collapsed;
+        RemoveComponentItem.Visibility = onComponent && component != null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         GrantPartItem.Visibility = onComponent && bare ? Visibility.Visible : Visibility.Collapsed;
         RemovePartItem.Visibility = onComponent && !bare && component != null
             ? Visibility.Visible
@@ -228,6 +243,21 @@ public partial class ComponentTreeView : UserControl
 
         if (AddMarkerItem.Items.Count == 0) FillAddMarker();
 
+        // Every item whose only rule is the visibility above is put back to enabled HERE. The far-level pass
+        // below greys the whole menu and nothing else ever switches these on again, so a modder who opened
+        // the menu once at the far level and switched back to Near would find them greyed for the rest of the
+        // session. The four that carry a rule of their own — the demotion, the two read-only reasons and the
+        // crumple row — are deliberately not in the list, since their answer was decided above.
+        foreach (MenuItem item in new[]
+                 {
+                     AddComponentItem, RemoveComponentItem, GrantPartItem, AddCollisionItem, AddMarkerItem,
+                     RemoveCollisionItem, RemoveMarkerItem, EditDataRowItem, EditDamageItem,
+                 })
+        {
+            item.IsEnabled = true;
+            item.ToolTip = null;
+        }
+
         // …and at a FAR level none of it acts. The tree there lists the two or three components the car
         // still draws past fifty metres, which is a look at the car rather than a place to work on it: the
         // lists a change is written into — a new part's parent, the components a collision can hang off —
@@ -237,9 +267,9 @@ public partial class ComponentTreeView : UserControl
         if (_components is not { Lod: > 0 }) return;
         foreach (MenuItem item in new[]
                  {
-                     GrantPartItem, RemovePartItem, AddCollisionItem, EditCollisionItem, RemoveCollisionItem,
-                     AddMarkerItem, EditMarkerItem, RemoveMarkerItem, EditDataRowItem, EditDamageItem,
-                     EditHandleItem,
+                     AddComponentItem, RemoveComponentItem, GrantPartItem, RemovePartItem, AddCollisionItem,
+                     EditCollisionItem, RemoveCollisionItem, AddMarkerItem, EditMarkerItem, RemoveMarkerItem,
+                     EditDataRowItem, EditDamageItem, EditHandleItem,
                  })
         {
             item.IsEnabled = false;
@@ -310,6 +340,16 @@ public partial class ComponentTreeView : UserControl
     private void RemovePart_Click(object sender, RoutedEventArgs e)
     {
         if (Component() is { IsBare: false } row) RemovePartRequested?.Invoke(row);
+    }
+
+    // Adding a component is about the CAR rather than about the row, so it fires whether or not one is under
+    // the cursor — the row only says which component the parent list should open on.
+    private void AddComponent_Click(object sender, RoutedEventArgs e) =>
+        AddComponentRequested?.Invoke(Component());
+
+    private void RemoveComponent_Click(object sender, RoutedEventArgs e)
+    {
+        if (Component() is { } row) RemoveComponentRequested?.Invoke(row);
     }
 
     /// <summary>The component the menu acts on: the selected row, or — on one of the rows that is a statement

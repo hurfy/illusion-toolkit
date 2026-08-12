@@ -50,22 +50,55 @@ public sealed partial class ComponentPartWindow : Window
             + "which is what the effects block's snow particle ids go with.",
     };
 
+    /// <summary>
+    /// What ADDING a component is, said before anything is asked — the counterpart of
+    /// <see cref="Car.PartGain"/>, which is the offer made to a bare component that already exists.
+    /// </summary>
+    private const string AddGain =
+        "A component IS a bone: what the tree lists is the bones of the car's model, with the deform part "
+        + "that says how each of them behaves when it is hit. So adding one names a bone, and the part is "
+        + "written around it.\n\n"
+        + "A bone that is already in the rig — a light, a licence-plate segment, a wiper — is given its part "
+        + "here and now. A bone that is NOT there has to be made in Blender first: the toolkit cannot yet "
+        + "write one, and it will say so rather than half-write a rig.";
+
+    /// <summary>The note under the bone box: what to type, and where the name comes from.</summary>
+    private const string BoneNote =
+        "The name the bone has in Blender — the same name the tree shows. Matched by the hash of the name, "
+        + "so the spelling has to be exact, casing and all.";
+
     private readonly string _component;
+    private readonly bool _adding;
 
     /// <param name="component">The bare component's name, for the window's own wording.</param>
     /// <param name="parents">The components it could hang off — every one that has a deform part of its own,
     /// since there is nothing for a part to hang off a bare component.</param>
     /// <param name="body">The car's body, which is where a component with no obvious owner belongs: it is
     /// already where every marker whose bone no component owns goes.</param>
+    /// <param name="adding">Whether a component is being ADDED, in which case the bone is asked for too — the
+    /// one and only difference between the two ways into this window.</param>
     public ComponentPartWindow(
-        string component, IReadOnlyList<ComponentRowViewModel> parents, ComponentRowViewModel? body)
+        string component, IReadOnlyList<ComponentRowViewModel> parents, ComponentRowViewModel? body,
+        bool adding = false)
     {
         ArgumentNullException.ThrowIfNull(parents);
         InitializeComponent();
         _component = component ?? "";
+        _adding = adding;
 
-        Title = $"Make {_component} damageable";
-        GainLabel.Text = Car.PartGain;
+        Title = adding ? "Add component" : $"Make {_component} damageable";
+        GainLabel.Text = adding ? AddGain : Car.PartGain;
+        if (adding)
+        {
+            BonePanel.Visibility = Visibility.Visible;
+            BoneBox.Text = _component;
+            BoneHint.Text = BoneNote;
+            Accept.Content = "Add it";
+            Trailer.Text = "A bone that is already in the rig is given its part. Then Build.";
+            // The bone is the first question and the only one with nothing filled in for it, so the caret
+            // starts there — on a second attempt after a refusal it is also the answer being corrected.
+            Loaded += (_, _) => { BoneBox.Focus(); BoneBox.SelectAll(); };
+        }
 
         KindBox.ItemsSource = Kinds();
         KindBox.SelectedItem = ((IReadOnlyList<KindChoice>)KindBox.ItemsSource!)[0];
@@ -103,6 +136,10 @@ public sealed partial class ComponentPartWindow : Window
     public CarPartTemplate Kind =>
         (KindBox.SelectedItem as KindChoice)?.Template ?? Car.DefaultPartKind;
 
+    /// <summary>The bone that was named. The component's own when a bare one is being given a part, since
+    /// there is nothing to ask there — the row the menu was opened on IS the bone.</summary>
+    public string Bone => _adding ? BoneBox.Text.Trim() : _component;
+
     /// <summary>The component the new part hangs off, or null when the car has none it could.</summary>
     public ComponentRowViewModel? HangsOff => (ParentBox.SelectedItem as ParentChoice)?.Row;
 
@@ -118,8 +155,9 @@ public sealed partial class ComponentPartWindow : Window
     public ComponentPartWindow Again(string refusal)
     {
         var again = new ComponentPartWindow(
-            _component, [.. ((IEnumerable<ParentChoice>)ParentBox.ItemsSource!).Select(c => c.Row)],
-            HangsOff)
+            _adding ? Bone : _component,
+            [.. ((IEnumerable<ParentChoice>)ParentBox.ItemsSource!).Select(c => c.Row)],
+            HangsOff, _adding)
         {
             Owner = Owner,
         };
@@ -147,6 +185,11 @@ public sealed partial class ComponentPartWindow : Window
 
     private void Accept_Click(object sender, RoutedEventArgs e)
     {
+        if (_adding && Bone.Length == 0)
+        {
+            Fail("A component IS a bone, so it needs the bone's name — the one it has in Blender.");
+            return;
+        }
         if (HangsOff == null)
         {
             Fail("This car has no component with a deform part for this one to hang off.");

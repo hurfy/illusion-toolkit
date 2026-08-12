@@ -8,11 +8,17 @@
         WindowStartupLocation="CenterOwner">
 
     <!-- Component tree → right-click a bare component → Make damageable…
+         Component tree → Add component…            (the same window, with the bone asked for as well)
 
          TWO questions and no more: what kind of part it is, and which component it hangs off. Everything
          else a deform part holds — the flag word, the crumple thresholds, the whole tuning block, the three
          copies of the parent link, and the half of the struct nobody has read — is derived from those two
          answers and from a measured template, and none of it is on this window.
+
+         A component IS a bone, so adding one asks for the bone as well — and that is the ONLY difference
+         between the two ways in. A bone that is already in the rig is given its part on the spot; one that
+         is not is refused in the box below, because minting a bone is a writer that does not exist yet. When
+         it lands, the refusal stops firing and nothing on this window moves.
 
          The paragraph above the questions is the OFFER: what the component gains by taking a part, said
          before the modder has to choose anything, because a bare component is a thing they have never had to
@@ -28,6 +34,16 @@
 
             <TextBlock x:Name="GainLabel" Style="{StaticResource DimLabel}" Margin="0,0,0,18"
                        TextWrapping="Wrap" />
+
+            <!-- WHICH BONE. Shown only when a component is being added rather than a bare one given a part:
+                 in that case the bone is the row the menu was opened on and there is nothing to ask. -->
+            <StackPanel x:Name="BonePanel" Visibility="Collapsed">
+                <TextBlock Style="{StaticResource DimLabel}" Text="Which bone" Margin="0,0,0,4" />
+                <TextBox x:Name="BoneBox" Style="{StaticResource DarkBox}"
+                         ToolTip="The bone this component is — the name it has in Blender." />
+                <TextBlock x:Name="BoneHint" Style="{StaticResource DimLabel}" Margin="0,6,0,14"
+                           TextWrapping="Wrap" />
+            </StackPanel>
 
             <!-- WHAT IT IS. Pre-filled with "normal", which is what a licence plate, a light and a wiper all
                  are: the kind that carries no other meaning. -->
@@ -52,13 +68,13 @@
         <Border Grid.Row="1" Background="{StaticResource FillHairline}" BorderBrush="{StaticResource EdgeFaint}"
                 BorderThickness="0,1,0,0" Padding="24,14">
             <DockPanel LastChildFill="False">
-                <TextBlock DockPanel.Dock="Left" Style="{StaticResource DimLabel}" MaxWidth="280"
-                           TextWrapping="Wrap" VerticalAlignment="Center"
+                <TextBlock x:Name="Trailer" DockPanel.Dock="Left" Style="{StaticResource DimLabel}"
+                           MaxWidth="280" TextWrapping="Wrap" VerticalAlignment="Center"
                            Text="The bone and its geometry are not touched. Then Build." />
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                     <Button Style="{StaticResource NeutralButton}" MinWidth="92" Height="32" Margin="0,0,8,0"
                             Content="Cancel" Click="Cancel_Click" />
-                    <Button Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
+                    <Button x:Name="Accept" Style="{StaticResource AccentButton}" MinWidth="92" Height="32"
                             Content="Give it a part" IsDefault="True" Click="Accept_Click" />
                 </StackPanel>
             </DockPanel>

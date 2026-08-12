@@ -52,6 +52,13 @@
                      inherits in principle and measurably does not reach a ContextMenu's items — the component
                      tree probe reads it back as False there — so the reason was written and never readable. -->
                 <ContextMenu Opened="Menu_Opened">
+                    <!-- One more component of the car. A component IS a bone, so this is offered whichever
+                         bone is named — and refused, in the window itself, when the bone would have to be
+                         minted, which is every bone Blender has not made yet. The refusal is the aggregate's
+                         single condition; when the rig writer lands it stops firing and this item does not
+                         move. -->
+                    <MenuItem x:Name="AddComponentItem" Header="Add component…"
+                              ToolTipService.ShowOnDisabled="True" Click="AddComponent_Click" />
                     <!-- The two halves of a component's own deform part. A BARE component is offered one —
                          a light, a plate or a wiper made damageable — and one that has a part is offered
                          the way back out, because a grant a modder cannot take back is a one-way door.
@@ -59,6 +66,11 @@
                     <MenuItem x:Name="GrantPartItem" Header="Make damageable…" Click="GrantPart_Click" />
                     <MenuItem x:Name="RemovePartItem" Header="Remove deform part"
                               ToolTipService.ShowOnDisabled="True" Click="RemovePart_Click" />
+                    <!-- …and taking the component away altogether, which means taking its BONE away. Offered
+                         beside the demotion because that is where a modder looks for it, and refused with
+                         what it would renumber — plus the demotion, which is what they usually want. -->
+                    <MenuItem x:Name="RemoveComponentItem" Header="Remove component"
+                              ToolTipService.ShowOnDisabled="True" Click="RemoveComponent_Click" />
                     <MenuItem x:Name="AddCollisionItem" Header="Add collision…" Click="AddCollision_Click" />
                     <!-- The roles are filled in from the aggregate rather than spelled here: the two it
                          cannot mint are absent rather than greyed, because a wiper is a bone on all 148

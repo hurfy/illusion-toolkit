@@ -469,6 +469,13 @@ internal static class CarPushProbes
         refusals.Add(grant);
         components.RemoveDeformPart(null, out string? demote);
         refusals.Add(demote);
+        // The two that reach into the rig. Both refuse in the aggregate whatever the gate says, and they are
+        // here because what is being measured is the GATE: an intent that skipped it would come back with its
+        // own refusal instead of the push's, which is exactly what the check below reads.
+        components.AddComponent("", Car.DefaultPartKind, null, out string? addComponent);
+        refusals.Add(addComponent);
+        components.RemoveComponent(null, out string? removeComponent);
+        refusals.Add(removeComponent);
         components.SetMarker(null, [], out string? marker);
         refusals.Add(marker);
         components.SetDataRow(null, [], out string? dataRow);

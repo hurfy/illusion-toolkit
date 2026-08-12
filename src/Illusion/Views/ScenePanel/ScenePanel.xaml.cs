@@ -96,6 +96,8 @@ public partial class ScenePanel : UserControl
 
         ComponentTree.Attach(_components);
         ComponentTree.ShowInRawRequested += () => _components.IsRaw = true;
+        ComponentTree.AddComponentRequested += AddComponent;
+        ComponentTree.RemoveComponentRequested += RemoveComponent;
         ComponentTree.GrantPartRequested += GrantPart;
         ComponentTree.RemovePartRequested += RemovePart;
         ComponentTree.AddCollisionRequested += AddCollision;
@@ -427,6 +429,66 @@ public partial class ScenePanel : UserControl
     {
         if (_syncingMode || _components == null) return;
         _components.IsRaw = ReferenceEquals(sender, RawMode);
+    }
+
+    // ── One more component of the car ──
+
+    /// <summary>
+    /// Asks which bone the new component is, what kind of part it carries and which component it hangs off,
+    /// then hands the answer to the aggregate.
+    ///
+    /// <para>
+    /// The same window a bare component is given a part in, and the same loop: it stays open on a refusal and
+    /// says why in place. Which matters more here than anywhere else — the refusal a modder meets today is
+    /// "that bone is not in this car", and it is answered by typing a different name rather than by starting
+    /// the whole question again.
+    /// </para>
+    /// </summary>
+    /// <param name="row">The row the menu was opened on, which is only what the parent list opens on: a new
+    /// component usually hangs off the one that was clicked. Null when the menu was opened on no row.</param>
+    private void AddComponent(ComponentRowViewModel? row)
+    {
+        IReadOnlyList<ComponentRowViewModel> parents = _components.Parentable();
+        if (parents.Count == 0)
+        {
+            _viewport.RaiseNotice(
+                "this car has no component with a deform part for a new one to hang off", isError: true);
+            return;
+        }
+
+        // The clicked row when it can hold a part, the body otherwise — a bare row cannot be a parent, and
+        // the body is where a component with no obvious owner belongs.
+        ComponentRowViewModel? hangsOff = row is { IsBare: false } ? row : _components.BodyRow;
+        var dialog = new ComponentPartWindow("", parents, hangsOff, adding: true)
+        {
+            Owner = Window.GetWindow(this),
+        };
+        while (dialog.ShowDialog() == true)
+        {
+            _components.AddComponent(dialog.Bone, dialog.Kind, dialog.HangsOff, out string? refusal);
+            if (refusal == null)
+            {
+                // The same thing the grant says, for the same measured reason: every one of the 1698 shipped
+                // parts carries at least one collision volume and a new one carries none.
+                _viewport.RaiseNotice($"\"{dialog.Bone}\" has no collision yet, and every shipped part has "
+                    + "one — give it one with \"Add collision…\" on its row.");
+                return;
+            }
+            dialog = dialog.Again(refusal);
+        }
+    }
+
+    /// <summary>
+    /// Takes a component off the car altogether — which means taking its bone away, and is refused with what
+    /// it would renumber and with the demotion that is available instead.
+    /// </summary>
+    private void RemoveComponent(ComponentRowViewModel row)
+    {
+        _components.RemoveComponent(row, out string? refusal);
+        if (refusal != null)
+        {
+            _viewport.RaiseNotice("the component was not removed: " + refusal, isError: true);
+        }
     }
 
     // ── A bare component's own deform part ──

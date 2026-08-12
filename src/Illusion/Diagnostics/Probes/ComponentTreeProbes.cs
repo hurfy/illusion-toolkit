@@ -73,6 +73,7 @@ internal static class ComponentTreeProbes
             CheckMarkers(car, Check, sb);
             CheckDamage(car, Check, sb);
             CheckDeformPart(car, Check, sb);
+            CheckRig(car, Check, sb);
             CheckRemembered(car, Check, sb);
             CheckNotACar(folder, Check, sb);
             CheckRestitch(car, Check, sb);
@@ -717,6 +718,94 @@ internal static class ComponentTreeProbes
                 ToolTipService.GetShowOnDisabled(remove),
                 $"ShowOnDisabled: {ToolTipService.GetShowOnDisabled(remove)}");
         }
+        sb.AppendLine();
+    }
+
+    // ── adding a component, and taking one away ──
+
+    /// <summary>
+    /// Whether the two intents that reach into the RIG are OFFERED, and whether refusing one leaves the car
+    /// exactly as it was.
+    ///
+    /// <para>
+    /// Offered is the point. The refusal a modder meets today is about their bone, not about the operation —
+    /// "make it in Blender and come back" is only actionable if the operation was there to be tried — and when
+    /// the rig writer lands nothing here may move: the same item, the same window, the same call. So what is
+    /// checked is that both items are shown and enabled on an ordinary component, and that going through with
+    /// either of them changes no row of the tree.
+    /// </para>
+    /// </summary>
+    private static void CheckRig(FileInfo car, Action<string, bool, string> check, StringBuilder sb)
+    {
+        sb.AppendLine("════ adding a component, and taking one away ════");
+        if (!Stage(car, out ScenePanel? panel, out D3DImageHost? host)) return;
+        ComponentTreeViewModel components = panel!.Components;
+        if (components.Car == null) { check("the car stitched", false, ""); return; }
+
+        List<ComponentRowViewModel> rows = [.. components.Roots.SelectMany(r => r.SelfAndDescendants())];
+        ComponentRowViewModel? row = rows.FirstOrDefault(r => !r.IsBare && !r.IsBody) ?? rows.FirstOrDefault();
+        ContextMenu? menu = panel.ComponentTree.ComponentTree.ContextMenu;
+        MenuItem? add = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Add component…");
+        MenuItem? remove = menu?.Items.OfType<MenuItem>()
+            .FirstOrDefault(m => (m.Header as string) == "Remove component");
+        if (menu == null || add == null || remove == null || row == null)
+        {
+            check("the menu carries both of the rig's own items", false, "");
+            return;
+        }
+
+        components.Select(row);
+        menu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent, menu));
+        check("adding a component is offered, and not greyed — the refusal is about the bone, not the intent",
+            add is { Visibility: Visibility.Visible, IsEnabled: true }, $"{add.Visibility}, {add.IsEnabled}");
+        check("removing one outright is offered beside the demotion",
+            remove is { Visibility: Visibility.Visible, IsEnabled: true },
+            $"{remove.Visibility}, {remove.IsEnabled}");
+
+        // The window the item opens, built and never shown. What it asks for — the bone — is the ONE
+        // difference between adding a component and giving a bare one a part, and nothing else reads it: the
+        // x:Names a window binds have silently vanished under a formatter in this repo before, and a green
+        // build did not notice.
+        IReadOnlyList<ComponentRowViewModel> parents = components.Parentable();
+        var adding = new ComponentPartWindow("", parents, components.BodyRow, adding: true);
+        var granting = new ComponentPartWindow(row.Name, parents, components.BodyRow);
+        check("the window asks for the bone, and that is all that separates it from the grant",
+            adding.Bone.Length == 0 && adding.Kind == Car.DefaultPartKind && adding.HangsOff != null
+            && string.Equals(granting.Bone, row.Name, StringComparison.Ordinal),
+            $"adding \"{adding.Bone}\" ({adding.Kind.Name}) off \"{adding.HangsOff?.Name}\"; "
+            + $"granting \"{granting.Bone}\"");
+
+        // …and it goes through. Both refuse in the aggregate, and the measurable form of "the refusal wrote
+        // nothing" here is that the tree is the same tree: same rows, same identities, nothing to build.
+        //
+        // Each is asked only while its own condition is off, because this probe stages the PLAYER's own
+        // extracted car rather than a mirror: the day a writer lands, the very same call would mint a bone in
+        // it. What the operation does once it is allowed belongs to --probe-car-rig, which works on a copy.
+        int was = rows.Count;
+        int building = host!.PendingBuildArchives().Count;
+        if (!CarRig.CanMintBone)
+        {
+            components.AddComponent("illusion_probe_bone_no_car_has", Car.DefaultPartKind,
+                components.BodyRow, out string? mint);
+            check("a component whose bone would have to be minted is refused, with the way to make it",
+                mint != null && mint.Contains("Blender", StringComparison.Ordinal), mint ?? "it was allowed");
+        }
+        if (!CarRig.CanRemoveBone)
+        {
+            components.RemoveComponent(row, out string? gone);
+            check("removing one outright is refused, with the demotion offered instead",
+                gone != null && gone.Contains("Remove deform part", StringComparison.Ordinal),
+                gone ?? "it was allowed");
+        }
+
+        int now = components.Roots.SelectMany(r => r.SelfAndDescendants()).Count();
+        check("neither refusal changed a row of the tree", now == was, $"{now} rows against {was}");
+        // Nothing was written, so nothing may be waiting to be built: an archive on that list is the modder
+        // being told the change happened after they were told it did not.
+        check("…and neither put the archive on the build list",
+            host.PendingBuildArchives().Count == building,
+            $"{host.PendingBuildArchives().Count} archives against {building}");
         sb.AppendLine();
     }
 

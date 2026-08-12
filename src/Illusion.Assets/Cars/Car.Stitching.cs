@@ -139,7 +139,7 @@ public sealed partial class Car
         OffTheNameTable(rig, components, body, faults);
 
         var stitched = new Car(prefab, frames, prefabPath, extracted, lod, rig.Lods, components, roots, body,
-            markers, faults, byBone, identities.ByAnchor);
+            markers, faults, byBone, rig.BoneNames, identities.ByAnchor);
         // What the prefab file holds right now, so a later save can tell whether somebody else has written it
         // in the meantime — four other modules still write this same file directly.
         stitched.RememberPrefabOnDisk();
