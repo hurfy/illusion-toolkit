@@ -187,6 +187,15 @@ public partial class ScenePanel : UserControl
             _selection.RefreshEffects();
         });
 
+        // A push from Blender is a transaction over the scene, and the component view is told at both ends of
+        // it. It cannot be treated as one more scene change: the apply raises those from inside its own
+        // middle, a push can change the very bones the stitching keys on, and what the modder had selected
+        // has to be remembered BEFORE the frames move to be reported against afterwards.
+        // The rows come back through CarEdited, which the re-stitch raises from inside itself — and the
+        // selection is put back AFTER that, by identity, so the push's own answer is the one that stands.
+        viewport.PushLanding += () => Dispatcher.Invoke(_components.PushLanding);
+        viewport.PushLanded += moved => Dispatcher.Invoke(() => _components.PushLanded(moved));
+
         viewport.SelectionChanged += OnSelectionChanged;
         viewport.SelectionTransformChanged += _selection.RefreshTransform;
         viewport.SelectionPropertiesChanged += _selection.RefreshPropertyValues;

@@ -154,6 +154,22 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     /// one — an empty stage, or a district holding a dozen archives at once.</param>
     public void Refresh(ISceneDocument? document)
     {
+        // While a push is landing, the car is stitched ONCE and at the END of it, by the push itself. The
+        // apply raises a scene change from inside its own middle — a mesh swapped, a frame deleted — and
+        // stitching a car whose frames are half rewritten costs a full rebuild for a tree nobody sees and a
+        // diagnosis nobody could act on. See PushLanding.
+        //
+        // …unless a DIFFERENT document has arrived, which is the stage moving out from under the push: the
+        // modder can open another archive while the apply runs, and holding the old one would leave the tree
+        // describing a car that is no longer on screen. That one is followed at once, and what the push had
+        // to say about the previous car goes with it.
+        if (_landing)
+        {
+            if (ReferenceEquals(document, _document)) return;
+            _landing = false;
+            _selectedBeforePush = default;
+        }
+
         // A car that is not the one the switch was moved on opens on its NEAR level. The level of detail is
         // a look at what survives past fifty metres rather than a setting, and the next archive may not even
         // carry a far level to carry it into — 3 of the 85 shipped cars ship one.
@@ -192,6 +208,105 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         // Only when the level really moved under the read — the switch's own setter raises its own change,
         // and a scene change on an unmoved switch must not send the panel round the rebuild again.
         if (_lod != wasLod) Raise(nameof(Lod));
+    }
+
+    // ── a push from Blender ──
+
+    /// <summary>Whether a push is being applied right now, and the tree is therefore waiting for the end of
+    /// it rather than following the scene changes it raises on its way through.</summary>
+    private bool _landing;
+
+    /// <summary>What the modder had selected when the push began — which component, and what it was called
+    /// then, so that one the push took away can be named in the past tense.</summary>
+    private (ComponentId Id, string Name) _selectedBeforePush;
+
+    /// <summary>
+    /// A push from Blender is about to change the frame graph this car is stitched from.
+    ///
+    /// <para>
+    /// What the modder had selected is remembered HERE rather than read back afterwards. The re-stitch that
+    /// follows resolves the viewport's own selection onto the new rows, so by the time the push has landed
+    /// the tree can no longer say what it was looking at before — which is exactly the thing a component the
+    /// push took away has to be reported against.
+    /// </para>
+    /// <para>
+    /// A row BENEATH a component — a collision, a marker — is remembered as its component. Those rows are
+    /// rebuilt from the car and the push may well have taken one away, so the component is the nearest thing
+    /// that is still true; the selection comes back one level up rather than not at all.
+    /// </para>
+    /// </summary>
+    public void PushLanding()
+    {
+        ComponentRowViewModel? row = Selected ?? SelectedChild?.Component;
+        _selectedBeforePush = row == null ? (ComponentId.None, "") : (row.Id, row.Name);
+        _landing = true;
+    }
+
+    /// <summary>
+    /// …and it has landed: the resolver runs again over the car as it now stands.
+    ///
+    /// <para>
+    /// It has to. Identity is rebuilt on every open and must equally be rebuilt on every push, because a push
+    /// can change the very bones the stitching keys on — a renamed bone, a deleted one, a new one — and a tree
+    /// left as it was would be a picture of a car the file no longer holds.
+    /// </para>
+    /// <para>
+    /// The SELECTION is put back by identity rather than by bone: a component whose bone the push renamed is
+    /// the same component, and asking the scene for it would find nothing under the name it used to have. One
+    /// the push took away cannot be put back, and is said out loud instead — a selection that quietly stops
+    /// existing is how a modder goes on typing numbers into a component that is not there.
+    /// </para>
+    /// </summary>
+    /// <param name="movedBones">The bones the push wrote a new rest transform into, by name. Empty for a push
+    /// that was about geometry alone, which is most of them.</param>
+    public void PushLanded(IReadOnlyList<string>? movedBones = null)
+    {
+        _landing = false;
+        Restitch();
+
+        var said = new List<string>();
+        // What the push moved, in the modder's own terms. A bone IS a component, and the bridge names bones —
+        // so the two are joined HERE, through the aggregate's own lookup, and never by a second mapping the
+        // bridge keeps of its own. That is what "the same component" means when the push says one thing and
+        // the tree shows another.
+        if (Car is { } car && movedBones is { Count: > 0 })
+        {
+            var seen = new HashSet<long>();
+            var moved = new List<string>();
+            foreach (string bone in movedBones)
+            {
+                if (car.ComponentOfBone(Fnv64.Hash(bone)) is not { } component) continue;
+                if (seen.Add(component.Id.Value)) moved.Add(component.Name);
+            }
+            if (moved.Count > 0)
+            {
+                said.Add($"{moved.Count.ToString(CultureInfo.InvariantCulture)} component(s) moved: "
+                    + string.Join(", ", moved.Take(6))
+                    + (moved.Count > 6 ? ", …" : ""));
+            }
+        }
+
+        (ComponentId id, string name) = _selectedBeforePush;
+        _selectedBeforePush = default;
+        if (id.IsSet)
+        {
+            if (RowOf(id) is { } row)
+            {
+                // Through the ordinary selection, so the viewport and the property tabs follow it — and then
+                // the row is lit whatever the viewport made of that. A push lands precisely while a Blender
+                // session is open, and a session refuses to select anything outside the set it holds: waiting
+                // for the viewport's report back would leave the tree with nothing selected after every push,
+                // which is the silence this whole method exists to prevent.
+                Select(row);
+                Highlight(row);
+            }
+            else
+            {
+                said.Add($"\"{name}\" is no longer a component of this car — the push took it away, so "
+                    + "nothing is selected where it was");
+            }
+        }
+        if (said.Count > 0) _viewport.RaiseNotice(string.Join("\n", said));
     }
 
     private Car? Read(ISceneDocument document, ref bool failed)
@@ -708,6 +823,41 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public event Action? CarEdited;
 
     /// <summary>
+    /// Holds the car still for the length of ONE component-level intent, so that an edit and a push landing
+    /// from Blender are never applied at the same time.
+    ///
+    /// <para>
+    /// They would otherwise overlap for real. A push computes each mesh's application on the bridge's own
+    /// thread, reading the frame graph an edit here adds a marker's Dummy to, takes a mirror stub out of and
+    /// hands to <c>Car.Save</c> to serialize — two threads, one graph, and a save that lands in the middle
+    /// writes an archive neither of them meant.
+    /// </para>
+    /// <para>
+    /// An edit that cannot take the gate is REFUSED rather than made to wait. A push holds it across the
+    /// dispatcher calls that apply it, so a UI thread waiting here would be waiting for a push that is
+    /// waiting for the UI thread; and a frozen window is a worse answer than "try again in a moment".
+    /// </para>
+    /// </summary>
+    private readonly struct CarEditHold : IDisposable
+    {
+        /// <summary>What an intent is refused with while a push has the car.</summary>
+        internal const string Landing =
+            "a push from Blender is landing on this car — make that change again in a moment";
+
+        private readonly D3DImageHost? _viewport;
+
+        private CarEditHold(D3DImageHost? viewport) => _viewport = viewport;
+
+        /// <summary>Whether this intent may go ahead.</summary>
+        internal bool Held => _viewport != null;
+
+        internal static CarEditHold Take(D3DImageHost viewport) =>
+            new(viewport.BridgeSession.TryHoldForEdit() ? viewport : null);
+
+        public void Dispose() => _viewport?.BridgeSession.ReleaseAfterEdit();
+    }
+
+    /// <summary>
     /// Gives a component one more collision, by role and shape.
     ///
     /// <para>
@@ -721,6 +871,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         Vector3 size, Vector3 position, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
         {
@@ -747,6 +899,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         CollisionRowViewModel? row, Vector3 size, Vector3 position, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Collision(row) is not (Car car, CarCollision collision))
         {
@@ -770,6 +924,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public void RemoveCollision(CollisionRowViewModel? row, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Collision(row) is not (Car car, CarCollision collision))
         {
@@ -825,6 +981,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null || parent == null) { refusal = "no car is open"; return; }
         // Both rows are found again in the SAME re-read: two rereads would leave the parent pointing into a
         // stitch the component is no longer part of.
@@ -845,6 +1003,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public void RemoveDeformPart(ComponentRowViewModel? row, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
         {
@@ -867,6 +1027,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public void SetMarker(MarkerRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Marker(row) is not (Car car, CarMarker marker))
         {
@@ -885,6 +1047,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         ComponentDataRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (DataRow(row) is not (Car car, CarComponentRow fresh))
         {
@@ -907,6 +1071,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         ComponentDamageRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Reread(row.Component.Id) is not (Car car, ComponentRowViewModel fresh))
         {
@@ -925,6 +1091,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         ComponentHandleRowViewModel? row, IReadOnlyList<CarField> fields, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row?.Handle == null) { refusal = "no car is open"; return; }
         if (Handle(row) is not (Car car, CarComponent component, CarHandle handle))
         {
@@ -942,6 +1110,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public void AddMarker(ComponentRowViewModel? row, CarMarkerRole role, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Reread(row.Id) is not (Car car, ComponentRowViewModel fresh))
         {
@@ -963,6 +1133,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     public void RemoveMarker(MarkerRowViewModel? row, out string? refusal)
     {
         refusal = null;
+        using CarEditHold hold = CarEditHold.Take(_viewport);
+        if (!hold.Held) { refusal = CarEditHold.Landing; return; }
         if (row == null) { refusal = "no car is open"; return; }
         if (Marker(row) is not (Car car, CarMarker marker))
         {

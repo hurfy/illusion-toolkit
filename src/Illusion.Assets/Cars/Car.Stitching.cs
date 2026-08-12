@@ -26,7 +26,7 @@ public sealed partial class Car
         var faults = new List<CarFault>();
         var components = new List<CarComponent>();
         var byBone = new Dictionary<ulong, CarComponent>();
-        var byAnchor = new Dictionary<long, ComponentId>();
+        var identities = new Identities(previous);
 
         IReadOnlyList<CarDeformPart> parts = prefab.CarDeformParts;
 
@@ -51,8 +51,13 @@ public sealed partial class Car
             rig.BoneNames.TryGetValue(bone, out string? found);
             int joint = rig.JointOfBone.TryGetValue(bone, out int at) ? at : -1;
 
+            // A PART is keyed on its bone's place in the rig, and on its own place in the part list BESIDE
+            // it — both are claimed, and the second is what a rename falls back on. Neither on its own is
+            // enough: keying on the rig alone loses the component the moment its bone stops resolving, and
+            // keying on the part list alone slides every identity along by one the moment a part is taken
+            // out, because removing one renumbers every part after it.
             var component = new CarComponent(
-                Identify(previous, byAnchor, Anchor(joint, part.Index)),
+                identities.Of(joint >= 0 ? AtJoint(joint) : Identities.Nowhere, AtPart(part.Index)),
                 found ?? (bone == 0 ? "(no bone)" : Hex(bone)), bone, joint, resolves,
                 part.Index, part.PartType, part.Kind, rig.Pieces.GetValueOrDefault(bone),
                 Handles(prefab, part, rig), Damage(part), DamageFields(prefab, part));
@@ -67,8 +72,8 @@ public sealed partial class Car
             else if (!resolves)
             {
                 faults.Add(new CarFault(CarFaultKind.ComponentBoneUnresolved,
-                    $"part {part.Index} ({part.Kind}) names {Hex(bone)}, which is no bone of this car",
-                    component.Id));
+                    $"part {part.Index} ({part.Kind}) names {Hex(bone)}, which is no bone of this car"
+                    + Instead(previous, component.Id, rig), component.Id));
             }
             else if (!byBone.TryAdd(bone, component))
             {
@@ -98,8 +103,10 @@ public sealed partial class Car
             if (pieces == 0 && !rig.Drawn.Contains(bone)) continue;
 
             int joint = rig.JointOfBone.TryGetValue(bone, out int at) ? at : -1;
+            // Its place in the rig is the only key a bare component has: no row anywhere in the prefab names
+            // it, so a rename is carried across by the joint and by nothing else.
             var component = new CarComponent(
-                Identify(previous, byAnchor, Anchor(joint, partIndex: -1)), name, bone, joint,
+                identities.Of(joint >= 0 ? AtJoint(joint) : Identities.Nowhere), name, bone, joint,
                 boneResolves: true, partIndex: -1, partType: 0, kind: BareKind, pieces, [],
                 damage: null, damageFields: []);
             components.Add(component);
@@ -128,11 +135,11 @@ public sealed partial class Car
 
         // ── what did not stitch, beyond what the passes above already named ──
         if (car != null) MatchRows(car, byBone, components, rig, faults);
-        LostGeometry(rig, byBone, handleBones, previous, byAnchor, faults);
+        LostGeometry(rig, byBone, handleBones, previous, identities.ByAnchor, faults);
         OffTheNameTable(rig, components, body, faults);
 
         var stitched = new Car(prefab, frames, prefabPath, extracted, lod, rig.Lods, components, roots, body,
-            markers, faults, byBone, byAnchor);
+            markers, faults, byBone, identities.ByAnchor);
         // What the prefab file holds right now, so a later save can tell whether somebody else has written it
         // in the meantime — four other modules still write this same file directly.
         stitched.RememberPrefabOnDisk();
@@ -149,28 +156,95 @@ public sealed partial class Car
     private const string BareKind = "bare";
 
     /// <summary>
-    /// WHERE a component sits, as the one number its identity is carried by across a re-stitch.
+    /// WHERE a component sits, as a number its identity is carried by across a re-stitch.
     ///
     /// <para>
-    /// It is the bone's position in the rig, not its name — which is the whole point. A rename made in
-    /// Blender changes the name and the hash and leaves the joint where it was, so undo and the bridge go on
-    /// talking about the same door. A component whose bone does not resolve has no joint to key on and falls
-    /// back to its position in the part list, which is stable for exactly as long as no part is inserted; the
-    /// two live in opposite halves of the number line so they can never collide.
+    /// Neither anchor is the bone's NAME, which is the whole point: a rename made in Blender changes the name
+    /// and the hash and moves nothing, so undo and the bridge go on talking about the same door. A component
+    /// is keyed on its bone's place in the rig, and a part on its place in the part list beside it; the two
+    /// live in opposite halves of the number line so a part key and a joint key can never collide.
+    /// </para>
+    /// <para>
+    /// Each is stable against what moves the other, which is why a part carries both. A rename leaves the
+    /// part where it was and takes its bone away; taking a part OUT renumbers every part after it and leaves
+    /// every bone where it was.
     /// </para>
     /// </summary>
-    private static long Anchor(int joint, int partIndex) => joint >= 0 ? joint : -1L - partIndex;
+    private static long AtPart(int partIndex) => -1L - partIndex;
 
-    /// <summary>Re-uses the identity the previous stitch gave whatever stood at this anchor, or mints one.</summary>
-    private static ComponentId Identify(Car? previous, Dictionary<long, ComponentId> byAnchor, long anchor)
+    /// <inheritdoc cref="AtPart"/>
+    private static long AtJoint(int joint) => joint;
+
+    /// <summary>
+    /// What a bone's name says about a part that no longer resolves to one — the other half of a rename.
+    ///
+    /// <para>
+    /// A bone renamed in Blender leaves two rows behind: the part, which now names a hash nothing answers to,
+    /// and the bone under its new name, which no part claims and which is therefore a bare component. Naming
+    /// the second one on the first one's fault is what makes them read as one accident rather than as a
+    /// component that vanished beside one that appeared.
+    /// </para>
+    /// </summary>
+    private static string Instead(Car? previous, ComponentId id, Rig rig)
     {
-        ComponentId id = previous != null && previous._byAnchor.TryGetValue(anchor, out ComponentId was)
-            ? was
-            : ComponentId.Mint();
-        // Two components on one anchor cannot both keep it — the second is a duplicate-bone fault and gets
-        // an identity of its own rather than shadowing the first one's.
-        if (!byAnchor.TryAdd(anchor, id)) id = ComponentId.Mint();
-        return id;
+        if (previous?.ComponentById(id) is not { BoneJoint: >= 0 } was
+            || was.BoneJoint >= rig.BonesByJoint.Length)
+        {
+            return "";
+        }
+        string now = rig.BonesByJoint[was.BoneJoint];
+        return now.Length == 0 || Fnv64.Hash(now) == was.BoneHash
+            ? ""
+            : $" — the bone at its place in the rig is now called \"{now}\"";
+    }
+
+    /// <summary>
+    /// Who was who in the previous stitch, and who has claimed which identity in this one.
+    ///
+    /// <para>
+    /// An identity is re-used at most ONCE per stitch. Two components can reach the same one — a bone renamed
+    /// out from under its part leaves the part recalling itself through the part list while the renamed bone
+    /// keys on the joint that part used to answer for — and letting both take it would move the door's
+    /// identity onto the stub the rename made. Whoever asks first keeps it, and the parts ask first because
+    /// the file lists them first.
+    /// </para>
+    /// </summary>
+    private sealed class Identities
+    {
+        /// <summary>A component with no place to be keyed on: it is new every time it is stitched.</summary>
+        internal const long Nowhere = long.MinValue;
+
+        private readonly Car? _previous;
+        private readonly HashSet<long> _taken = [];
+
+        internal Identities(Car? previous) => _previous = previous;
+
+        /// <summary>Where each identity of this stitch can be found again by the next one.</summary>
+        internal Dictionary<long, ComponentId> ByAnchor { get; } = [];
+
+        /// <summary>The identity the previous stitch gave whatever stood at one of these anchors — the first
+        /// of them that names anybody still free — or a freshly minted one.</summary>
+        internal ComponentId Of(long anchor, long fallback = Nowhere)
+        {
+            ComponentId id = Recall(anchor);
+            if (!id.IsSet) id = Recall(fallback);
+            if (!id.IsSet) id = ComponentId.Mint();
+            _taken.Add(id.Value);
+            Claim(anchor, id);
+            Claim(fallback, id);
+            return id;
+        }
+
+        private ComponentId Recall(long anchor) =>
+            anchor != Nowhere && _previous != null
+            && _previous._byAnchor.TryGetValue(anchor, out ComponentId was) && !_taken.Contains(was.Value)
+                ? was
+                : ComponentId.None;
+
+        private void Claim(long anchor, ComponentId id)
+        {
+            if (anchor != Nowhere) ByAnchor.TryAdd(anchor, id);
+        }
     }
 
     private static IReadOnlyList<CarHandle> Handles(PrefabFile prefab, CarDeformPart part, Rig rig)
@@ -393,8 +467,9 @@ public sealed partial class Car
         {
             int joint = was.BoneJoint;
             if (!was.IsBare || joint < 0 || joint >= rig.BonesByJoint.Length) continue;
-            // Still standing under this anchor — renamed, or given a deform part of its own, but not lost.
-            if (byAnchor.ContainsKey(Anchor(joint, partIndex: -1))) continue;
+            // Something is still keyed on this joint — the same bone renamed, or a part that has since claimed
+            // it, which keys on its own place in the part list AND on the joint. Either way, not lost.
+            if (byAnchor.ContainsKey(AtJoint(joint))) continue;
 
             // The bone this joint holds NOW, and the one the component stood on THEN. Both have to be dark
             // before this is a loss: a push that inserts a bone renumbers every joint above it, and reading

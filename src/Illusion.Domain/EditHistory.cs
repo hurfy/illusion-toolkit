@@ -20,11 +20,35 @@ public sealed class EditHistory
     public void Push(IEditAction action)
     {
         _undo.Add(action);
-        // Snapshot-then-clear so a throwing Discard cannot leave a stale action on the redo stack.
-        IEditAction[] dropped = _redo.ToArray();
-        _redo.Clear();
+        IEditAction[] dropped = TakeRedo();
         Changed?.Invoke();
         foreach (IEditAction a in dropped) a.Discard();
+    }
+
+    /// <summary>
+    /// Drops the redo branch alone, leaving the undo stack — what a change that did NOT come off this stack
+    /// does to it.
+    ///
+    /// <para>
+    /// A Blender push is the case: it rewrites the very geometry a redo would put its snapshot back over, so
+    /// every action on the branch is now a recipe for a scene that no longer exists. The undo stack stays,
+    /// because it is the way back out and it is what a modder reaches for when a push went wrong.
+    /// </para>
+    /// </summary>
+    public void ClearRedo()
+    {
+        IEditAction[] dropped = TakeRedo();
+        if (dropped.Length == 0) return;
+        Changed?.Invoke();
+        foreach (IEditAction a in dropped) a.Discard();
+    }
+
+    // Snapshot-then-clear so a throwing Discard cannot leave a stale action on the redo stack.
+    private IEditAction[] TakeRedo()
+    {
+        IEditAction[] dropped = _redo.ToArray();
+        _redo.Clear();
+        return dropped;
     }
 
     /// <summary>Reverts the most recent edit (no-op when empty).</summary>

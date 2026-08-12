@@ -237,10 +237,31 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     public EditHistory History => Editing.History;
 
     /// <summary>Reverts the last transform edit (gizmo drag or numeric field).</summary>
-    public void Undo() => Editing.History.Undo();
+    public void Undo() => Unwind(Editing.History.Undo, "Undo");
 
     /// <summary>Re-applies the last undone transform edit.</summary>
-    public void Redo() => Editing.History.Redo();
+    public void Redo() => Unwind(Editing.History.Redo, "Redo");
+
+    /// <summary>
+    /// One step of the history, taken while a Blender push cannot be landing.
+    ///
+    /// <para>
+    /// A step is a WRITE to the same frame graph a push reads on its own thread and rewrites on this one — it
+    /// puts a mesh back, restores a car's prefab bytes, gives a deleted frame its parents again — so the two
+    /// take the same gate the component-level edits take. It is refused rather than made to wait, for the
+    /// reason the gate itself gives: this thread is the one the push comes back to.
+    /// </para>
+    /// </summary>
+    private void Unwind(Action step, string what)
+    {
+        if (!BridgeSession.TryHoldForEdit())
+        {
+            RaiseNotice($"a push from Blender is landing — {what} again in a moment");
+            return;
+        }
+        try { step(); }
+        finally { BridgeSession.ReleaseAfterEdit(); }
+    }
 
     /// <summary>Whether the selection has anything deletable — a frame object or a collision placement.</summary>
     public bool CanDeleteSelection() =>
@@ -676,6 +697,39 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     public event Action? BridgeStateChanged;
 
     internal void RaiseBridgeStateChanged() => BridgeStateChanged?.Invoke();
+
+    /// <summary>
+    /// A push from Blender is about to change the scene. UI thread, and always paired with
+    /// <see cref="PushLanded"/> — the push raises the second one even when it fails part way through.
+    ///
+    /// <para>
+    /// Views that describe the scene rather than draw it use the pair as a transaction: a car's components
+    /// are stitched out of the frame graph a push rewrites, and stitching one in the middle of the apply
+    /// would describe a car whose frames are half swapped. What the modder had selected is worth remembering
+    /// here, too — by the time the push has landed, the tree can no longer say what it was looking at.
+    /// </para>
+    /// </summary>
+    public event Action? PushLanding;
+
+    /// <summary>…and it has landed, with the names of the bones it moved. UI thread.</summary>
+    public event Action<IReadOnlyList<string>>? PushLanded;
+
+    internal void RaisePushLanding() => PushLanding?.Invoke();
+
+    /// <param name="movedBones">The bones this push wrote a new rest transform into, by name. Empty for a
+    /// push that was about geometry alone, which is most of them.</param>
+    internal void RaisePushLanded(IReadOnlyList<string> movedBones)
+    {
+        // Every snapshot on the redo branch was taken against the scene as it stood BEFORE the push, and a
+        // push rewrites the very geometry one of them would put its bytes back over. The undo stack stays: it
+        // is the way back out, and it is what a modder reaches for when a push went wrong.
+        //
+        // In a finally, because dropping the branch runs Discard() over actions that release GPU meshes: one
+        // of those throwing must not swallow the end of the transaction, or a view that stopped following the
+        // scene at PushLanding would never start again.
+        try { History.ClearRedo(); }
+        finally { PushLanded?.Invoke(movedBones); }
+    }
 
     /// <summary>How many objects are currently open in Blender (0 = no active edit session).</summary>
     public int BridgeEditedCount => BridgeSession.ExportedCount;

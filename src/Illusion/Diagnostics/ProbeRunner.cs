@@ -770,6 +770,16 @@ internal static class ProbeRunner
                 ComponentTreeProbes.RunComponentTreeProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // What a push from Blender does to a car somebody is editing: the resolver run again over what
+            // landed, a renamed bone leaving the part where it was rather than swapping identities with the
+            // bare component it mints, the selection put back by identity and reported when it cannot be, the
+            // redo branch dropped, the components a push moved named the way the tree names them, and every
+            // component-level intent refused while the push has the car. Driven at the seam the bridge raises
+            // — Blender is never launched. Optional arg = the car to focus on.
+            // Output: %TEMP%\illusion_car_push.txt
+            case "--probe-car-push":
+                CarPushProbes.RunCarPushProbe(args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // What survives past fifty metres: how many levels each car carries, how far the bone palette
             // falls between them, which bones keep geometry at the far one, and what the aggregate stitches
             // when it is read there. The far level is a SHELL, and the switch rests on that being true.

@@ -581,6 +581,32 @@ internal sealed class BridgeSessionController : IDisposable
     // frame buffers a concurrent apply would be mutating.
     private readonly SemaphoreSlim _pushGate = new(1, 1);
 
+    /// <summary>
+    /// Takes the same gate a push takes, so that a component-level edit and a push are never applied at the
+    /// same time — false when a push has it, and the edit is then refused rather than made.
+    ///
+    /// <para>
+    /// The two sides wait DIFFERENTLY, and that asymmetry is the whole design. A push blocks: it runs on the
+    /// bridge's own thread, and an edit holds the gate for the length of one intent and never waits on
+    /// anything. The editor does not block, because a push holds the gate across the dispatcher calls that
+    /// apply it — a UI thread waiting here while the push waits for the UI thread is a deadlock, and a frozen
+    /// window is a worse answer than "try again in a moment".
+    /// </para>
+    /// <para>
+    /// What it protects is real: the push computes each mesh's application on its own thread, reading the very
+    /// frame graph a component-level edit adds a marker's Dummy to and hands to <c>Car.Save</c> to serialize.
+    /// </para>
+    /// <para>
+    /// What it does NOT yet cover: the Build/Save path, which serializes the same graph from the file menu
+    /// and has raced a push since the bridge landed. It is a wider seam than this ticket's, and it is left
+    /// where it was rather than half-taken here.
+    /// </para>
+    /// </summary>
+    internal bool TryHoldForEdit() => _pushGate.Wait(0);
+
+    /// <inheritdoc cref="TryHoldForEdit"/>
+    internal void ReleaseAfterEdit() => _pushGate.Release();
+
     // FIFO ordering for pushes — see OnMessage. The gate above serializes; this preserves arrival order.
     private readonly object _pushChainLock = new();
     private Task _pushChain = Task.CompletedTask;
@@ -591,6 +617,11 @@ internal sealed class BridgeSessionController : IDisposable
     {
         var ack = new PushAckMessage();
         _pushGate.Wait();
+        // Whether the scene has been told a push is coming, so the pair is closed even when the apply throws
+        // half way through — a view left waiting for the end of a transaction that never came would stop
+        // describing the scene for the rest of the session.
+        bool announced = false;
+        var movedBones = new List<string>();
         try
         {
             ExchangeContainer container = ExchangeReader.Read(push.File);
@@ -809,6 +840,20 @@ internal sealed class BridgeSessionController : IDisposable
                 });
             }
 
+            // Everything above this line only READ the scene. From here it is being changed, so the views
+            // that describe it are told — and told again in the finally below, whatever happens in between.
+            //
+            // Only when there IS something to change. A push whose every object was skipped — a stale session
+            // after Blender was reopened, or hulls that came back exactly as they went out — leaves the scene
+            // as it found it, and announcing one would re-stitch a car nothing happened to and drop a redo
+            // branch that is still perfectly replayable.
+            if (rigEdits.Count > 0 || geometry.Count > 0 || transforms.Count > 0 || reshapes.Count > 0
+                || newHulls.Count > 0 || newPayloads.Count > 0 || deleteNodes.Count > 0)
+            {
+                announced = true;
+                _host.Dispatcher.Invoke(_host.RaisePushLanding);
+            }
+
             // The rigs come back before anything else touches the scene: a bone pose is what the file
             // stores as a rest transform, and the meshes pushed alongside were evaluated against it.
             int bonesMoved = 0;
@@ -824,6 +869,11 @@ internal sealed class BridgeSessionController : IDisposable
                         _host.Streamer.RefreshRig(node);
                         _host.Persistence.MarkFrameModified(node);
                         bonesMoved += pose.Moved.Count;
+                        // A bone IS a component of a car, so which ones moved is the one thing this push can
+                        // say in the modder's terms — and it is said by naming the bone and letting the car
+                        // aggregate resolve it, so that the push and the tree are talking about the same
+                        // component rather than each keeping a mapping of its own.
+                        movedBones.AddRange(pose.Moved);
                     }
                     _host.RaiseSelectionTransformChanged();
                 });
@@ -994,6 +1044,22 @@ internal sealed class BridgeSessionController : IDisposable
         }
         finally
         {
+            // The scene has stopped moving: the resolver runs again over what landed, and the redo branch —
+            // every action on which was recorded against the scene as it was — goes. BEFORE the gate is
+            // released, because an edit that slipped in between would be made against a view still waiting
+            // for the end of this push.
+            //
+            // And it may not throw past here, which is why the catch is as wide as it is: the release below
+            // would be skipped, every component edit for the rest of the session would refuse with "a push is
+            // landing", and Blender would never get its ack — a far worse failure than the one being reported.
+            if (announced)
+            {
+                try { _host.Dispatcher.Invoke(() => _host.RaisePushLanded(movedBones)); }
+                catch (Exception ex)
+                {
+                    Notice?.Invoke("The car could not be re-read after the push: " + ex.Message, true);
+                }
+            }
             _pushGate.Release();
             try { _client?.Send(ack); }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { }
