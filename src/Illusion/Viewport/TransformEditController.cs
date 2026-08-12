@@ -529,6 +529,14 @@ internal sealed class TransformEditController
                 // node is still in the tree (both lookups walk up to the owning document).
                 _host.Persistence.MarkFrameModified(it.Node);
                 _host.Persistence.MarkNameTableDirty(it.Node);
+                // A deleted collision stub takes its prefab volume with it, through the aggregate — and that
+                // save can refuse. The row goes either way, so a refusal leaves the car solid where nothing
+                // is drawn, which nobody can see without being told.
+                if (it.Detached.VolumesRefused is { } why)
+                {
+                    _host.RaiseNotice(
+                        "the collision of a deleted shape is still in the car's prefab: " + why, isError: true);
+                }
             }
             _host.Rnd?.DetachMeshes(it.Meshes);
             _host.Tree.MeshCount -= it.Meshes.Length;

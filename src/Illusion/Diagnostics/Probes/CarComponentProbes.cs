@@ -47,6 +47,7 @@ internal static class CarComponentProbes
             string folder = Path.Combine(MafiaEnvironment.PcFolder, "sds", "cars");
 
             Census(sb, folder, Check);
+            Reachable(sb, folder, Check);
             Identity(sb, folder, focus, Check);
             Broken(sb, folder, focus, Check);
             sb.Insert(0, $"CAR COMPONENTS PROBE ({focus}): {pass} passed, {fail} failed\n\n");
@@ -325,6 +326,140 @@ internal static class CarComponentProbes
             && faultsByKind.GetValueOrDefault(CarFaultKind.NoBody) == 0,
             string.Join(", ", faultsByKind.Select(p => $"{p.Key}×{p.Value}")));
     }
+
+    // ── nothing the assembly holds is unreachable ──
+
+    /// <summary>
+    /// Every number and every frame reference the retired Prefab tab put on screen, asked for again through
+    /// the component view — because "the tab is gone and nothing it showed is now unreachable" is a promise
+    /// about a list, and a list is exactly the sort of thing that loses an entry unnoticed.
+    ///
+    /// <para>
+    /// Reachability is the ADDRESS, not the label: a field carries the slot it is written through, so this
+    /// walks every component's damage fields, its own-bone rows, its handles and its markers, collects the
+    /// addresses they offer, and compares that set with what the tab used to reach. A slot no car in the
+    /// corpus carries at all — a bus entry on a coupé — is not a hole, so the comparison is over the whole
+    /// corpus and counts a slot as reachable if any car offers it and as ABSENT if no car has a row for it.
+    /// </para>
+    /// </summary>
+    private static void Reachable(StringBuilder sb, string folder, Action<string, bool, string> check)
+    {
+        sb.AppendLine("\n\n════ what the retired Prefab tab showed, reached through the components ════");
+
+        var values = new HashSet<CarValueSlot>();
+        var frames = new HashSet<CarFrameSlot>();
+        var carried = new HashSet<CarValueSlot>();
+        var carriedFrames = new HashSet<CarFrameSlot>();
+
+        foreach (FileInfo sds in new DirectoryInfo(folder).GetFiles("*.sds").OrderBy(f => f.Name))
+        {
+            string extracted = MafiaEnvironment.ExtractedDir(sds);
+            if (!File.Exists(Path.Combine(extracted, "SDSContent.xml"))) continue;
+
+            Car? car;
+            try { car = Car.ReadFrom(extracted); }
+            catch (Exception) { continue; }
+            if (car?.Prefab.Car == null) continue;
+
+            foreach (CarField field in Fields(car)) Take(field, values, frames);
+
+            // What this car actually HAS a row for, so a slot nothing in the corpus carries can be told
+            // apart from one the component view forgot.
+            foreach (CarValueSlot slot in ShownValues)
+            {
+                if (!float.IsNaN(car.Prefab.GetCarValue(slot, 0))) carried.Add(slot);
+            }
+            foreach (CarFrameSlot slot in ShownFrames)
+            {
+                if (car.Prefab.CarSlotCount(slot) > 0) carriedFrames.Add(slot);
+            }
+        }
+
+        var missingValues = ShownValues.Where(s => carried.Contains(s) && !values.Contains(s)).ToList();
+        var missingFrames = ShownFrames.Where(s => carriedFrames.Contains(s) && !frames.Contains(s)).ToList();
+
+        sb.AppendLine($"    numbers the tab showed: {ShownValues.Length}, carried by some car {carried.Count}, "
+            + $"reachable on a component {values.Count(v => carried.Contains(v))}");
+        sb.AppendLine($"    frame references: {ShownFrames.Length}, carried by some car {carriedFrames.Count}, "
+            + $"reachable {frames.Count(v => carriedFrames.Contains(v))}");
+        foreach (CarValueSlot slot in missingValues) sb.AppendLine($"      UNREACHABLE number {slot}");
+        foreach (CarFrameSlot slot in missingFrames) sb.AppendLine($"      UNREACHABLE reference {slot}");
+        foreach (CarValueSlot slot in ShownValues.Where(s => !carried.Contains(s)))
+        {
+            sb.AppendLine($"      (no shipped car carries {slot})");
+        }
+        foreach (CarFrameSlot slot in ShownFrames.Where(s => !carriedFrames.Contains(s)))
+        {
+            sb.AppendLine($"      (no shipped car carries {slot})");
+        }
+
+        check("every number the Prefab tab showed is edited on a component now",
+            missingValues.Count == 0, string.Join(", ", missingValues));
+        check("…and so is every frame reference it let you re-point",
+            missingFrames.Count == 0, string.Join(", ", missingFrames));
+    }
+
+    /// <summary>Every field the component view offers on one car, wherever it hangs.</summary>
+    private static IEnumerable<CarField> Fields(Car car)
+    {
+        foreach (CarComponent component in car.Components)
+        {
+            foreach (CarField field in component.DamageFields) yield return field;
+            foreach (CarHandle handle in component.Handles)
+            {
+                foreach (CarField field in handle.Fields) yield return field;
+            }
+            foreach (CarComponentRow row in component.Rows)
+            {
+                foreach (CarField field in row.Fields) yield return field;
+            }
+            foreach (CarMarker marker in component.Markers)
+            {
+                foreach (CarField field in marker.Fields) yield return field;
+            }
+        }
+    }
+
+    private static void Take(CarField field, HashSet<CarValueSlot> values, HashSet<CarFrameSlot> frames)
+    {
+        if (field.Kind == CarFieldKind.Frame) frames.Add(field.FrameSlot);
+        else values.Add(field.Slot);
+    }
+
+    /// <summary>
+    /// The numbers the Prefab tab put on screen. The raw flag WORD is deliberately not among them: it is
+    /// reachable as five named bits instead, and writing the word back through a float is the very bug that
+    /// cost the top of a 0x80000508 — see <c>--probe-car-damage</c>.
+    /// </summary>
+    private static readonly CarValueSlot[] ShownValues =
+    [
+        CarValueSlot.SeatType, CarValueSlot.SeatPosition,
+        CarValueSlot.DoorHandle, CarValueSlot.DoorLock,
+        CarValueSlot.WindowDepth, CarValueSlot.WindowOpenable,
+        CarValueSlot.AxleType, CarValueSlot.AxleBrakeDrumRadius, CarValueSlot.AxleBrakeDrumMass,
+        CarValueSlot.AxleMass,
+        CarValueSlot.ClimbBoxMin, CarValueSlot.ClimbBoxMax,
+        CarValueSlot.BoneRange, CarValueSlot.ReduceBboxZ,
+        CarValueSlot.DcbResistance, CarValueSlot.DcbHitpoints,
+        CarValueSlot.DeformPartType, CarValueSlot.DeformPartEffectGroup, CarValueSlot.DeformCentreOfMass,
+        CarValueSlot.DeformMass, CarValueSlot.DeformResistance,
+        CarValueSlot.DeformSpeedMin, CarValueSlot.DeformSpeedMax,
+        CarValueSlot.DeformEnergyStart, CarValueSlot.DeformEnergyDrop,
+    ];
+
+    /// <summary>The frame references it let you re-point.</summary>
+    private static readonly CarFrameSlot[] ShownFrames =
+    [
+        CarFrameSlot.RootFrame, CarFrameSlot.ScaleBone, CarFrameSlot.Body, CarFrameSlot.RestBone,
+        CarFrameSlot.SnowRest, CarFrameSlot.MotorVentilator,
+        // A light is a marker WHILE its slot is filled, and a slot nothing fills has no marker to be on — so
+        // these are asked for as chassis rows, and an empty one is still a row.
+        CarFrameSlot.Headlight, CarFrameSlot.Backlight, CarFrameSlot.Toplight,
+        CarFrameSlot.DrivingWheel, CarFrameSlot.LocalWindEmitter,
+        CarFrameSlot.BusSeat, CarFrameSlot.EnterBus,
+        CarFrameSlot.DrWheelSnapWheel, CarFrameSlot.DrWheelSnapLeft, CarFrameSlot.DrWheelSnapRight,
+        CarFrameSlot.SeatDoor, CarFrameSlot.AxleBrakeDrum, CarFrameSlot.DcbDoor,
+    ];
 
     // ── identity: the toolkit's own, and what it has to survive ──
 

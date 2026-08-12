@@ -7,7 +7,6 @@ using Illusion.Assets.Bridge;
 using Illusion.Assets.Collisions;
 using Illusion.Bridge.Payload;
 using Illusion.Assets.Sds;
-using Illusion.Domain;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
@@ -52,7 +51,7 @@ internal static class CarPhysicsProbes
             Floaters(sb, folder, focus, Check);
             Delivery(sb, folder, focus, Check);
             if (reference != null) CompareWithStock(sb, folder, focus, reference);
-            RoundTrip(sb, folder, focus, Check);
+            VolumeValues(sb, folder, focus, Check);
             SecondInfluence(sb, folder, focus, Check);
             CapsuleAxis(sb, folder, Check);
             Census(sb, folder, Check, focus);
@@ -840,15 +839,21 @@ internal static class CarPhysicsProbes
     private static IEnumerable<string> Added(HashSet<string> now, HashSet<string> before) =>
         now.Except(before).OrderBy(n => n, StringComparer.Ordinal);
 
-    // ── giving a part something to be shot at, end to end, on a copy ──
+    // ── the numbers a volume is made of, on a copy ──
 
     /// <summary>
-    /// The whole chain the reported bug turns on, run on a scratch copy: a bone gets a box, and the box has to
-    /// exist in ALL THREE places — as an ItemDesc record the manifest announces, as a stub in the frame graph,
-    /// and as a collision volume in the prefab. The third is the one that was missing, and the one the game
-    /// reads; a box with the first two is exactly the "it is just a mesh" the user described.
+    /// Adding collision to a bone end to end used to be measured here, against the builder that wrote the
+    /// prefab, the ItemDesc record and the stub on its own. That builder is gone: a collision is authored on
+    /// the component by role and shape, and <c>--probe-collision-role</c> asks the same chain of the
+    /// aggregate with the shipped corpus as the oracle.
+    ///
+    /// <para>
+    /// What stays here is the FORMAT half, which is nobody else's: every number of every volume reached one
+    /// flat index and one axis at a time, and a volume dropped and put back at the same index. Run on a
+    /// scratch copy — the player's car is never touched, and nothing here writes a file at all.
+    /// </para>
     /// </summary>
-    private static void RoundTrip(
+    private static void VolumeValues(
         StringBuilder sb, string folder, string focus, Action<string, bool, string> check)
     {
         var car = new FileInfo(Path.Combine(folder, focus + ".sds"));
@@ -857,7 +862,7 @@ internal static class CarPhysicsProbes
         if (!File.Exists(Path.Combine(source, "SDSContent.xml"))) return;
         string scratch = Path.Combine(Path.GetTempPath(), "illusion_carphys_scratch");
 
-        sb.AppendLine("\n\n════ adding collision to a bone, on a copy ════");
+        sb.AppendLine("\n\n════ every number a collision volume is made of ════");
         try
         {
             if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
@@ -865,8 +870,9 @@ internal static class CarPhysicsProbes
             foreach (string file in Directory.GetFiles(source))
                 File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
 
-            // Rewriting a prefab must be a no-op when nothing was asked for. Everything below writes this
-            // file, so a writer that does not reproduce its input would corrupt a car on the first edit.
+            // Rewriting a prefab must be a no-op when nothing was asked for. Everything that edits a car
+            // writes this file, so a writer that does not reproduce its input would corrupt one on the first
+            // edit.
             string? prf = SdsManifest.Load(scratch).GetFiles("PREFAB").FirstOrDefault();
             if (prf != null)
             {
@@ -877,472 +883,11 @@ internal static class CarPhysicsProbes
                     $"{before.Length} vs {after.Length} bytes, first difference at {FirstDiff(before, after)}");
             }
 
-            FrameResource? fr = SdsMeshLoader.OpenScene(scratch).FrameResource;
-            FrameObjectModel? model = fr?.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
-            if (fr == null || model == null) { sb.AppendLine("no skinned model"); return; }
-
-            string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
-            IReadOnlyList<string> partBones = CarPhysicsVolumes.PartBones(scratch, fr);
-            sb.AppendLine($"    bones that are a deformable part, so can carry collision ({partBones.Count}): "
-                + string.Join(", ", partBones));
-            check("a car has bones that can carry collision", partBones.Count > 0, "");
-            if (partBones.Count == 0) return;
-
-            string target = partBones.Contains("coverF", StringComparer.Ordinal) ? "coverF" : partBones[0];
-            int bone = Array.FindIndex(bones, n => string.Equals(n, target, StringComparison.Ordinal));
-            int volumesBefore = CarPhysicsVolumes.Load(scratch, fr).Count;
-
-            var size = new Vector3(0.30f, 0.20f, 0.05f);
-            Matrix4x4 place = Matrix4x4.CreateTranslation(0.11f, 0.22f, 0.33f);
-            AddedCollisionBox? added = CarCollisionBuilder.AddShape(
-                model, bone, "illusion_physics_probe_Collision", RigidBodyShape.Box, size, place, scratch,
-                out string? refusal);
-            check($"a box can be added to \"{target}\"", added != null, refusal ?? "");
-            if (added == null) return;
-
-            IReadOnlyList<PlacedPhysicsVolume> now = CarPhysicsVolumes.Load(scratch, fr);
-            PlacedPhysicsVolume? mine = now.FirstOrDefault(v => ReferenceEquals(v.Stub, added.Frame));
-            check("…and the prefab gained a collision volume for it — the half the game reads",
-                now.Count == volumesBefore + 1 && mine != null,
-                $"{volumesBefore} -> {now.Count} volumes");
-            if (mine == null) return;
-
-            // Adding the SAME NAME twice. Deleting a collision leaves its ItemDesc record behind, so the
-            // second add has to mint clear of BOTH of the orphan's hashes — the file one and the data one.
-            // When it did not, two records answered to one data hash, the new volume resolved to the orphan
-            // and lost its stub: the shape drew at the prefab placement, ignoring the scale and standing
-            // still while the gizmo moved.
-            AddedCollisionBox? twin = CarCollisionBuilder.AddShape(
-                model, bone, "illusion_physics_probe_Collision_2", RigidBodyShape.Box, size, place, scratch,
-                out string? twinRefusal);
-            check("a second shape can be added", twin != null, twinRefusal ?? "");
-            if (twin != null)
-            {
-                ulong twinData = (twin.Shape.Element as RigidBodyElement)?.DataHash ?? 0;
-                ulong mineData = (added.Shape.Element as RigidBodyElement)?.DataHash ?? 0;
-                check("…and its hashes collide with nothing already in the archive",
-                    twin.Shape.Hash != added.Shape.Hash && twinData != mineData
-                    && twinData != added.Shape.Hash && twin.Shape.Hash != mineData
-                    && twinData != 0 && mineData != 0,
-                    $"file 0x{twin.Shape.Hash:X16}/0x{added.Shape.Hash:X16}, "
-                        + $"data 0x{twinData:X16}/0x{mineData:X16}");
-                check("…and both volumes resolve to their OWN stub, which is what the overlay draws by",
-                    CarPhysicsVolumes.Load(scratch, fr)
-                        .Count(v => ReferenceEquals(v.Stub, added.Frame) || ReferenceEquals(v.Stub, twin.Frame))
-                        == 2, "");
-                CarCollisionBuilder.Remove(model, twin);
-            }
-
-            check("the volume names the shape by its DATA hash, the way every shipped one does",
-                mine.Volume.ShapeHash == added.Shape.Element!.DataHash && mine.Shape != null,
-                $"0x{mine.Volume.ShapeHash:X16} vs 0x{added.Shape.Element!.DataHash:X16}");
-            check("the volume sits on the bone that was chosen",
-                mine.Bone == bone, $"{mine.BoneName} (part {mine.Part}, {mine.PartKind})");
-            check("the placement survives the axis conversion into the file and back",
-                (mine.Volume.Transform.Translation - place.Translation).Length() < 1e-4f,
-                $"{mine.Volume.Transform.Translation} vs {place.Translation}");
-
-            // Where a shape LANDS when the thing that was selected is not the part it is given to. The dialog
-            // answers "which part" with the body whenever the selection is not itself a deformable part — and
-            // no Dummy ever is — so asking for a shape while pointing at a climb box used to put it at the
-            // body bone, which on a car is its centre. Reported as "the transform is strange in places".
-            FrameObjectDummy? pointed = fr.FrameObjects.Values.OfType<FrameObjectDummy>()
-                .FirstOrDefault(d => d.WorldTransform.Translation.Length() > 0.2f);
-            if (pointed != null)
-            {
-                Matrix4x4 landing = TransformMath.ComputeLocalTransform(
-                    pointed.WorldTransform, model.GetJointWorldTransform(bone));
-                TransformMath.TryDecompose(landing, out _, out Quaternion rotation, out Vector3 position);
-                AddedCollisionBox? atDummy = CarCollisionBuilder.AddShape(
-                    model, bone, "illusion_landing_probe_Collision", RigidBodyShape.Box, size,
-                    TransformMath.Compose(rotation, Vector3.One, position), scratch, out string? landRefusal);
-                check($"a shape asked for while pointing at \"{pointed.Name}\" lands THERE, not at the "
-                    + $"\"{target}\" bone it belongs to", atDummy != null, landRefusal ?? "");
-                if (atDummy != null)
-                {
-                    PlacedPhysicsVolume? landed = CarPhysicsVolumes.Load(scratch, fr)
-                        .FirstOrDefault(v => ReferenceEquals(v.Stub, atDummy.Frame));
-                    float off = landed == null
-                        ? float.NaN
-                        : (landed.World.Translation - pointed.WorldTransform.Translation).Length();
-                    check("…and the prefab agrees, so the game puts it where the editor drew it",
-                        landed != null && off < 1e-3f,
-                        landed == null ? "no volume" : $"{off:F4} m away from the dummy");
-                    CarCollisionBuilder.Remove(model, atDummy);
-                }
-            }
-
-            // The SELF-DESCRIBING volume — what the second report was about: "I change the Z of windowFR2 and
-            // it moves along Y, and undo does not put it back". Two separate questions, so two checks.
-            PlacedPhysicsVolume? loose = CarPhysicsVolumes.Load(scratch, fr)
-                .FirstOrDefault(v => v.Stub == null && v.Bone >= 0
-                    && v.BoneName.Contains("window", StringComparison.OrdinalIgnoreCase))
-                ?? CarPhysicsVolumes.Load(scratch, fr).FirstOrDefault(v => v.Stub == null && v.Bone >= 0);
-            if (loose != null && FlatIndexOf(scratch, loose) is var slot && slot >= 0)
-            {
-                float was = loose.Volume.Transform.Translation.Z;
-                Vector3 before = loose.World.Translation;
-                Illusion.Assets.Prefabs.PrefabEditing.ValueChange? edit =
-                    Illusion.Assets.Prefabs.PrefabEditing.SetValueIn(
-                        scratch, CarValueSlot.CollisionVolumePosition, slot, 2, was + 0.25f, "probe");
-
-                PlacedPhysicsVolume? after = CarPhysicsVolumes.Load(scratch, fr)
-                    .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
-                Vector3 shifted = after == null ? Vector3.Zero : after.World.Translation - before;
-                sb.AppendLine($"    \"{loose.BoneName}\" is written in \"{ParentBoneName(scratch, fr, loose)}\" "
-                    + $"space: +0.25 on the field's Z moves it {shifted:F3} in the world — its local axes point "
-                    + $"X{Row(after?.World ?? Matrix4x4.Identity, 0):F2} Y{Row(after?.World ?? Matrix4x4.Identity, 1):F2} "
-                    + $"Z{Row(after?.World ?? Matrix4x4.Identity, 2):F2}");
-                check("a self-describing volume's position field writes the axis it says it does",
-                    edit != null && after != null
-                    && MathF.Abs(after.Volume.Transform.Translation.Z - (was + 0.25f)) < 1e-4f
-                    && MathF.Abs(after.Volume.Transform.Translation.X - loose.Volume.Transform.Translation.X) < 1e-5f
-                    && MathF.Abs(after.Volume.Transform.Translation.Y - loose.Volume.Transform.Translation.Y) < 1e-5f,
-                    after == null ? "the volume is gone" : $"{after.Volume.Transform.Translation:F4}");
-
-                // …and the undo of it, which is what Ctrl+Z runs. A negative starting number is the case the
-                // report singled out, so the assertion is on exact equality rather than on a tolerance.
-                if (edit != null)
-                {
-                    Illusion.Assets.Prefabs.PrefabEditing.RestoreValue(edit, edit.Before);
-                    PlacedPhysicsVolume? back = CarPhysicsVolumes.Load(scratch, fr)
-                        .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
-                    check($"…and undoing it puts back exactly what was there (was {was:F4})",
-                        back != null && back.Volume.Transform.Translation == loose.Volume.Transform.Translation,
-                        back == null ? "the volume is gone" : $"{back.Volume.Transform.Translation:F4} vs "
-                            + $"{loose.Volume.Transform.Translation:F4}");
-                }
-            }
-
-            // The PANEL's own arithmetic: the position rows are shown in the car's axes, not the bone's, so
-            // "+0.25 on Y" has to move the box a quarter of a metre along the car and nowhere else. This is
-            // the fix for "Y moves it along Z and Z along Y" — the field was reading the raw bone-space
-            // numbers, and most car bones are turned.
-            if (loose != null)
-            {
-                var worlds = new Dictionary<ulong, Matrix4x4>();
-                string[] rig = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
-                for (int i = 0; i < rig.Length; i++) worlds.TryAdd(Fnv64.Hash(rig[i]), model.GetJointWorldTransform(i));
-
-                Illusion.Assets.Prefabs.PrefabAssembly? shown =
-                    Illusion.Assets.Prefabs.PrefabAssembly.ReadFrom(scratch, null, worlds);
-                Illusion.Assets.Prefabs.PrefabRefView? posRow = shown?.Entries
-                    .SelectMany(e => e.Groups).Where(g => g.Title == "Collision").SelectMany(g => g.Rows)
-                    .FirstOrDefault(r => r.ValueSlot == CarValueSlot.CollisionVolumePosition
-                        && r.Index == FlatIndexOf(scratch, loose));
-
-                PlacedPhysicsVolume? nowAt = CarPhysicsVolumes.Load(scratch, fr)
-                    .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
-                check("the panel shows a volume's position in the CAR's axes, where the viewport draws it",
-                    posRow is { Space: not null } && nowAt != null
-                    && (new Vector3(posRow.X, posRow.Y, posRow.Z) - nowAt.World.Translation).Length() < 1e-3f,
-                    posRow == null ? "no position row"
-                        : $"panel {new Vector3(posRow.X, posRow.Y, posRow.Z):F3} vs world {nowAt?.World.Translation:F3}");
-
-                // …and writing one of those axes back moves it along THAT axis of the car, which is the whole
-                // point: the conversion has to run in both directions or the field is worse than raw.
-                if (posRow is { Space: { } space } && nowAt != null
-                    && Matrix4x4.Invert(space, out Matrix4x4 back))
-                {
-                    var wanted = new Vector3(posRow.X, posRow.Y + 0.25f, posRow.Z);
-                    Vector3 asStored = Vector3.Transform(wanted, back);
-                    for (int at = 0; at < 3; at++)
-                    {
-                        Illusion.Assets.Prefabs.PrefabEditing.SetValueIn(
-                            scratch, CarValueSlot.CollisionVolumePosition, posRow.Index, at,
-                            at == 0 ? asStored.X : at == 1 ? asStored.Y : asStored.Z, "probe");
-                    }
-                    PlacedPhysicsVolume? ended = CarPhysicsVolumes.Load(scratch, fr)
-                        .FirstOrDefault(v => v.Part == loose.Part && v.Volume.Index == loose.Volume.Index);
-                    Vector3 went = (ended?.World.Translation ?? Vector3.Zero) - nowAt.World.Translation;
-                    check("…and typing +0.25 into that Y moves it a quarter-metre along the car, nowhere else",
-                        ended != null && (went - new Vector3(0f, 0.25f, 0f)).Length() < 2e-3f,
-                        $"it went {went:F4}");
-                }
-            }
-
-            // A SELF-DESCRIBING volume, which the toolkit could not make at all until now. Every box it added
-            // was type 5 — a placed physics shape, i.e. body collision — so hanging one on a window part
-            // changed nothing, and that is why the in-game test came back empty twice. A window is type 0 on
-            // all 527 shipped ones; this is the path that can finally write one.
-            IReadOnlyList<string> zoneBones = CarPhysicsVolumes.PartBones(scratch, fr);
-            string zoneOn = zoneBones.FirstOrDefault(b => b.Contains("window", StringComparison.OrdinalIgnoreCase))
-                ?? target;
-            int zonesBefore = CarPhysicsVolumes.Load(scratch, fr).Count;
-            var zoneSize = new Vector3(0.60f, 0.02f, 0.40f);
-            CarPhysicsVolumes.VolumeChange? zone = CarPhysicsVolumes.AddZone(
-                scratch, zoneOn, Matrix4x4.CreateTranslation(0.1f, 0.2f, 0.3f), zoneSize, 0);
-            check($"a plain GLASS volume can be added to \"{zoneOn}\"", zone != null, "");
-            if (zone != null)
-            {
-                PlacedPhysicsVolume? made = CarPhysicsVolumes.Load(scratch, fr)
-                    .FirstOrDefault(v => v.Volume.VolumeType == 0 && !v.Volume.NamesShape
-                        && (v.Volume.Size - zoneSize).Length() < 1e-4f);
-                check("…and it is type 0, names no shape, and states the size that was asked for",
-                    made != null && made.Volume.ShapeHash == 0,
-                    made == null ? "not found" : $"type {made.Volume.VolumeType}, size {made.Volume.Size:F3}");
-                check("…and it added exactly one volume",
-                    CarPhysicsVolumes.Load(scratch, fr).Count == zonesBefore + 1,
-                    $"{zonesBefore} -> {CarPhysicsVolumes.Load(scratch, fr).Count}");
-
-                CarPhysicsVolumes.Remove(zone);
-                check("…and undoing it takes that one volume away again",
-                    CarPhysicsVolumes.Load(scratch, fr).Count == zonesBefore, "");
-                CarPhysicsVolumes.Restore(zone);
-                check("…and redo puts it back, not a second one",
-                    CarPhysicsVolumes.Load(scratch, fr).Count == zonesBefore + 1, "");
-                CarPhysicsVolumes.Remove(zone);
-            }
-
-            // CHANGING what an existing volume is. The catch is that the kinds live in different spaces — a
-            // type-5 volume in its own part's bone, a self-describing one in the bone of the part it hangs
-            // off — so rewriting the type alone would leave the placement meaning something else and the box
-            // would jump. What must survive a conversion is where it IS.
-            // A shipped HULL, not one of this probe's own boxes: a hull is the case that broke — its size
-            // lives in the cooked blob, and reading a token 0.2 m instead turned a car body into a speck.
-            List<PlacedPhysicsVolume> convertible = [.. CarPhysicsVolumes.Load(scratch, fr)
-                .Where(v => v.Volume.NamesShape && v.Bone >= 0 && v.Shape != null)];
-            PlacedPhysicsVolume? toConvert =
-                convertible.FirstOrDefault(v => (v.Shape!.Element as RigidBodyElement)?.Shape
-                    == RigidBodyShape.ConvexPolyhedron)
-                ?? convertible.FirstOrDefault();
-            if (toConvert != null)
-            {
-                // Where the SPACE it covers is centred, which is what has to survive — not the placement's
-                // origin. A cooked hull sits wherever its geometry sits around that origin, while a plain box
-                // is centred on it, so the two are only the same thing for a primitive.
-                RigidBodyElement? rb = toConvert.Shape?.Element as RigidBodyElement;
-                Vector3 middle = Vector3.Zero;
-                if (rb?.Shape is RigidBodyShape.ConvexPolyhedron or RigidBodyShape.TriangleMesh
-                    && Illusion.Assets.Collisions.CarCollisionShapes.TryReadCookedBounds(
-                        rb.CookedMesh, out Vector3 hLo, out Vector3 hHi))
-                {
-                    middle = (hLo + hHi) * 0.5f;
-                }
-                Vector3 wasAt = Vector3.Transform(middle, toConvert.World);
-                sb.AppendLine($"    converting {rb?.Shape.ToString() ?? "?"} on \"{toConvert.BoneName}\" "
-                    + $"({toConvert.PartKind}), covering a space centred on {wasAt:F3}");
-                CarPhysicsVolumes.TypeChange? turned = CarPhysicsVolumes.ChangeType(
-                    scratch, fr, toConvert.Part, toConvert.Volume.Index, 0, out string? noTurn);
-                check("a placed shape can be turned into glass", turned != null, noTurn ?? "");
-                if (turned != null)
-                {
-                    PlacedPhysicsVolume? asGlass = CarPhysicsVolumes.Load(scratch, fr)
-                        .FirstOrDefault(v => v.Part == toConvert.Part && v.Volume.Index == toConvert.Volume.Index);
-                    check("…and it stays exactly where it was, though the space it is written in changed",
-                        asGlass != null && (asGlass.World.Translation - wasAt).Length() < 1e-3f,
-                        asGlass == null ? "gone" : $"{asGlass.World.Translation:F3} vs {wasAt:F3}");
-                    check("…and it now names no shape and states its own size",
-                        asGlass is { Volume.VolumeType: 0, Volume.ShapeHash: 0 } && asGlass.Volume.Size.Length() > 0.01f,
-                        asGlass == null ? "gone" : $"type {asGlass.Volume.VolumeType}, size {asGlass.Volume.Size:F3}");
-                    // A hull turned into a box has to keep its SIZE too, or it survives the conversion as a
-                    // speck: the body hull of a five-metre car came back a fifth of a metre across and read
-                    // as having vanished from the viewport.
-                    check("…and it is the size of the shape it replaced, not a token box",
-                        asGlass != null && asGlass.Volume.Size.Length() > 0.4f,
-                        asGlass == null ? "gone" : $"{asGlass.Volume.Size:F3}");
-
-                    // …and back again, which has to mint a shape because that kind is required to have one.
-                    CarPhysicsVolumes.TypeChange? back = CarPhysicsVolumes.ChangeType(
-                        scratch, fr, toConvert.Part, toConvert.Volume.Index,
-                        Illusion.Formats.Prefab.CarPhysicsVolume.ShapeVolumeType, out string? noBack);
-                    PlacedPhysicsVolume? again = back == null ? null : CarPhysicsVolumes.Load(scratch, fr)
-                        .FirstOrDefault(v => v.Part == toConvert.Part && v.Volume.Index == toConvert.Volume.Index);
-                    check("glass can be turned back into a placed shape, and a shape is minted for it",
-                        back != null && again is { Volume.NamesShape: true } && again.Shape != null,
-                        noBack ?? (again == null ? "gone" : $"shape {again.Volume.ShapeHash:X16}"));
-                    check("…and it is still in the same place after the round trip",
-                        again != null && (again.World.Translation - wasAt).Length() < 1e-3f,
-                        again == null ? "gone" : $"{again.World.Translation:F3} vs {wasAt:F3}");
-
-                    if (back != null) CarPhysicsVolumes.RestoreType(back, toBefore: true);
-                    CarPhysicsVolumes.RestoreType(turned, toBefore: true);
-                    PlacedPhysicsVolume? undone = CarPhysicsVolumes.Load(scratch, fr)
-                        .FirstOrDefault(v => v.Part == toConvert.Part && v.Volume.Index == toConvert.Volume.Index);
-                    check("…and undoing both conversions puts the original volume back",
-                        undone is { Volume.NamesShape: true }
-                        && undone.Volume.ShapeHash == toConvert.Volume.ShapeHash,
-                        undone == null ? "gone" : $"type {undone.Volume.VolumeType}");
-                }
-            }
-
-            // DELETING SEVERAL STUBS AT ONCE. Reported: "the prefab says 19 collisions, I delete TWO, and it
-            // says 18". Each stub is supposed to take its own volume with it, so two should leave 17. This
-            // walks every stub the car has and reports which volume each one claims — a stub that claims the
-            // same volume as another, or none, is the arithmetic.
-            var claims = new Dictionary<int, List<string>>();
-            var orphans = new List<string>();
-            foreach (PlacedPhysicsVolume any in CarPhysicsVolumes.Load(scratch, fr))
-            {
-                if (any.Stub == null) continue;
-                if (!claims.TryGetValue(any.Volume.Index + (any.Part * 1000), out List<string>? who))
-                {
-                    claims[any.Volume.Index + (any.Part * 1000)] = who = [];
-                }
-                who.Add(any.Stub.Name.ToString() ?? "?");
-            }
-            foreach (FrameObjectCollision stub in fr.FrameObjects!.Values.OfType<FrameObjectCollision>())
-            {
-                bool named = CarPhysicsVolumes.Load(scratch, fr).Any(v => ReferenceEquals(v.Stub, stub));
-                if (!named) orphans.Add(stub.Name.ToString() ?? "?");
-            }
-            int shared = claims.Count(p => p.Value.Count > 1);
-            sb.AppendLine($"    {fr.FrameObjects!.Values.OfType<FrameObjectCollision>().Count()} collision "
-                + $"stubs, {claims.Count} volumes claimed, {shared} claimed by more than one stub, "
-                + $"{orphans.Count} stubs claiming no volume at all"
-                + (orphans.Count > 0 ? " — " + string.Join(", ", orphans.Take(6)) : ""));
-            foreach ((int at, List<string> who) in claims.Where(p => p.Value.Count > 1).Take(6))
-            {
-                sb.AppendLine($"      part {at / 1000} volume {at % 1000} is claimed by "
-                    + string.Join(" and ", who));
-            }
-
-            // A stub that shares its volume with another means deleting both takes ONE volume away, and a
-            // stub that claims none means deleting it takes nothing. Either way the count the panel shows
-            // stops matching what was removed, which is exactly the report.
-            check("every collision stub claims a volume of its own",
-                shared == 0 && orphans.Count == 0,
-                $"{shared} volumes shared, {orphans.Count} stubs with none");
-
-            // What the reported bug actually was: moving the stub used to change only the frame graph.
-            var moved = Matrix4x4.CreateTranslation(-0.4f, 0.7f, 1.25f);
-            added.Frame.LocalTransform = moved;
-            int synced = CarPhysicsVolumes.SyncStubs(scratch, [added.Frame]);
-            PlacedPhysicsVolume? after2 = CarPhysicsVolumes.Load(scratch, fr)
-                .FirstOrDefault(v => v.Volume.ShapeHash == added.Shape.Element!.DataHash);
-            check("moving the stub carries through to the prefab volume",
-                synced == 1 && after2 != null
-                && (after2.Volume.Transform.Translation - moved.Translation).Length() < 1e-4f,
-                after2 == null ? "the volume is gone" : $"{after2.Volume.Transform.Translation} vs {moved.Translation}");
-
-            // A shipped stub, moved and synced, must land where the shipped volume already was — the two
-            // copies have to mean the same thing or the conversion is wrong in a way no probe would notice.
-            PlacedPhysicsVolume? shipped = CarPhysicsVolumes.Load(scratch, fr)
-                .FirstOrDefault(v => v.Stub != null && !ReferenceEquals(v.Stub, added.Frame));
-            if (shipped?.Stub != null)
-            {
-                Matrix4x4 asShipped = shipped.Volume.Transform;
-                Matrix4x4 asFrame = shipped.Stub.LocalTransform;
-                check("a shipped volume and its own stub already agree, under the conversion this writes",
-                    (asShipped.Translation - asFrame.Translation).Length() < 1e-3f,
-                    $"{shipped.Stub.Name}: prefab {asShipped.Translation} vs frame {asFrame.Translation}");
-            }
-
-            // Scaling the stub with the gizmo. The placement cannot carry a scale, so it has to end up in
-            // the SHAPE — dropping it is what drew a box 0.41 m thick in the editor and gave the game one
-            // 0.10 m thick, which a character's arm goes straight through.
-            Matrix4x4 grown = added.Frame.LocalTransform;
-            grown.M31 *= 4f;
-            grown.M32 *= 4f;
-            grown.M33 *= 4f;
-            added.Frame.LocalTransform = grown;
-            int bakedCount = CarPhysicsVolumes.BakeScales(scratch, [added.Frame]);
-            ItemDescFile grownShape = ItemDescFile.Load(added.ShapeFile);
-            float thickness = (grownShape.Element as RigidBodyElement)?.BoxDimensions.Z ?? 0f;
-            check("scaling a box stub folds the scale into the box's own size",
-                bakedCount == 1 && MathF.Abs(thickness - (0.05f * 4f)) < 1e-3f,
-                $"half-thickness {thickness:F3}, wanted {0.05f * 4f:F3}");
-            Matrix4x4 afterBake = added.Frame.LocalTransform;
-            check("…and the stub itself comes back unscaled, so nothing is counted twice",
-                MathF.Abs(new Vector3(afterBake.M31, afterBake.M32, afterBake.M33).Length() - 1f) < 1e-3f,
-                $"{new Vector3(afterBake.M31, afterBake.M32, afterBake.M33).Length():F3}");
-
-            // …and the repair the loader performs: a stub left standing somewhere else is snapped back onto
-            // the placement the game uses, so the handle never lies about what it holds.
-            added.Frame.LocalTransform = Matrix4x4.CreateTranslation(9f, 9f, 9f);
-            int aligned = CarPhysicsVolumes.AlignStubsToPrefab(scratch, fr);
-            check("a stub standing away from its volume is snapped back on load",
-                aligned >= 1
-                && (added.Frame.LocalTransform.Translation - moved.Translation).Length() < 1e-4f,
-                $"{aligned} stubs moved; the probe's own is at {added.Frame.LocalTransform.Translation}");
-            check("…and a car whose copies already agree needs no repair at all",
-                CarPhysicsVolumes.AlignStubsToPrefab(scratch, fr) == 0, "");
-
-            // The route the PREFAB TAB takes: a number typed into a field, straight into the file, with the
-            // scene never touched. Reported as "I change the position and nothing happens in the scene" —
-            // the prefab moved and the overlay went on drawing the stub, which had not. What makes it visible
-            // is the repair above, run after the edit rather than only at load.
-            PlacedPhysicsVolume? typed = CarPhysicsVolumes.Load(scratch, fr)
-                .FirstOrDefault(v => ReferenceEquals(v.Stub, added.Frame));
-            if (typed != null)
-            {
-                const float wanted = 1.75f;
-                bool written = Illusion.Assets.Prefabs.PrefabEditing.SetValueIn(
-                    scratch, CarValueSlot.CollisionVolumePosition,
-                    typed.Part >= 0 ? FlatIndexOf(scratch, typed) : -1, 1, wanted, "probe") != null;
-                CarPhysicsVolumes.AlignStubsToPrefab(scratch, fr);
-                check("a position typed into the Prefab tab moves the stub the overlay draws by",
-                    written && MathF.Abs(added.Frame.LocalTransform.Translation.Y - wanted) < 1e-3f,
-                    written
-                        ? $"stub is at Y={added.Frame.LocalTransform.Translation.Y:F3}, wanted {wanted:F3}"
-                        : "the prefab would not take the value");
-            }
-
-            // The route the property panel takes: every volume addressed by ONE flat number, read, written,
-            // and put back. A slot that reads and does not write is a field that looks editable and is not.
             PrefabValueRoundTrip(scratch, check);
-
-            // Deleting a frame that hangs off a BONE, the way the scene tree does it. The writer resolves
-            // each attachment with IndexOfValue over the frame objects, so a frame removed from the resource
-            // while the model still lists it is written with an index of -1 relative to the block — and the
-            // game crashes on load. Nothing else in the toolkit tests this, and it bit a real car.
-            var deleteDoc = new Illusion.Assets.Adapters.SceneDocumentAdapter(fr, car);
-            var doomed = new List<Illusion.Domain.IFrameNode> { deleteDoc.Node(added.Frame) };
-            Illusion.Assets.Frames.DetachedFrames? detached =
-                Illusion.Assets.Frames.DetachedFrames.Capture(deleteDoc, doomed, scratch);
-            check("a frame delete captures the frame", detached != null, "");
-            if (detached != null)
-            {
-                int before = (model.AttachmentReferences ?? []).Length;
-                int volumesBeforeDelete = CarPhysicsVolumes.Load(scratch, fr).Count;
-                detached.Detach();
-                check("deleting a collision stub takes its VOLUME with it — the half the game reads",
-                    CarPhysicsVolumes.Load(scratch, fr).Count == volumesBeforeDelete - 1,
-                    $"{CarPhysicsVolumes.Load(scratch, fr).Count} volumes, was {volumesBeforeDelete}");
-                bool dangling = (model.AttachmentReferences ?? [])
-                    .Any(r => r.Attachment != null
-                        && !model.Resource.FrameObjects.ContainsKey(r.Attachment.RefID));
-                check("deleting an attached frame takes its attachment with it — no dangling reference",
-                    !dangling && (model.AttachmentReferences ?? []).Length == before - 1,
-                    $"{(model.AttachmentReferences ?? []).Length} references, was {before}, "
-                        + $"dangling={dangling}");
-
-                // …and the whole thing still serializes, which is the step that used to write the bad index.
-                try
-                {
-                    var reread = new FrameResource();
-                    using var stream = new MemoryStream(fr.WriteToStream());
-                    reread.ReadFromFile(stream);
-                    check("…and the resource still writes and reads back", true, "");
-                }
-                catch (Exception ex) { check("…and the resource still writes and reads back", false, ex.Message); }
-
-                detached.Reattach();
-                check("undoing the delete puts the attachment back on its bone",
-                    (model.AttachmentReferences ?? []).Length == before
-                    && added.Frame.AttachedTo == model,
-                    $"{(model.AttachmentReferences ?? []).Length} references, wanted {before}");
-                check("…and puts the collision volume back too",
-                    CarPhysicsVolumes.Load(scratch, fr).Count == volumesBeforeDelete,
-                    $"{CarPhysicsVolumes.Load(scratch, fr).Count} volumes, wanted {volumesBeforeDelete}");
-            }
-
-            CarCollisionBuilder.Remove(model, added);
-            check("undo takes the volume away with the shape and the stub",
-                CarPhysicsVolumes.Load(scratch, fr).Count == volumesBefore
-                && !File.Exists(added.ShapeFile),
-                $"{CarPhysicsVolumes.Load(scratch, fr).Count} volumes, was {volumesBefore}");
-
-            CarCollisionBuilder.Restore(added, added.Shape.ToBytes());
-            check("redo puts all three back, not two of them",
-                CarPhysicsVolumes.Load(scratch, fr).Count == volumesBefore + 1
-                && File.Exists(added.ShapeFile)
-                && SdsManifest.Load(scratch).HasFile(Path.GetFileName(added.ShapeFile)),
-                $"{CarPhysicsVolumes.Load(scratch, fr).Count} volumes");
         }
         catch (Exception ex)
         {
-            check("the round trip runs", false, ex.GetType().Name + ": " + ex.Message);
+            check("the volume-value round trip runs", false, ex.GetType().Name + ": " + ex.Message);
         }
         finally
         {
@@ -1352,9 +897,8 @@ internal static class CarPhysicsProbes
     }
 
     /// <summary>
-    /// Every collision volume reached the way the Prefab tab reaches it — one flat index, one axis at a time —
-    /// written, read back, and restored. Also drops a volume and puts it back, which is what the remove button
-    /// and its undo do.
+    /// Every collision volume reached one flat index and one axis at a time — written, read back, and
+    /// restored. Also drops a volume and puts it back, which is what a remove and its undo do.
     /// </summary>
     private static void PrefabValueRoundTrip(string extracted, Action<string, bool, string> check)
     {
@@ -3832,27 +3376,6 @@ internal static class CarPhysicsProbes
         1 => new Vector3(m.M21, m.M22, m.M23),
         _ => new Vector3(m.M31, m.M32, m.M33),
     };
-
-    /// <summary>The one flat number the Prefab tab addresses a volume by — part and volume folded together,
-    /// which is how the panel's rows are keyed.</summary>
-    private static int FlatIndexOf(string extracted, PlacedPhysicsVolume volume)
-    {
-        Illusion.Formats.Prefab.PrefabFile? prefab =
-            Illusion.Assets.Prefabs.PrefabEditing.OpenFirst(extracted);
-        return prefab?.CarVolumeIndex(volume.Part, volume.Volume.Index) ?? -1;
-    }
-
-    /// <summary>The bone whose space a self-describing volume is written in — the part it hangs off.</summary>
-    private static string ParentBoneName(string extracted, FrameResource fr, PlacedPhysicsVolume volume)
-    {
-        FrameObjectModel? model = fr.FrameObjects?.Values.OfType<FrameObjectModel>().FirstOrDefault();
-        IReadOnlyList<CarDeformPart> parts = CarPhysicsVolumes.Parts(extracted);
-        CarDeformPart? own = volume.Part >= 0 && volume.Part < parts.Count ? parts[volume.Part] : null;
-        if (model == null || own == null || own.ParentFrame == 0) return volume.BoneName;
-        int bone = BoneOf(model, own.ParentFrame);
-        string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
-        return bone >= 0 && bone < bones.Length ? bones[bone] : volume.BoneName;
-    }
 
     /// <summary>The joint index a frame hash names on this model, or -1.</summary>
     private static int BoneOf(FrameObjectModel model, ulong frame)

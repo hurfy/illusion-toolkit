@@ -130,7 +130,11 @@ public sealed partial class Car
         List<CarMarker> markers = car == null ? [] : HangMarkers(prefab, car, rig, byBone, body, faults);
         // …and the rows that name a component's OWN bone, which belong to it the same way and for the same
         // reason: a door's handle and lock, a window's depth, an axle's masses.
-        if (car != null) HangRows(prefab, car, byBone, body);
+        if (car != null) HangRows(prefab, car, rig, byBone, body);
+        // …and the slots that belong to the car itself rather than to any panel of it, on the body, which is
+        // not a panel either. Without them the chassis, the wind emitters and the steering-wheel grip would
+        // be reachable nowhere at all once the Prefab tab was gone.
+        if (car != null) HangCarRows(prefab, car, rig, body);
         List<CarComponent> roots = [.. components.Where(c => c.Parent == null)];
 
         // ── what did not stitch, beyond what the passes above already named ──
@@ -571,7 +575,7 @@ public sealed partial class Car
                 ? boneName
                 : FrameName(frame, rig) ?? Hex(frame);
             var marker = new CarMarker(role, index, label, frame, name, bone, onOwnBone, bone != 0,
-                MarkerFields(prefab, role, index));
+                MarkerFields(prefab, rig, role, index));
             markers.Add(marker);
 
             CarComponent? owner = bone != 0 ? byBone.GetValueOrDefault(bone) : null;
@@ -690,7 +694,46 @@ public sealed partial class Car
         /// level. What says a row points at real geometry even when the level on screen does not draw it.
         /// </summary>
         internal HashSet<ulong> Drawn { get; } = [];
+
+        private IReadOnlyList<CarFrameChoice>? _choices;
+
+        /// <summary>
+        /// Every frame of the archive a reference may be pointed at, by name, with the empty slot first.
+        ///
+        /// <para>
+        /// This is the whole edit vocabulary of a frame field: a slot is set by choosing one of these and
+        /// never by typing a hash, because a hash that names nothing does not fail — the part simply stops
+        /// working, silently. Built once per stitch and shared by every field, so it costs one list.
+        /// </para>
+        /// </summary>
+        internal IReadOnlyList<CarFrameChoice> Choices => _choices ??= BuildChoices();
+
+        /// <summary>What a hash names in this archive — a frame object or a bone — or null when nothing does.</summary>
+        internal string? NameOf(ulong hash)
+        {
+            if (hash == 0) return null;
+            if (BoneNames.TryGetValue(hash, out string? bone)) return bone;
+            return FrameByHash.TryGetValue(hash, out FrameObjectBase? frame) ? frame.Name?.String : null;
+        }
+
+        private IReadOnlyList<CarFrameChoice> BuildChoices()
+        {
+            var names = new Dictionary<ulong, string>(BoneNames);
+            foreach ((ulong hash, FrameObjectBase frame) in FrameByHash)
+            {
+                if (frame.Name?.String is { Length: > 0 } name) names.TryAdd(hash, name);
+            }
+            var choices = new List<CarFrameChoice>(names.Count + 1) { Unset };
+            choices.AddRange(names
+                .Select(p => new CarFrameChoice(p.Key, p.Value))
+                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase));
+            return choices;
+        }
     }
+
+    /// <summary>The empty slot, as a picker offers it. A car with no top light is written this way and is not
+    /// broken, so "point at nothing" has to be sayable.</summary>
+    private static readonly CarFrameChoice Unset = new(0, "— not set —");
 
     private static Rig ReadRig(FrameResource? frames, int lod)
     {

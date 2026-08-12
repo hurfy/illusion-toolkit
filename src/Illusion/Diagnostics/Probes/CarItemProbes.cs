@@ -7,7 +7,6 @@ using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Hashing;
-using Illusion.Assets.Prefabs;
 using Illusion.Formats.Prefab;
 using static Illusion.Diagnostics.Probes.ProbeAssert;
 
@@ -166,7 +165,10 @@ internal static class CarItemProbes
             Census(sb, folder, Check);
             ClimbGeometry(sb, folder, Check);
             One(sb, folder, focus);
-            Minting(sb, folder, focus, Check);
+
+            // Minting a part used to be measured here, against the builder that wrote the prefab on its own.
+            // That builder is gone and the aggregate does the minting; what it does is measured by
+            // --probe-car-markers, which asks the same questions of the surviving path.
 
             sb.Insert(0, $"CAR ITEMS PROBE ({focus}): {pass} passed, {fail} failed\n\n");
         }
@@ -281,180 +283,6 @@ internal static class CarItemProbes
         }
     }
 
-    /// <summary>
-    /// Minting a part end to end, on a scratch copy: the helper frame appears in the graph on the chosen bone,
-    /// the prefab gains a row, the row NAMES that frame (the whole point — a row pointing anywhere else is a
-    /// part that exists and does nothing), undo takes both halves back, and redo puts both back.
-    /// </summary>
-    private static void Minting(
-        StringBuilder sb, string folder, string focus, Action<string, bool, string> check)
-    {
-        var sds = new FileInfo(Path.Combine(folder, focus + ".sds"));
-        if (!sds.Exists) return;
-        string source = MafiaEnvironment.ExtractedDir(sds);
-        if (!File.Exists(Path.Combine(source, "SDSContent.xml"))) return;
-        string scratch = Path.Combine(Path.GetTempPath(), "illusion_caritems_scratch");
-
-        sb.AppendLine("\n════ minting a part ════");
-        try
-        {
-            if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
-            Directory.CreateDirectory(scratch);
-            foreach (string file in Directory.GetFiles(source))
-            {
-                File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
-            }
-
-            FrameResource? fr = TryFrames(scratch);
-            FrameObjectModel? model = fr?.FrameObjects!.Values.OfType<FrameObjectModel>().FirstOrDefault();
-            if (fr == null || model == null) { sb.AppendLine("    no skinned model"); return; }
-
-            HashName[] bones = model.GetSkeletonObject().BoneNames ?? [];
-            int bone = Array.FindIndex(bones, n =>
-                string.Equals(n.ToString(), "Scale_bone", StringComparison.OrdinalIgnoreCase));
-            if (bone < 0) bone = 0;
-
-            foreach (CarItemKind kind in CarPartBuilder.AddableKinds)
-            {
-                int before = Count(scratch, kind);
-                Assets.Prefabs.AddedCarPart? added =
-                    CarPartBuilder.Add(model, bone, kind, scratch, out string? refusal);
-                check($"{CarPartBuilder.Words(kind)} can be minted whole", added != null, refusal ?? "");
-                if (added == null) continue;
-
-                check($"…the prefab gained one — {kind}", Count(scratch, kind) == before + 1,
-                    $"{before} -> {Count(scratch, kind)}");
-                check("…and the new row names the frame that was minted",
-                    NamesFrame(scratch, kind, Fnv64.Hash(added.Name)),
-                    $"\"{added.Name}\" on bone \"{bones[bone]}\"");
-                check("…the frame is in the graph, hung off that bone",
-                    fr.FrameObjects!.ContainsKey(added.Frame.RefID)
-                    && (model.AttachmentReferences ?? []).Any(r =>
-                        ReferenceEquals(r.Attachment, added.Frame) && r.JointIndex == bone),
-                    "");
-
-                // The panel's view of it, WITHOUT a save: the frame is only in memory until Save, so the
-                // assembly has to be told the open graph's names or the part reads as a bare hash and cannot
-                // be pointed anywhere — which is exactly how it looked when the user first tried it.
-                var liveNames = new Dictionary<ulong, string>();
-                foreach (object o in fr.FrameObjects!.Values)
-                {
-                    if (o is FrameObjectBase f && f.Name.String is { Length: > 0 } n) liveNames[f.Name.Hash] = n;
-                }
-                PrefabAssembly? shown = PrefabAssembly.ReadFrom(scratch, liveNames);
-                check("…the panel resolves the new frame before any Save",
-                    shown != null && shown.FrameChoices.Any(c => c.Name == added.Name),
-                    shown == null ? "no assembly" : $"{shown.FrameChoices.Count} choices");
-                check("…and no row of it is left dangling",
-                    shown != null && shown.Entries.Sum(e => e.DanglingCount) == 0,
-                    $"{shown?.Entries.Sum(e => e.DanglingCount)} dangling");
-
-                // The writer is the real judge. A frame that does not survive being written is a part that
-                // exists in the editor and is simply not in the game — the failure mode this whole phase is
-                // about. Checked with the name table too: a frame the table does not carry is invisible.
-                var reread = new FrameResource();
-                using (var stream = new MemoryStream(fr.WriteToStream())) reread.ReadFromFile(stream);
-                FrameObjectBase? survivor = reread.FrameObjects?.Values.OfType<FrameObjectBase>()
-                    .FirstOrDefault(f => string.Equals(f.Name?.ToString(), added.Name, StringComparison.Ordinal));
-                check("…the frame survives the writer",
-                    survivor != null, survivor == null ? "gone after a write" : added.Name);
-                check("…and comes back on the same joint, on the name table like its neighbours",
-                    survivor != null
-                    && reread.FrameObjects!.Values.OfType<FrameObjectModel>().Any(m =>
-                        (m.AttachmentReferences ?? []).Any(r =>
-                            ReferenceEquals(r.Attachment, survivor) && r.JointIndex == bone))
-                    && survivor.IsOnFrameTable == added.Donor.IsOnFrameTable,
-                    survivor == null ? "" : $"table {survivor.IsOnFrameTable}, donor {added.Donor.IsOnFrameTable}");
-
-                CarPartBuilder.Remove(model, added);
-                check("…undo takes back both halves", Count(scratch, kind) == before
-                    && !fr.FrameObjects!.ContainsKey(added.Frame.RefID), $"back to {Count(scratch, kind)}");
-
-                CarPartBuilder.Restore(model, added);
-                check("…and redo puts back both, not two of one", Count(scratch, kind) == before + 1
-                    && fr.FrameObjects!.ContainsKey(added.Frame.RefID), $"{Count(scratch, kind)} rows");
-                CarPartBuilder.Remove(model, added);
-            }
-
-            // A CLIMB BOX end to end: minted, dragged, saved. Its row is the only copy the game reads, so
-            // every one of those steps has to reach the row — reported as "I added a climb box and cannot
-            // climb it", because the row was a copy of the donor's and said the old box's place and size.
-            Assets.Prefabs.AddedCarPart? climb =
-                CarPartBuilder.Add(model, bone, CarItemKind.ClimbBox, scratch, out string? climbWhy);
-            check("a climb box can be minted", climb != null, climbWhy ?? "");
-            if (climb?.Frame is FrameObjectDummy box)
-            {
-                CarPrefab.ClimbBox row = LastClimb(scratch);
-                (Vector3 min, Vector3 max) = Assets.Cars.Car.BoxOf(box);
-                check("…and its row states ITS box, not a copy of the donor's",
-                    (row.Min - min).Length() < 1e-3f && (row.Max - max).Length() < 1e-3f,
-                    $"row {row.Min:F2}…{row.Max:F2} vs frame {min:F2}…{max:F2}");
-                check("…and that box is big enough to stand on, not a 5 cm speck",
-                    (max - min).Length() > 0.5f, $"{max - min:F2}");
-
-                // Dragged and scaled with the gizmo, then saved — the sync a save runs is what carries it.
-                box.LocalTransform = Matrix4x4.CreateScale(3f) * Matrix4x4.CreateTranslation(0.2f, 1.4f, 0.9f);
-                int moved = Assets.Cars.Car.SyncMarkers(scratch, fr, [box], out _);
-                CarPrefab.ClimbBox after = LastClimb(scratch);
-                (Vector3 wantMin, Vector3 wantMax) = Assets.Cars.Car.BoxOf(box);
-                check("moving and scaling the Dummy carries through to the row the game climbs",
-                    moved >= 1 && (after.Min - wantMin).Length() < 1e-3f
-                    && (after.Max - wantMax).Length() < 1e-3f,
-                    $"{moved} rewritten; row {after.Min:F2}…{after.Max:F2} vs frame {wantMin:F2}…{wantMax:F2}");
-                check("…and running the same sync again writes nothing",
-                    Assets.Cars.Car.SyncMarkers(scratch, fr, [box], out _) == 0, "");
-
-                CarPartBuilder.Remove(model, climb!);
-            }
-
-            // The kinds that name a bone must refuse rather than mint a Dummy the game will not drive.
-            foreach (CarItemKind kind in new[]
-                     { CarItemKind.Door, CarItemKind.Window, CarItemKind.AxlePair, CarItemKind.Wiper })
-            {
-                Assets.Prefabs.AddedCarPart? refused =
-                    CarPartBuilder.Add(model, bone, kind, scratch, out string? why);
-                check($"{CarPartBuilder.Words(kind)} is refused, with the reason",
-                    refused == null && !string.IsNullOrWhiteSpace(why), why ?? "minted anyway!");
-            }
-        }
-        catch (Exception ex)
-        {
-            sb.AppendLine("    FAILED: " + ex.Message);
-        }
-        finally
-        {
-            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { /* best effort */ }
-        }
-    }
-
-    /// <summary>The climb-box row that was added last — read back off disk, which is where the game reads it.</summary>
-    private static CarPrefab.ClimbBox LastClimb(string extracted)
-    {
-        PrefabFile? prefab = Assets.Prefabs.PrefabEditing.OpenFirst(extracted);
-        IReadOnlyList<CarPrefab.ClimbBox> boxes = prefab?.Car?.ClimbBoxes ?? [];
-        return boxes.Count > 0 ? boxes[^1] : default;
-    }
-
-    private static int Count(string extracted, CarItemKind kind)
-    {
-        PrefabFile? prefab = TryPrefab(extracted);
-        return prefab?.CarItemCount(kind) ?? -1;
-    }
-
-    private static bool NamesFrame(string extracted, CarItemKind kind, ulong hash)
-    {
-        PrefabFile? prefab = TryPrefab(extracted);
-        if (prefab?.Car is not { } car) return false;
-        return kind switch
-        {
-            CarItemKind.ClimbBox => car.ClimbBoxes.Any(b => b.Dummy == hash),
-            CarItemKind.FuelTank => car.FuelTanks.Contains(hash),
-            CarItemKind.Seat => car.Seats.Any(s => s.Frame == hash),
-            CarItemKind.Exhaust => car.ExhaustEmitters.Contains(hash),
-            _ => false,
-        };
-    }
 
     // ── helpers ──
 

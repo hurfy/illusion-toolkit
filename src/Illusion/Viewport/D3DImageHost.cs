@@ -324,55 +324,18 @@ public sealed class D3DImageHost : ViewportControl, ITransformGizmoHost
     /// Re-reads the car's physics off disk and redraws it.
     ///
     /// <para>
-    /// For an edit that changes a collision volume WITHOUT going through the scene: typing a position into
-    /// the Prefab tab, resizing a self-describing box, deleting a volume, and the undo of any of those. The
-    /// prefab file is rewritten immediately, but the overlay serves what it read last, so without this the
-    /// number changes in the panel and the box on screen does not move — which reads as "the edit did
-    /// nothing".
+    /// For an edit that changes a collision volume WITHOUT going through the scene: a size or a position
+    /// typed on a component's collision row, a volume removed, and the undo of either. The overlay serves
+    /// what it read last, so without this the number changes in the panel and the box on screen does not
+    /// move — which reads as "the edit did nothing".
     /// </para>
     /// </summary>
     public void RefreshCarCollisionOverlay() => CarCollisionEditing.AdoptPrefabPlacements();
 
-    /// <summary>Gives a part a self-describing collision volume — glass (type 0) or a zone (type 6). No
-    /// ItemDesc shape and no gizmo handle, exactly as the shipped ones are built.</summary>
-    public void AddCollisionZone(uint volumeType, System.Numerics.Vector3 fullSize, int bone) =>
-        CarCollisionEditing.AddZoneToPart(volumeType, fullSize, bone);
-
-    /// <summary>Changes what an existing collision volume is — glass, a zone, or a placed physics shape. The
-    /// placement is carried across, which is the whole difficulty: the kinds live in different spaces.</summary>
-    public bool ChangeCollisionVolumeType(FileInfo archive, int flat, uint newType, out string? refusal) =>
-        CarCollisionEditing.ChangeVolumeType(archive, flat, newType, out refusal);
-
-    /// <summary>Whether the selection is a bone, which is the only thing a collision box can hang off.</summary>
-    public bool CanAddCollisionBox => CarCollisionEditing.CanAddBox;
-
-    /// <summary>Name of the selected bone, for the menu to say what the box would be attached to.</summary>
-    public string? SelectedBoneName => CarCollisionEditing.SelectedBone?.BoneName;
-
-    /// <summary>The deformable parts of the selected car a new shape could be given to — the dialog asks
-    /// which, because the answer decides whether the shape is part of the CAR or part of one panel.</summary>
-    public IReadOnlyList<Assets.Collisions.CarPartChoice> CollisionPartChoices =>
-        CarCollisionEditing.PartChoices();
-
-    /// <summary>Gives a part a physics shape — undoable, selected on the way out so the gizmo can place it,
-    /// and the shape layer is switched on so it is visible the moment it exists.</summary>
-    public void AddCollisionShape(
-        Formats.ItemDesc.RigidBodyShape kind, System.Numerics.Vector3 size, int bone, int? surface = null)
-    {
-        CarCollisionEditing.AddBoxToPart(kind, size, bone, surface);
-        RaiseDirtyChanged();   // the Layers menu shows the shape layer as on now
-    }
-
-    /// <summary>
-    /// Gives the car a part it did not ship with — the prefab row AND the frame it names, as one undoable
-    /// step. Only the kinds whose frame is a helper (Dummy or Point) can be minted; the rest name a bone of
-    /// the rig and are refused with that reason.
-    /// </summary>
-    /// <returns>True when the car gained the part.</returns>
-    public bool AddCarPart(Formats.Prefab.CarItemKind kind) => CarPartEditing.AddPart(kind);
-
-    /// <summary>Whether a minted part could be hung right now — a bone has to be selected.</summary>
-    public bool CanAddCarPart => CarPartEditing.CanAddPart;
+    // A car's collision is AUTHORED on the component tree — a role, a shape, a size and a position in the
+    // component's own space — and the aggregate derives the rest. The surfaces that used to hang a box off a
+    // raw bone, turn a volume into another kind and mint a part are gone with the Prefab tab they served:
+    // each wrote the prefab on its own, which is the seam ticket 13 closes.
 
     /// <summary>
     /// The names the OPEN graph of <paramref name="archive"/> answers to, for resolving prefab references.

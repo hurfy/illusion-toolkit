@@ -267,8 +267,14 @@ internal static class FramePropertyCatalog
             "Names the physics shape this frame places — a mesh in the district's .col, or (for a car, which "
                 + "ships none) an ItemDesc record in its own archive."));
 
-        // The SHAPE itself, when the archive carries it. This is what a bullet hits, and a car's shapes are its
-        // own ItemDesc records — so a hull can be resized here without going anywhere near a .col.
+        // The SHAPE itself, when the archive carries it — what a bullet actually hits. SHOWN and not edited:
+        // the record belongs to a car's assembly, and a car's assembly has exactly one writer, the Car
+        // aggregate. This panel used to write the .ids file straight from the setter, which made it a second
+        // path to the same bytes and left the prefab volume beside it saying another size.
+        //
+        // Nothing is lost by showing it: the same numbers are edited on the component's own collision row,
+        // in the component's own space, by role and shape — and there the volume, the record and the mirror
+        // stub move together.
         ResolvedCollisionShape? resolved = ResolveShape(col, node);
         if (resolved?.Shape.Element is not RigidBodyElement rigid) return;
 
@@ -277,20 +283,16 @@ internal static class FramePropertyCatalog
         {
             case RigidBodyShape.Box:
                 c.AddType("Physics shape", Vec3Desc("Shape.Box", "Half-size",
-                    () => rigid.BoxDimensions,
-                    v => { rigid.BoxDimensions = v; Save(resolved); },
+                    () => rigid.BoxDimensions, null,
                     "How far the box reaches from its centre on each axis."));
                 break;
             case RigidBodyShape.Sphere:
-                c.AddType("Physics shape", FloatDesc("Shape.Radius", "Radius",
-                    () => rigid.Radius, v => { rigid.Radius = v; Save(resolved); }));
+                c.AddType("Physics shape", FloatDesc("Shape.Radius", "Radius", () => rigid.Radius, null));
                 break;
             case RigidBodyShape.Capsule:
             case RigidBodyShape.Cylinder:
-                c.AddType("Physics shape", FloatDesc("Shape.Radius", "Radius",
-                    () => rigid.Radius, v => { rigid.Radius = v; Save(resolved); }));
-                c.AddType("Physics shape", FloatDesc("Shape.Height", "Height",
-                    () => rigid.Height, v => { rigid.Height = v; Save(resolved); },
+                c.AddType("Physics shape", FloatDesc("Shape.Radius", "Radius", () => rigid.Radius, null));
+                c.AddType("Physics shape", FloatDesc("Shape.Height", "Height", () => rigid.Height, null,
                     "Length of the straight section; the round caps add the radius at each end."));
                 break;
             default:
@@ -300,6 +302,8 @@ internal static class FramePropertyCatalog
                     () => $"{rigid.CookedMesh?.Length ?? 0} cooked bytes — not editable"));
                 break;
         }
+        c.AddType("Physics shape", ReadOnlyText("Shape.Where", "Edited on",
+            () => "the component's collision row, in the Components tree"));
     }
 
     /// <summary>The physics shape a collision frame names, from its own archive. Null when it has none.</summary>
@@ -313,20 +317,6 @@ internal static class FramePropertyCatalog
         catch (Exception ex) when (ex is IOException or ArgumentException)
         {
             return null;
-        }
-    }
-
-    /// <summary>
-    /// Writes a shape back to its own file. Every edit lands on disk straight away, and undo goes through the
-    /// same setter with the old value — so there is no half-state where the panel shows one size and the file
-    /// holds another.
-    /// </summary>
-    private static void Save(ResolvedCollisionShape resolved)
-    {
-        try { File.WriteAllBytes(resolved.File, resolved.Shape.ToBytes()); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Nothing to tell the user from this layer; the next read shows the file's own value again.
         }
     }
 

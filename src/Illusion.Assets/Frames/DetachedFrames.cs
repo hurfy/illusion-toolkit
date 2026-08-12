@@ -140,31 +140,50 @@ public sealed class DetachedFrames
     private string? _extracted;
 
     /// <summary>Collision volumes that went with a deleted stub, for undo.</summary>
-    private readonly List<Collisions.CarPhysicsVolumes.VolumeChange> _volumes = new();
+    private readonly List<Cars.CarStubVolume> _volumes = new();
 
     /// <summary>
     /// Takes the collision a deleted stub places away with it. A stub is only half of a car's collision —
     /// the prefab volume is the half the game reads — so removing the frame alone leaves a car that still
     /// collides exactly as before while the editor shows nothing there.
+    ///
+    /// <para>
+    /// Through the aggregate, which is the one path from a change to a car's bytes. Nothing here knows what a
+    /// volume is written in or which of two spaces it lives in, and that is the point.
+    /// </para>
     /// </summary>
     private void DetachCollisionVolumes()
     {
         _volumes.Clear();
+        VolumesRefused = null;
         if (_extracted == null) return;
         foreach (FrameObjectCollision stub in _set.OfType<FrameObjectCollision>())
         {
-            if (Collisions.CarPhysicsVolumes.TakeForStub(_extracted, stub) is { } removed)
+            if (Cars.Car.DropVolumeOfStub(_extracted, _resource, stub, out string? lost) is { } removed)
             {
                 _volumes.Add(removed);
+            }
+            else if (lost != null)
+            {
+                // The frame is going either way — the caller has already decided that — but the collision it
+                // places is staying, and a car that is solid where nothing is drawn is the exact confusion
+                // this whole path exists to avoid. Said out loud rather than swallowed.
+                VolumesRefused = lost;
             }
         }
     }
 
+    /// <summary>Why a deleted stub's collision could not be taken out of the prefab with it, or null when
+    /// every one of them was. The host says so: the row is gone from the tree and the car still collides
+    /// there, which is a difference nobody can see without being told.</summary>
+    public string? VolumesRefused { get; private set; }
+
     private void ReattachCollisionVolumes()
     {
-        foreach (Collisions.CarPhysicsVolumes.VolumeChange removed in _volumes)
+        if (_extracted == null) { _volumes.Clear(); return; }
+        foreach (Cars.CarStubVolume removed in _volumes)
         {
-            Collisions.CarPhysicsVolumes.Restore(removed);
+            Cars.Car.PutVolumeOfStub(_extracted, _resource, removed, out _);
         }
         _volumes.Clear();
     }

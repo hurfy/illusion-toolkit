@@ -35,7 +35,8 @@ public sealed partial class CarFieldsWindow : Window
     /// would drag the marker and rewrite the frame resource for an edit nobody made.
     /// </para>
     /// </summary>
-    private sealed record Row(CarField Field, TextBox[] Boxes, CheckBox? Flag, string[] Shown);
+    private sealed record Row(
+        CarField Field, TextBox[] Boxes, CheckBox? Flag, DropDownField? Picker, string[] Shown);
 
     /// <param name="title">What is being edited — "Seat 2 on doorFL".</param>
     /// <param name="caption">The line above the fields: what this row IS.</param>
@@ -96,7 +97,13 @@ public sealed partial class CarFieldsWindow : Window
 
         TextBox[] boxes = [];
         CheckBox? flag = null;
-        if (field.Kind == CarFieldKind.Flag)
+        DropDownField? picker = null;
+        if (field.Kind == CarFieldKind.Frame)
+        {
+            picker = Picker(field);
+            stack.Children.Add(picker);
+        }
+        else if (field.Kind == CarFieldKind.Flag)
         {
             flag = new CheckBox { IsChecked = field.Number != 0f, Content = "Yes" };
             stack.Children.Add(flag);
@@ -123,8 +130,36 @@ public sealed partial class CarFieldsWindow : Window
             });
         }
 
-        _rows.Add(new Row(field, boxes, flag, [.. boxes.Select(b => b.Text)]));
+        _rows.Add(new Row(field, boxes, flag, picker, [.. boxes.Select(b => b.Text)]));
         return stack;
+    }
+
+    /// <summary>
+    /// The frames this reference may be pointed at, as a list to choose from — never a box to type a hash
+    /// into, because a hash that names nothing does not fail: the part simply stops working, silently.
+    ///
+    /// <para>
+    /// A reference that already names nothing keeps its own entry at the top so it can be SEEN and replaced.
+    /// Dropping it would leave the picker blank and make a dangling reference look like an empty slot, which
+    /// is the one distinction this row exists to draw.
+    /// </para>
+    /// </summary>
+    private DropDownField Picker(CarField field)
+    {
+        List<CarFrameChoice> items = [.. field.Choices];
+        CarFrameChoice? current = items.FirstOrDefault(c => c.Hash == field.Frame);
+        if (current == null)
+        {
+            current = new CarFrameChoice(field.Frame, field.FrameName + "  (no frame of this archive)");
+            items.Insert(0, current);
+        }
+        return new DropDownField
+        {
+            DisplayPath = nameof(CarFrameChoice.Name),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = items,
+            SelectedItem = current,
+        };
     }
 
     private TextBox Box(float value) => new()
@@ -168,6 +203,14 @@ public sealed partial class CarFieldsWindow : Window
         var values = new List<CarField>(_rows.Count);
         foreach (Row row in _rows)
         {
+            if (row.Picker != null)
+            {
+                // A picker holds a frame the archive HAS, so there is nothing to parse and nothing to refuse.
+                // Its unchanged state is the same object it was given, which goes back as it came.
+                ulong picked = row.Picker.SelectedItem is CarFrameChoice choice ? choice.Hash : row.Field.Frame;
+                values.Add(picked == row.Field.Frame ? row.Field : row.Field with { Frame = picked });
+                continue;
+            }
             // A box still holding the text it was shown with is a field nobody typed into, and it goes back
             // exactly as it came — see Row.Shown for why re-reading it instead is an edit of its own.
             if (row.Boxes.Length > 0 && row.Boxes.Zip(row.Shown).All(

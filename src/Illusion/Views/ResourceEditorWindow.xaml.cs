@@ -211,14 +211,15 @@ public partial class ResourceEditorWindow : Window
             return;
         }
 
-        // The two resources that already HAVE an editor open onto it. Both describe the whole archive rather
-        // than any one selected object, so their tabs stand on their own — clicking the tile is the obvious
-        // way to reach them, and it used to do nothing at all.
+        // The two resources that already HAVE an editor open onto them. Both describe the whole archive
+        // rather than any one selected object, so clicking the tile is the obvious way to reach them and it
+        // used to do nothing at all. The prefab's editor is the COMPONENT TREE: how a car is assembled is
+        // what the hierarchy says now, not a tab of raw lists.
         if (resource.Kind == SdsResourceKind.Prefab)
         {
             ClearTexture();
             UpdateStageChrome();
-            Scene.ShowPrefab();
+            Scene.ShowAssembly();
             return;
         }
         if (resource.Kind == SdsResourceKind.EntityData)

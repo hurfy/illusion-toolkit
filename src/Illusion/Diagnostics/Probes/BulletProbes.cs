@@ -72,7 +72,7 @@ internal static class BulletProbes
             RebuildUndo(sb, cars, Check);
             RoundTrips(sb, cars, Check);
             BodyHulls(sb, cars, Check);
-            SurfaceReaches(sb, cars, focus, Check);
+            SurfaceBias(sb, Check);
 
             sb.Insert(0, $"BULLET PROBE ({focus}): {pass} passed, {fail} failed\n\n");
         }
@@ -2056,83 +2056,32 @@ internal static class BulletProbes
     }
 
     /// <summary>
-    /// The one thing this probe can settle without the game: that a surface ASKED FOR is a surface the archive
-    /// carries. The shipped shapes all say 0, so if the field turns out to be what a shot reads, the toolkit
-    /// has to be able to write it — and if it turns out not to be, this is what proves the experiment was set
-    /// up correctly rather than silently dropped. Runs on a scratch copy; the player's car is never touched.
+    /// The bias between a physics surface's slot id on disk and its index in the table a person picks from.
+    ///
+    /// <para>
+    /// It used to be measured by MINTING a shape with a surface chosen and reading the file back, and that
+    /// path is gone: the surface picker went with the raw collision dialog when the write consolidated on the
+    /// aggregate, and it was an experiment rather than an answer — what a shot throws turned out to be the
+    /// part's own effect group, and what gates the hit turned out to be the hit box. The bias itself is still
+    /// live, because the collision overlay colours a volume by it, and reading it as a table index names the
+    /// surface two places off. So it is asserted here directly, where nothing has to be written for it.
+    /// </para>
     /// </summary>
-    private static void SurfaceReaches(
-        StringBuilder sb, string folder, string focus, Action<string, bool, string> check)
+    private static void SurfaceBias(StringBuilder sb, Action<string, bool, string> check)
     {
-        var car = new FileInfo(Path.Combine(folder, focus + ".sds"));
-        if (!car.Exists) return;
-        string source = MafiaEnvironment.ExtractedDir(car);
-        if (!File.Exists(Path.Combine(source, "SDSContent.xml"))) return;
-        string scratch = Path.Combine(Path.GetTempPath(), "illusion_bullets_scratch");
+        const int Glass = 28;   // sklo_rozbitelne_1 — the table index a person picks
+        int raw = Glass + CollisionMaterialCatalog.RawToTableBias;
 
-        sb.AppendLine("\n════ does a chosen surface reach the archive? ════");
-        try
-        {
-            if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
-            Directory.CreateDirectory(scratch);
-            foreach (string file in Directory.GetFiles(source))
-            {
-                File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
-            }
-
-            FrameResource? fr = SdsMeshLoader.OpenScene(scratch).FrameResource;
-            FrameObjectModel? model = fr?.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
-            if (fr == null || model == null) { sb.AppendLine("    no skinned model"); return; }
-
-            // The body part, because that is where a test shot would go.
-            IReadOnlyList<Assets.Collisions.CarPartChoice> parts =
-                Assets.Collisions.CarPhysicsVolumes.PartChoices(scratch, fr);
-            Assets.Collisions.CarPartChoice? body = parts.FirstOrDefault(p => p.IsBody) ?? parts.FirstOrDefault();
-            if (body == null) { sb.AppendLine("    this car has no deformable part"); return; }
-
-            const int Glass = 28;   // sklo_rozbitelne_1 — the table index a person picks
-            Assets.Collisions.AddedCollisionBox? added = Assets.Collisions.CarCollisionBuilder.AddShape(
-                model, body.Bone, "illusion_bullet_probe_Collision", Formats.ItemDesc.RigidBodyShape.Box,
-                new Vector3(0.20f, 0.20f, 0.05f), Matrix4x4.Identity, scratch, out string? refusal, Glass);
-            check("a shape can be added with a surface chosen", added != null, refusal ?? $"on {body.BoneName}");
-            if (added == null) return;
-
-            // THE BIAS, which is what made the first in-game test come back empty. The field on disk is a raw
-            // PhysX slot id and the table index is that minus 2 — the same offset the world's own collision
-            // uses. Writing the table index straight in asked for breakable glass (28) and wrote a value the
-            // game reads as bulletproof glass (30), which is exactly the sort of null result that looks like
-            // "the field does nothing". This asserts the raw value, and then that reading it back names the
-            // surface that was asked for.
-            var shape = Formats.ItemDesc.ItemDescFile.Load(added.ShapeFile);
-            ushort wrote = (shape.Element as Formats.ItemDesc.RigidBodyElement)?.MaterialId ?? 0;
-            check("…and the shape on disk carries the RAW slot id, table index plus the bias",
-                wrote == Glass + CollisionMaterialCatalog.RawToTableBias,
-                $"wrote {wrote}, wanted {Glass + CollisionMaterialCatalog.RawToTableBias}");
-            check("…so reading it back names the surface that was asked for",
-                CollisionMaterialCatalog.ForRawId(wrote).Index == Glass,
-                $"{CollisionMaterialCatalog.ForRawId(wrote).Token} "
-                    + $"(unbiased it would read {CollisionMaterialCatalog.ForTableIndex(wrote).Token})");
-
-            // And the default stays what the game ships, so an ordinary add changes nothing.
-            Assets.Collisions.AddedCollisionBox? plain = Assets.Collisions.CarCollisionBuilder.AddShape(
-                model, body.Bone, "illusion_bullet_probe2_Collision", Formats.ItemDesc.RigidBodyShape.Box,
-                new Vector3(0.20f, 0.20f, 0.05f), Matrix4x4.Identity, scratch, out _);
-            ushort plainSurface = plain == null
-                ? ushort.MaxValue
-                : (Formats.ItemDesc.ItemDescFile.Load(plain.ShapeFile).Element
-                    as Formats.ItemDesc.RigidBodyElement)?.MaterialId ?? ushort.MaxValue;
-            check("a shape added without asking still carries 0, as every shipped one does",
-                plainSurface == 0, $"surface {plainSurface}");
-        }
-        catch (Exception ex)
-        {
-            sb.AppendLine("    FAILED: " + ex.Message);
-        }
-        finally
-        {
-            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
-            catch (IOException) { /* best effort */ }
-        }
+        sb.AppendLine("\n════ the physics-surface bias ════");
+        sb.AppendLine($"    table index {Glass} is slot id {raw} on disk "
+            + $"({CollisionMaterialCatalog.ForRawId((ushort)raw).Token})");
+        check("a slot id read as a slot id names the surface it stands for",
+            CollisionMaterialCatalog.ForRawId((ushort)raw).Index == Glass,
+            $"{CollisionMaterialCatalog.ForRawId((ushort)raw).Token} "
+                + $"(read as a table index it would be {CollisionMaterialCatalog.ForTableIndex((ushort)raw).Token})");
+        check("…and the two readings really do differ, so the bias is not a no-op",
+            CollisionMaterialCatalog.RawToTableBias != 0,
+            $"bias {CollisionMaterialCatalog.RawToTableBias}");
     }
 
     /// <summary>Material names used by the geometry weighted to each bone, keyed by FNV64 of the bone name.</summary>

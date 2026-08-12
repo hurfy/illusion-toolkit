@@ -796,6 +796,17 @@ internal static class ProbeRunner
                 CarRoundTripProbes.RunCarRoundTripProbe(
                     args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
                 return true;
+            // ONE WRITE PATH: that no module outside the Car aggregate writes a car's prefab, one of its
+            // ItemDesc records or its frame resource — the point of the seam, and the property of it that
+            // decays in silence. Measured twice: every surface that can still touch a car is driven against a
+            // mirrored working copy and what CHANGED is compared with what the aggregate says it wrote, and
+            // the two projects' sources are swept so that every file writing bytes at all is one this
+            // contract names. The four that wrote independently before — prefab-editing, climb-boxes,
+            // car-physics-volumes and car-collision-builder — are named in it as the regression to watch.
+            // Optional arg = the car to drive. Output: %TEMP%\illusion_car_writes.txt
+            case "--probe-car-writes":
+                CarWriteProbes.RunCarWritesProbe(args.Length >= 2 ? args[1] : "berkley_kingfisher_pha");
+                return true;
             // A collision authored by ROLE and SHAPE, travelling the whole path: what a modder asked for comes
             // back, and what reached the file — the stored type, the bone space the matrix went into, the
             // extents, the ItemDesc record and the mirror stub — matches how shipped cars of the same role and

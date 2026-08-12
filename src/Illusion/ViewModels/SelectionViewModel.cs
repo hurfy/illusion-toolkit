@@ -6,11 +6,9 @@ using System.Windows.Data;
 using Illusion.Assets.Adapters;
 using Illusion.Assets.Effects;
 using Illusion.Assets.EntityData;
-using Illusion.Assets.Prefabs;
 using Illusion.Domain;
 using Illusion.Domain.Materials;
 using Illusion.Domain.Properties;
-using Illusion.Formats.Prefab;
 using Illusion.Rendering.Gizmos;
 using Illusion.Scene;
 using Illusion.Viewport;
@@ -55,7 +53,6 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
             BuildPropertyGroups();
             BuildMaterials();
             BuildParentCandidates();
-            BuildPrefab();
             BuildTuning();
         }
         RaiseAll();
@@ -110,346 +107,14 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
         foreach (PropertyGroupViewModel g in _typeGroups) g.Refresh();
     }
 
-    // ── Prefab (archive root only) ──
-
-    private PrefabAssembly? _prefab;
-    private string? _prefabArchive;
-    private int _prefabToken;
-
-    /// <summary>Whether the open archive carries a PREFAB — the Prefab tab's visibility. False until the read
-    /// finishes, so the tab appears rather than sitting empty (257 of 1324 archives carry one at all).</summary>
-    public bool HasPrefab => _prefab != null;
-
-    private IReadOnlyList<PrefabEntryRowsViewModel> _prefabRows = [];
-
-    /// <summary>The prefab's entries as rows the panel can bind — each reference a picker over the archive's
-    /// own frames.</summary>
-    public IReadOnlyList<PrefabEntryRowsViewModel> PrefabEntries => _prefabRows;
-
-    /// <summary>Raised when a prefab edit lands, so the host can record it and say so. The action undoes and
-    /// redoes it; the string is the line for the notice banner.</summary>
-    public event Action<FileInfo, string, IEditAction>? PrefabEdited;
-
-    private void BuildPrefabRows()
-    {
-        // Which bands were open before. A pick, an add or a remove rewrites the file and rebuilds these
-        // rows, and folding the band shut under the user's hands the moment they changed something in it is
-        // the panel throwing away where they were.
-        var wasOpen = _prefabRows
-            .SelectMany(e => e.Groups)
-            .Where(g => g.IsExpanded)
-            .Select(g => g.Title)
-            .ToHashSet(StringComparer.Ordinal);
-
-        if (_prefab == null || _prefabArchive == null) { _prefabRows = []; return; }
-
-        var archive = new FileInfo(_prefabArchive);
-        var entries = new List<PrefabEntryRowsViewModel>();
-        foreach (PrefabEntryView entry in _prefab.Entries)
-        {
-            var groups = new List<PrefabGroupRowsViewModel>();
-            foreach (PrefabGroupView group in entry.Groups)
-            {
-                CarItemKind? adds = AddableIn(group.Title);
-                var rows = new List<PrefabRowViewModel>();
-                foreach (PrefabRefView row in group.Rows)
-                {
-                    // A row may bring its own list — the kinds a collision volume can be — instead of the
-                    // archive's frames. Same dropdown, different meaning; the commit tells them apart.
-                    var vm = new PrefabRowViewModel(row, row.Options ?? _prefab.FrameChoices,
-                        (r, choice) => CommitPrefabPick(archive, r, choice))
-                    {
-                        Removable = RemovableFor(row),
-                        // The PART's index, not the frame's: axles are listed one per row but stored two at a
-                        // time, and the pair is the only unit the file can lose without desyncing the rest.
-                        RemoveIndex = row.PartIndex,
-                    };
-                    if (vm.Removable != null) vm.OnRemove(r => CommitPrefabRemove(archive, r));
-                    vm.OnSetValue((r, axis, value) => CommitPrefabValue(archive, r, axis, value));
-                    rows.Add(vm);
-                }
-                var band = new PrefabGroupRowsViewModel(group, rows, adds,
-                    adds == null ? null : g => CommitPrefabAdd(archive, g));
-                band.IsExpanded = wasOpen.Contains(band.Title);
-                groups.Add(band);
-            }
-            entries.Add(new PrefabEntryRowsViewModel(entry, groups));
-        }
-        _prefabRows = entries;
-
-        // A rebuild (an edit, an undo) must not silently widen the tab back out from under the search.
-        if (_prefabSearch.Trim().Length > 0)
-        {
-            foreach (PrefabGroupRowsViewModel group in entries.SelectMany(e => e.Groups))
-            {
-                group.Search(_prefabSearch.Trim());
-            }
-        }
-    }
-
-    // One picked frame, written straight into the working copy — a prefab edit has no in-memory stage of its
-    // own, the same as a collision box. The host turns it into an undo entry and a pending build.
-    private bool CommitPrefabPick(FileInfo archive, PrefabRefView row, FrameChoice choice)
-    {
-        // Changing a volume's KIND, which travels down the same dropdown and is nothing like pointing a slot
-        // at a frame: the kinds live in different spaces, so this has to move the placement too.
-        if (row.ChoosesVolumeType)
-        {
-            if (!_viewport.ChangeCollisionVolumeType(archive, row.Index, (uint)choice.Hash, out string? why))
-            {
-                _viewport.RaiseNotice("the volume was not changed: " + (why ?? "unknown reason"), true);
-                return false;
-            }
-            RefreshPrefabAfterUndo();
-            return true;
-        }
-
-        if (row.Slot is not { } slot) return false;
-
-        PrefabEditing.Change? change = PrefabEditing.SetFrame(
-            archive, slot, row.Index, choice.Hash, row.Label);
-        if (change == null) return false;
-
-        PrefabEdited?.Invoke(archive,
-            $"{row.Label} now points at {choice.Name}.",
-            new PrefabPickEdit(change, RefreshPrefabAfterUndo));
-        return true;
-    }
-
-    // Which band gains a part when its + is pressed. The bands that are a fixed set of slots — a car has one
-    // headlight and one rest bone — have none, and show no button rather than a dead one.
-    private static CarItemKind? AddableIn(string group) => group switch
-    {
-        "Seats" => CarItemKind.Seat,
-        "Doors" => CarItemKind.Door,
-        "Windows" => CarItemKind.Window,
-        "Axles" => CarItemKind.AxlePair,
-        "Climb boxes" => CarItemKind.ClimbBox,
-        "Driving wheels" => CarItemKind.DrivingWheel,
-        "Fuel tanks" => CarItemKind.FuelTank,
-        "Exhausts" => CarItemKind.Exhaust,
-        "Wipers" => CarItemKind.Wiper,
-        _ => null,
-    };
-
-    // Which rows stand for a whole part. A part made of several fields carries it on its HEADER — the line
-    // that names it — while a bare list's row is the part itself. A brake drum belongs to its axle and a
-    // seat's door is a reference the seat holds; neither is a thing that can be dropped on its own.
-    private static CarItemKind? RemovableFor(PrefabRefView row) => row.Item ?? row.Slot switch
-    {
-        CarFrameSlot.Wiper => CarItemKind.Wiper,
-        CarFrameSlot.DrivingWheel => CarItemKind.DrivingWheel,
-        CarFrameSlot.FuelTank => CarItemKind.FuelTank,
-        CarFrameSlot.Exhaust => CarItemKind.Exhaust,
-        _ => null,
-    };
-
-    // Adding a part is two things: the prefab row, and the FRAME the row names.
-    //
-    // When the toolkit can mint that frame — a climb box, a fuel tank, a seat, an exhaust: measured to be a
-    // Dummy or a Point on every shipped car — the whole part is made at once and lands on the selected bone,
-    // ready to be dragged. When it cannot (a door, a window, an axle and a wiper are a BONE every time, and
-    // growing a rig is a different job), the old behaviour stands: the row is written pointing at the first
-    // frame in the archive and the user re-points it, because a row that exists is at least visible and
-    // fixable, while no row at all is a dead button.
-    private void CommitPrefabAdd(FileInfo archive, PrefabGroupRowsViewModel group)
-    {
-        if (group.Adds is not { } kind || _prefab is not { FrameChoices.Count: > 0 } prefab) return;
-
-        if (CarPartBuilder.CanAdd(kind))
-        {
-            // The viewport owns this one: it holds the frame graph the new helper goes into, the scene tree
-            // row for it and the undo stack that has to take BOTH halves back together.
-            if (_viewport.AddCarPart(kind)) RefreshPrefabAfterUndo();
-            return;
-        }
-
-        PrefabEditing.ItemChange? change = PrefabEditing.AddItem(
-            archive, kind, prefab.FrameChoices[0].Hash, group.Title);
-        if (change == null) return;
-
-        PrefabEdited?.Invoke(archive,
-            $"Added a {kind.ToString().ToLowerInvariant()} — point it at the right frame.",
-            new PrefabItemEdit(change, added: true, RefreshPrefabAfterUndo));
-        RefreshPrefabAfterUndo();
-    }
-
-    private void CommitPrefabRemove(FileInfo archive, PrefabRowViewModel row)
-    {
-        if (row.Removable is not { } kind) return;
-
-        PrefabEditing.ItemChange? change = PrefabEditing.RemoveItem(
-            archive, kind, row.RemoveIndex, row.Label);
-        if (change == null) return;
-
-        PrefabEdited?.Invoke(archive,
-            $"Removed a {kind.ToString().ToLowerInvariant()}.",
-            new PrefabItemEdit(change, added: false, RefreshPrefabAfterUndo));
-        RefreshPrefabAfterUndo();
-    }
-
-    // One number typed into a field. Unlike a pick, this does NOT rebuild the panel: retyping a depth while
-    // the rows are being replaced under the caret is how a field loses what is being typed into it.
-    private bool CommitPrefabValue(FileInfo archive, PrefabRefView row, int axis, float value)
-    {
-        if (row.ValueSlot is not { } slot) return false;
-
-        // A row shown in a converted space writes all THREE numbers, not one: the axis the user typed is an
-        // axis of the car, and turning it back into the bone's space mixes it into every stored component.
-        // The three go on the undo stack as one entry — the user made one edit.
-        if (row.Space is { } space)
-        {
-            var wanted = new System.Numerics.Vector3(row.X, row.Y, row.Z);
-            wanted = axis switch
-            {
-                0 => wanted with { X = value },
-                1 => wanted with { Y = value },
-                _ => wanted with { Z = value },
-            };
-            if (!System.Numerics.Matrix4x4.Invert(space, out System.Numerics.Matrix4x4 back)) return false;
-            System.Numerics.Vector3 stored = System.Numerics.Vector3.Transform(wanted, back);
-
-            var written = new List<IEditAction>();
-            foreach ((int at, float number) in new[] { (0, stored.X), (1, stored.Y), (2, stored.Z) })
-            {
-                if (PrefabEditing.SetValue(archive, slot, row.Index, at, number, row.Label) is { } one)
-                {
-                    written.Add(new PrefabValueEdit(one, RefreshPrefabAfterUndo));
-                }
-            }
-            if (written.Count == 0) return false;
-
-            PrefabEdited?.Invoke(archive, $"{row.Label} set.", new CompositeEdit([.. written]));
-            _viewport.RefreshCarCollisionOverlay();
-            return true;
-        }
-
-        PrefabEditing.ValueChange? change = PrefabEditing.SetValue(
-            archive, slot, row.Index, axis, value, row.Label);
-        if (change == null) return false;
-
-        PrefabEdited?.Invoke(archive, $"{row.Label} set.", new PrefabValueEdit(change, RefreshPrefabAfterUndo));
-        // The panel is deliberately left alone (see above) — but the VIEWPORT is not the panel, and a
-        // collision volume that moved has to move on screen or the number reads as having done nothing.
-        _viewport.RefreshCarCollisionOverlay();
-        return true;
-    }
-
-    // After an undo or redo the file has moved underneath the panel; re-read it rather than guess.
-    private void RefreshPrefabAfterUndo()
-    {
-        _prefabArchive = null;      // defeat the same-archive cache — the file really did change
-        BuildPrefab();
-        // …and so has the car's physics, which is drawn from the same file and cached separately.
-        _viewport.RefreshCarCollisionOverlay();
-    }
-
-    /// <summary>The headline over the entries: how many, and whether anything is broken.</summary>
-    public string PrefabSummary
-    {
-        get
-        {
-            if (_prefab == null) return "";
-            int entries = _prefab.Entries.Count;
-            int dangling = _prefab.Entries.Sum(e => e.DanglingCount);
-            string count = entries == 1 ? "1 entry" : $"{entries} entries";
-            return dangling == 0 ? count : $"{count} · {dangling} dangling references";
-        }
-    }
-
-    public bool PrefabHasDangling => _prefab?.HasDangling ?? false;
-
-    private string _prefabSearch = "";
-
-    /// <summary>
-    /// Narrows the Prefab tab to what matches — by the name of a row or by the frame it names. A car's
-    /// assembly is over two hundred lines and the question is usually "where is X", not "show me everything".
-    /// </summary>
-    public string PrefabSearch
-    {
-        get => _prefabSearch;
-        set
-        {
-            _prefabSearch = value ?? "";
-            foreach (PrefabGroupRowsViewModel group in _prefabRows.SelectMany(e => e.Groups))
-            {
-                group.Search(_prefabSearch.Trim());
-            }
-            Raise(nameof(PrefabSearch));
-            Raise(nameof(PrefabNothingFound));
-        }
-    }
-
-    /// <summary>Whether the search left nothing on screen — otherwise an empty tab reads as a broken one.</summary>
-    public bool PrefabNothingFound =>
-        _prefabSearch.Trim().Length > 0
-        && _prefabRows.SelectMany(e => e.Groups).All(g => !g.IsVisible);
-
-    // Reading one costs opening the frame resource to build the name table, so it runs off the UI thread and
-    // the tab appears when the answer arrives. Token-guarded: selecting another archive mid-read must not be
-    // overwritten by the first one landing late. Kept per ARCHIVE rather than per selection — clicking from
-    // one door to the next inside a car must not re-read the file each time.
-    /// <summary>
-    /// Re-reads the staged archive's prefab. Called when the SCENE changes, not just the selection: the tab
-    /// is about the archive, and it has to be there the moment a car opens.
-    /// <para>
-    /// It DEFEATS the same-archive cache, because the scene changing is exactly when the file behind that name
-    /// can have become a different file. Restoring a backup swaps the .sds and re-extracts it under the same
-    /// path, so a cached read left the tab showing parts and collision volumes the archive no longer has —
-    /// the rollback looked like it had not worked.
-    /// </para>
-    /// </summary>
-    public void RefreshPrefab()
-    {
-        _prefabArchive = null;
-        BuildPrefab();
-    }
-
-    private async void BuildPrefab()
-    {
-        FileInfo? archive = ContextArchive();
-        if (archive != null && _prefabArchive != null
-            && string.Equals(archive.FullName, _prefabArchive, StringComparison.OrdinalIgnoreCase))
-        {
-            return;     // same archive, already read — the answer cannot have changed
-        }
-
-        int token = ++_prefabToken;
-        _prefab = null;
-        _prefabArchive = archive?.FullName;
-        RaisePrefab();
-        if (archive == null) return;
-
-        // The open graph's names go with the read: a Dummy minted for a new climb box exists only in memory
-        // until Save, and without it the part it belongs to shows as a bare hash the moment it is made.
-        IReadOnlyDictionary<ulong, string> live = _viewport.LiveFrameNames(archive);
-        // …and where its bones stand, which is what turns a collision volume's stored position into the
-        // car's own axes. Read on this thread: the graph is the UI's.
-        IReadOnlyDictionary<ulong, System.Numerics.Matrix4x4> bones = _viewport.LiveBoneWorlds(archive);
-
-        PrefabAssembly? read = null;
-        try { read = await Task.Run(() => PrefabAssembly.Read(archive, live, bones)); }
-        catch (Exception) { /* an archive the panel cannot read is a tab that does not appear */ }
-
-        if (token != _prefabToken) return;
-        _prefab = read;
-        BuildPrefabRows();
-        RaisePrefab();
-    }
-
-    private void RaisePrefab()
-    {
-        Raise(nameof(HasPrefab));
-        Raise(nameof(PrefabEntries));
-        Raise(nameof(PrefabSummary));
-        Raise(nameof(PrefabHasDangling));
-    }
-
     // ── Tuning (archive root only) ──
     //
-    // The entity-data tables of the staged archive. Same shape as the Prefab tab above and for the same
-    // reason: both describe the ARCHIVE rather than the selection, both write the working copy the moment a
-    // value is typed, and both hand the host an undo entry to record.
+    // The entity-data tables of the staged archive. Like the effects below it and unlike everything above:
+    // it describes the ARCHIVE rather than the selection, it writes the working copy the moment a value is
+    // typed, and it hands the host an undo entry to record.
+    //
+    // What a car is ASSEMBLED from is not here and no longer has a tab: it is the component tree, and the
+    // aggregate is the one path from a change to a car's bytes.
 
     private CarTuning? _tuning;
     private string? _tuningArchive;
@@ -845,10 +510,10 @@ public sealed class SelectionViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// The archive the Prefab tab is describing. The selection decides it when the selection belongs to one —
-    /// that is what makes the tab right in the map editor, where a dozen archives are loaded at once. With
-    /// nothing selected it falls back to the SCENE: a stage holding exactly one archive is unambiguous, and
-    /// waiting for a click before saying what the car is made of would be waiting for nothing.
+    /// The archive the archive-wide tabs are describing. The selection decides it when the selection belongs
+    /// to one — that is what makes them right in the map editor, where a dozen archives are loaded at once.
+    /// With nothing selected it falls back to the SCENE: a stage holding exactly one archive is unambiguous,
+    /// and waiting for a click before saying how a car drives would be waiting for nothing.
     /// </summary>
     private FileInfo? ContextArchive()
     {

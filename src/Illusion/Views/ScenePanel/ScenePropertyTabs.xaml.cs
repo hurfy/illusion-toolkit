@@ -33,17 +33,7 @@ public partial class ScenePropertyTabs : UserControl
         Effects.AddCopyRequested += selection.AddEffectCopy;
     }
 
-    /// <summary>
-    /// Brings the Prefab tab up. The content browser calls it when its PREFAB tile is opened: the tile is
-    /// the obvious way in, and the tab describes the whole archive rather than a selection, so nothing else
-    /// would have brought it forward.
-    /// </summary>
-    public void ShowPrefab()
-    {
-        if (PrefabTab.Visibility == Visibility.Visible) PropertyTabs.SelectedItem = PrefabTab;
-    }
-
-    /// <summary>The same for the Tuning tab, which is what an EntityDataStorage tile opens onto.</summary>
+    /// <summary>The Tuning tab, which is what an EntityDataStorage tile opens onto.</summary>
     public void ShowTuning()
     {
         if (TuningTab.Visibility == Visibility.Visible) PropertyTabs.SelectedItem = TuningTab;

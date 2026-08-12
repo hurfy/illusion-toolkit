@@ -42,15 +42,6 @@ public static class TabIcon
         (element ?? throw new ArgumentNullException(nameof(element))).SetValue(HasIconProperty, value);
 }
 
-/// <summary>The Prefab tab's picture and colour, taken straight from the content browser's own table so the
-/// tab and the tile can never drift into being two different icons for one resource.</summary>
-public static class PrefabTabIcon
-{
-    public static Geometry Geometry { get; } = ArchiveIcons.Icon(Assets.Sds.SdsResourceKind.Prefab);
-
-    public static Brush Tint { get; } = ArchiveIcons.Tint(Assets.Sds.SdsResourceKind.Prefab);
-}
-
 /// <summary>The Tuning tab's picture and colour — the entity-data storage's own, for the same reason.</summary>
 public static class TuningTabIcon
 {

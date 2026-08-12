@@ -499,8 +499,6 @@ internal static class TuningProbes
         // Path — nothing a build would ever object to. The only way to see it is to run the template.
         check("...and the icon reaches the rail's template rather than binding to nothing",
             DrawnIcon(panel, "Tuning") != null, DrawnIconDetail(panel, "Tuning"));
-        check("the Prefab tab's icon is drawn too", DrawnIcon(panel, "Prefab") != null,
-            DrawnIconDetail(panel, "Prefab"));
 
         // The table picker is a strip of numbered buttons rather than a drop-down: with six tables, one
         // click each beats open-list-read-pick every time. It sits in the header card, outside any data
@@ -511,20 +509,19 @@ internal static class TuningProbes
         check("...whose buttons split the width evenly, like a segmented control",
             strip?.ItemsPanel?.LoadContent() is System.Windows.Controls.Primitives.UniformGrid { Rows: 1 }, "");
 
-        // Both stand under Render rather than appearing with a selection: they describe the whole archive,
-        // not whatever happens to be clicked.
+        // Tuning stands under Render rather than appearing with a selection: it describes the whole archive,
+        // not whatever happens to be clicked. It used to be checked beside the Prefab tab, which is gone —
+        // a car's ASSEMBLY is the component tree now, and the rail is left describing the car class and the
+        // archive. That the assembly has no tab is asserted here rather than left to be noticed.
         var top = panel.Tabs.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
             .Take(3).Select(t => t.Header as string).ToList();
-        check("Render, Tuning and Prefab are the standing tabs, in that order",
-            top is ["Render", "Tuning", "Prefab"], string.Join(" ", top));
+        check("Render and Tuning are the standing tabs, in that order",
+            top is ["Render", "Tuning", ..], string.Join(" ", top));
 
-        // The tab's own place on the rail. Tuning is what a car IS asked about first — how it drives — so it
-        // sits above the assembly tab rather than below it.
         var headers = panel.Tabs.PropertyTabs.Items.OfType<System.Windows.Controls.TabItem>()
             .Select(t => t.Header as string).ToList();
-        check("Tuning comes before Prefab on the rail",
-            headers.IndexOf("Tuning") >= 0 && headers.IndexOf("Tuning") < headers.IndexOf("Prefab"),
-            string.Join(" ", headers));
+        check("nothing on the rail describes how the car is ASSEMBLED — that is the component tree",
+            !headers.Contains("Prefab"), string.Join(" ", headers));
     }
 
     // The first ListBox under the tab that carries the strip's own style — walked logically, because a tab

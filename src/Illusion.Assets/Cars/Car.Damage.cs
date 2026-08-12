@@ -58,6 +58,11 @@ public sealed partial class Car
             fields.Add(Number(prefab, "Energy drop", "And how quickly that energy falls away.",
                 CarFieldKind.Number, CarValueSlot.DeformEnergyDrop, at));
         }
+        fields.Add(Number(prefab, "Part kind",
+            "Which kind of panel the engine treats this as — 1 body, 4 door, 5 window, 6 cover, 13 motor. It "
+            + "is the file's own word for the component and the reason the tree does not read it off the "
+            + "bone's name: a cover names doorBL on seven shipped cars.",
+            CarFieldKind.Count, CarValueSlot.DeformPartType, at));
         fields.Add(Point(prefab, "Centre of mass of this component",
             "The point the damage model swings this panel about. NOT the car's centre of mass — that one is "
             + "the car class's, in the Tuning tab.", CarValueSlot.DeformCentreOfMass, at));

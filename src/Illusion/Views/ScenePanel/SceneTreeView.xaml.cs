@@ -193,32 +193,6 @@ public partial class SceneTreeView : UserControl
         TreeRestoreBackupItem.Header = sds != null ? $"Restore Backup… ({sds.Name})" : "Restore Backup…";
         TreeRestoreBackupItem.IsEnabled = sds != null && _viewport.BridgeEditedCount == 0;
 
-        // A collision box hangs off a PART, so the item only lights up on a bone and says which one.
-        string? bone = _viewport.SelectedBoneName;
-        TreeAddCollisionBoxItem.Header = bone != null ? $"Add Collision Shape… ({bone})" : "Add Collision Shape…";
-        TreeAddCollisionBoxItem.IsEnabled = _viewport.CanAddCollisionBox;
-    }
-
-    private void AddCollisionBox_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewport.SelectedBoneName is not { } bone) return;
-        var dialog = new CollisionBoxWindow(_viewport.CollisionPartChoices, bone)
-        {
-            Owner = Window.GetWindow(this),
-        };
-        if (dialog.ShowDialog() != true || dialog.Size is not { } size || dialog.Part is not { } part) return;
-
-        // Two different things behind one dialog: a placed physics shape, or a plain box that is what its
-        // type says. They are not variants — a window is type 0 on all 527 shipped ones and a body type 5 on
-        // all 407 — so they take different paths from here.
-        if (dialog.VolumeType is { } volumeType)
-        {
-            _viewport.AddCollisionZone(volumeType, size, part.Bone);
-        }
-        else if (dialog.Kind is { } kind)
-        {
-            _viewport.AddCollisionShape(kind, size, part.Bone, dialog.Surface);
-        }
     }
 
     private void DeleteMenuItem_Click(object sender, RoutedEventArgs e) => _viewport.DeleteSelected();

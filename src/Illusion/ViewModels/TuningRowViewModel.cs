@@ -179,7 +179,7 @@ public sealed class TuningElementRowsViewModel
 public sealed class TuningBandRowsViewModel : INotifyPropertyChanged
 {
     // Warm for what a driver feels (engine, gearbox, brakes), cool for the structure under it, grey for the
-    // parts nobody has named — the same warm/cool split the Prefab tab and the resource icons use.
+    // parts nobody has named — the same warm/cool split the resource icons use.
     private static readonly Dictionary<string, Brush> Accents = new(StringComparer.Ordinal)
     {
         ["Body"] = PaletteInk.Steel,

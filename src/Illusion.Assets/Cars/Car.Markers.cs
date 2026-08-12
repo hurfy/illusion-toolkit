@@ -1,6 +1,5 @@
 using System.Numerics;
 using Illusion.Domain;
-using Illusion.Formats;
 using Illusion.Formats.Frames;
 using Illusion.Formats.Frames.ObjectTypes;
 using Illusion.Formats.Hashing;
@@ -33,11 +32,15 @@ public sealed partial class Car
     /// and nothing else, so they are placed by moving that frame and there is nothing here to type.
     /// </para>
     /// </summary>
-    private static IReadOnlyList<CarField> MarkerFields(PrefabFile prefab, CarMarkerRole role, int index) =>
+    private static IReadOnlyList<CarField> MarkerFields(
+        PrefabFile prefab, Rig rig, CarMarkerRole role, int index) =>
         role switch
         {
             CarMarkerRole.Seat =>
             [
+                Frame(prefab, rig, "Entered by", "The door this seat is reached through. It is the seat's "
+                    + "own reference and not the door's — nothing in the format keeps the two in step.",
+                    CarFrameSlot.SeatDoor, index),
                 Number(prefab, "Seat number", "WHICH seat of the car this is — not its place in the list. "
                     + "Measured over the 213 shipped seats it is unique within its car and below the seat "
                     + "count, and the commonest two-seater is written 1, 0.",
@@ -76,7 +79,7 @@ public sealed partial class Car
     /// </para>
     /// </summary>
     private static void HangRows(
-        PrefabFile prefab, CarPrefab car, Dictionary<ulong, CarComponent> byBone, CarComponent? body)
+        PrefabFile prefab, CarPrefab car, Rig rig, Dictionary<ulong, CarComponent> byBone, CarComponent? body)
     {
         IReadOnlyList<CarPrefab.DoorPoints> doors = car.Doors;
         for (int i = 0; i < doors.Count; i++)
@@ -109,6 +112,8 @@ public sealed partial class Car
             Hang(axles[i].Frame, new CarComponentRow(
                 Numbered("Axle", i, axles.Count), "axle", i,
                 [
+                    Frame(prefab, rig, "Brake drum", "The frame the brake drum is drawn from.",
+                        CarFrameSlot.AxleBrakeDrum, i),
                     Number(prefab, "Axle type", "Which kind of axle this is, as the game numbers them.",
                         CarFieldKind.Count, CarValueSlot.AxleType, i),
                     Number(prefab, "Brake drum radius", "In metres.",
@@ -117,6 +122,23 @@ public sealed partial class Car
                         CarFieldKind.Number, CarValueSlot.AxleBrakeDrumMass, i),
                     Number(prefab, "Axle mass", "In kilograms.",
                         CarFieldKind.Number, CarValueSlot.AxleMass, i),
+                ]));
+        }
+
+        // What it takes to knock a door off, in a list of its own beside the door's — a car that carries none
+        // has no rows here, which is most of them.
+        int dcb = prefab.CarSlotCount(CarFrameSlot.DcbDoor);
+        for (int i = 0; i < dcb; i++)
+        {
+            Hang(prefab.GetCarFrame(CarFrameSlot.DcbDoor, i), new CarComponentRow(
+                Numbered("Door damage", i, dcb), "door damage", i,
+                [
+                    Frame(prefab, rig, "Door", "Which door these two numbers are about.",
+                        CarFrameSlot.DcbDoor, i),
+                    Number(prefab, "Resistance", "How hard this door is to knock off.",
+                        CarFieldKind.Number, CarValueSlot.DcbResistance, i),
+                    Number(prefab, "Hitpoints", "How much it takes before it comes off.",
+                        CarFieldKind.Number, CarValueSlot.DcbHitpoints, i),
                 ]));
         }
 
@@ -222,8 +244,8 @@ public sealed partial class Car
     /// <para>
     /// The skip is not an optimisation, it is what keeps this from undoing somebody else's edit. A field was
     /// read when the row was BUILT, and the fields come back from a dialog the modder may have had open for a
-    /// while; meanwhile the Prefab tab writes the very same numbers straight to the working copy and re-stitches
-    /// nothing. Writing all of them back would put every value the modder did not touch to what it was when the
+    /// while; meanwhile a scene save or a bridge push can write the very same file. Writing all of them back
+    /// would put every value the modder did not touch to what it was when the
     /// row was built — silently reverting that other edit and reporting success. Writing only what differs makes
     /// an untouched field mean "leave it alone", which is what it says on screen.
     /// </para>
@@ -236,6 +258,18 @@ public sealed partial class Car
     {
         foreach (CarField field in fields)
         {
+            // A frame reference is written by HASH and never by a number, so it leaves before the numeric
+            // checks below get a chance to read its empty Number as a value the modder typed.
+            if (field.Kind == CarFieldKind.Frame)
+            {
+                if (Prefab.GetCarFrame(field.FrameSlot, field.At) == field.Frame) continue;
+                if (!Prefab.SetCarFrame(field.FrameSlot, field.At, field.Frame))
+                {
+                    refusal = $"the prefab would not take \"{field.Label}\" — that slot is no longer there";
+                    return false;
+                }
+                continue;
+            }
             if (!Finite(field))
             {
                 refusal = $"\"{field.Label}\" has to be a number";
@@ -275,7 +309,11 @@ public sealed partial class Car
     private bool Taken(CarMarker marker, IReadOnlyList<CarField> fields, ref string? refusal)
     {
         if (marker.Role != CarMarkerRole.Seat || Prefab.Car is not { } car) return false;
-        CarField? number = fields.FirstOrDefault(f => f.Slot == CarValueSlot.SeatIndex);
+        // The KIND first: a frame field is addressed through FrameSlot and leaves Slot at whatever the enum's
+        // first member happens to be, so matching on the slot alone would make this depend on a declaration
+        // order nothing else does.
+        CarField? number = fields.FirstOrDefault(
+            f => f.Kind != CarFieldKind.Frame && f.Slot == CarValueSlot.SeatIndex);
         if (number == null) return false;
 
         var want = (uint)MathF.Max(0f, MathF.Round(number.Number));
@@ -480,44 +518,6 @@ public sealed partial class Car
             if (ok) written++;
         }
         return written;
-    }
-
-    /// <summary>
-    /// The same, for a frame graph the caller already holds — what a frame-resource save runs so that dragging
-    /// a marker changes what the game reads and not only what the editor draws.
-    /// </summary>
-    /// <param name="lost">What the save would not deliver, or null when it delivered everything. A save can be
-    /// REFUSED — the prefab has to survive being written and read back, and it refuses outright if somebody
-    /// else has written the file since — and a caller that threw this away would let the frame move while the
-    /// row the game reads stayed where it was, silently.</param>
-    /// <returns>How many rows changed. 0 with a <paramref name="lost"/> means nothing was written at all.</returns>
-    public static int SyncMarkers(
-        string extracted, FrameResource frames, IReadOnlyCollection<FrameObjectBase> moved,
-        out string? lost)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(extracted);
-        ArgumentNullException.ThrowIfNull(frames);
-        ArgumentNullException.ThrowIfNull(moved);
-        lost = null;
-        if (moved.Count == 0) return 0;
-
-        foreach (string file in PrefabFiles(extracted))
-        {
-            PrefabFile prefab;
-            try { prefab = PrefabFile.Load(file); }
-            catch (Exception ex) when (ex is IOException or SdsFormatException) { continue; }
-            if (prefab.Car == null) continue;
-
-            Car car = Stitch(prefab, frames, lod: 0, previous: null, prefabPath: file, extracted: extracted);
-            int written = car.SyncMarkers(moved);
-            if (written == 0) return 0;
-
-            CarSave saved = car.Save();
-            if (saved.Ok) return written;
-            lost = string.Join("; ", saved.Lost);
-            return 0;
-        }
-        return 0;
     }
 
     /// <summary>

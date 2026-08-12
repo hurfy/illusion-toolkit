@@ -177,60 +177,104 @@ public sealed class SceneDocumentAdapter : ISceneDocument
     /// <remarks>
     /// A stub the user has DRAGGED is left alone. Its new placement lives only in the frame until a save
     /// writes it through, so snapping it to the prefab here would silently throw the drag away — and this
-    /// runs on every number typed into the Prefab tab, which is a thing people do in the middle of placing
-    /// a box by eye.
+    /// runs after edits made in the property panel, which happen mid-placement.
     /// </remarks>
-    /// <summary>Changes what one of this car's collision volumes IS — see
-    /// <see cref="Collisions.CarPhysicsVolumes.ChangeType"/>, which also re-spaces its placement.</summary>
-    public Collisions.CarPhysicsVolumes.TypeChange? ChangeVolumeType(
-        int part, int volume, uint newType, out string? refusal) =>
-        Collisions.CarPhysicsVolumes.ChangeType(
-            MafiaEnvironment.ExtractedDir(SourceArchive), _frame, part, volume, newType, out refusal);
-
     public int AdoptPrefabPlacements() =>
         Collisions.CarPhysicsVolumes.AlignStubsToPrefab(
             MafiaEnvironment.ExtractedDir(SourceArchive), _frame, _movedCollisionStubs);
 
+    /// <summary>
+    /// Writes what the editor has changed into the archive's working copy.
+    ///
+    /// <para>
+    /// A CAR goes through the aggregate, whole: its frame resource, its name table and the prefab rows its
+    /// moved frames are written down in twice are one save, because a car's collision, its climb boxes and
+    /// its seats are each stated in two places and only one of them is what the game reads. Every other kind
+    /// of archive takes the plain frame writer, which is what it has always been.
+    /// </para>
+    /// </summary>
     public string SaveWorkingCopy()
     {
-        string written = SdsWriter.SaveFrameResource(_frame, SourceArchive);
-        if (_movedCollisionStubs.Count > 0)
+        string extracted = MafiaEnvironment.ExtractedDir(SourceArchive);
+        MarkerRowsRefused = null;
+        string? written = _isCar == false ? null : SaveCar(extracted);
+        if (written == null)
         {
-            Collisions.CarPhysicsVolumes.SyncStubs(
-                MafiaEnvironment.ExtractedDir(SourceArchive), _movedCollisionStubs);
-            _movedCollisionStubs.Clear();
+            // Not a car: the frame resource, and its name table after it — the rebuild reads the object order
+            // and scene indices that serializing the resource finalises, so it has to run second. Verified a
+            // semantic fixpoint across every district (see --probe-nametable).
+            written = SdsWriter.SaveFrameResource(_frame, SourceArchive);
+            if (_nameTableDirty)
+            {
+                SdsWriter.SaveFrameNameTable(_frame, SourceArchive);
+                _nameTableDirty = false;
+            }
         }
-        // A climb box is stated in the prefab row and only there, and a seat states where its occupant sits
-        // beside the Dummy that shows it; either way the frame is where it is EDITED. Without this, moving or
-        // scaling one changed what the editor draws and nothing the game reads — which is exactly how a newly
-        // added climb box turned out to be unclimbable. Through the aggregate, which is the one path from a
-        // change to a car's bytes, and only for the frames that actually moved.
-        if (_movedMarkerFrames.Count > 0)
-        {
-            Cars.Car.SyncMarkers(
-                MafiaEnvironment.ExtractedDir(SourceArchive), _frame, _movedMarkerFrames, out string? lost);
-            // Cleared only when the rows were actually written. A save can be refused — the prefab has to
-            // survive being written and read back, and it refuses outright if another editor has written the
-            // file since — and forgetting the drag anyway is how a marker moves in the editor and nowhere
-            // else. Held instead, so the next save carries it.
-            if (lost == null) _movedMarkerFrames.Clear();
-            MarkerRowsRefused = lost;
-        }
-        if (_nameTableDirty)
-        {
-            // Must run AFTER SaveFrameResource: WriteToStream ran UpdateFrameData, so FrameObjects order and the
-            // scene indices the rebuild reads are final. Verified a semantic fixpoint across every district (see
-            // --probe-nametable).
-            SdsWriter.SaveFrameNameTable(_frame, SourceArchive);
-            _nameTableDirty = false;
-        }
-        if (_dirtyVertexBuffers.Count > 0 || _dirtyIndexBuffers.Count > 0)
+
+        // The pools describe geometry the FRAME RESOURCE indexes, so they go only when it went. A refused car
+        // save wrote neither, and flushing the buffers anyway would leave the working copy holding vertices
+        // no frame in it accounts for.
+        if (MarkerRowsRefused == null && (_dirtyVertexBuffers.Count > 0 || _dirtyIndexBuffers.Count > 0))
         {
             Bridge.SdsGeometrySaver.SaveDirtyPools(_frame, _dirtyVertexBuffers, _dirtyIndexBuffers);
             _dirtyVertexBuffers.Clear(); // the working copy now matches memory
             _dirtyIndexBuffers.Clear();
         }
         return written;
+    }
+
+    /// <summary>
+    /// Whether this archive carries a car, once anything has asked. A district's PREFAB holds over a thousand
+    /// entries and opening it to find no car is work paid on every save of a scene that never had one, so the
+    /// answer is remembered — a document is one archive's graph for its whole life, and an archive does not
+    /// become a car.
+    /// </summary>
+    private bool? _isCar;
+
+    /// <summary>
+    /// The car half of a save, through the one seam. Null when this archive carries no car, which is how the
+    /// caller knows to fall back to the plain frame writer.
+    ///
+    /// <para>
+    /// The moved-frame sets are cleared only when the rows were actually written. A save can be REFUSED — the
+    /// prefab has to survive being written and read back, and it refuses outright if another editor has
+    /// written the file since — and forgetting the drag anyway is how a marker moves in the editor and
+    /// nowhere else. They are held for the next save instead, and the modder is told through
+    /// <see cref="MarkerRowsRefused"/> — which is also the only place a refusal is reported, since the
+    /// string this answers with names the archive's frame resource either way.
+    /// </para>
+    /// </summary>
+    private string? SaveCar(string extracted)
+    {
+        Cars.Car? car = Cars.Car.SaveScene(
+            extracted, _frame, _movedMarkerFrames, _movedCollisionStubs, _nameTableDirty, out string? lost);
+        _isCar = car != null;
+        if (car == null) return null;
+
+        MarkerRowsRefused = lost;
+        if (lost == null)
+        {
+            _movedMarkerFrames.Clear();
+            _movedCollisionStubs.Clear();
+            _nameTableDirty = false;
+        }
+        return FrameResourceFile(extracted) ?? car.PrefabPath;
+    }
+
+    /// <summary>Where this archive's frame resource lives, for the caller that wants to say what was
+    /// written. Null when the manifest cannot be read or lists none.</summary>
+    private static string? FrameResourceFile(string extracted)
+    {
+        try
+        {
+            IReadOnlyList<string> files = Formats.Archive.SdsManifest.Load(extracted)
+                .GetFiles("FrameResource");
+            return files.Count > 0 ? files[0] : null;
+        }
+        catch (Exception ex) when (ex is IOException or Formats.SdsFormatException)
+        {
+            return null;
+        }
     }
 
     /// <inheritdoc cref="ISceneDocument.Reparent"/>

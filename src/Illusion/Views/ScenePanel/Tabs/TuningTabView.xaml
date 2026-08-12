@@ -8,8 +8,8 @@
          aerodynamics and a long sound tail — and none of it is in the car a district places: an
          actor record for a car is a position, and this is where the driving lives.
 
-         Same shape as the Prefab tab beside it, deliberately: one card per band, closed to start
-         with, a search over the lot. A car's table is 771 fields, so it is skimmed, never read.
+         One card per band, closed to start with, a search over the lot — a car's table is 771
+         fields, so it is skimmed, never read.
 
          The struct is COLUMN-major in the file (all ten wheels' models, then all ten tyres); the
          rows are put back together per wheel here, which is the tab's whole reason for existing. -->

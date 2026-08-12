@@ -147,15 +147,6 @@ public partial class ScenePanel : UserControl
         Tabs.Attach(viewport, _selection);
         Tabs.MaterialEditorRequested += vm => MaterialEditorRequested?.Invoke(vm);
 
-        // A prefab pick writes the working copy the moment it is made, so the three things that follow are
-        // the host's: it goes on the undo stack, the archive joins the build list, and the user is told.
-        _selection.PrefabEdited += (archive, message, edit) =>
-        {
-            viewport.History.Push(edit);
-            viewport.MarkArchiveModified(archive);
-            viewport.RaiseNotice(message + " Build to write it into the archive.", isError: false);
-        };
-
         // A tuning edit is the same deal: the number is already in the working copy, so the host records it,
         // adds the archive to the build list and says so.
         _selection.TuningEdited += (archive, message, edit) =>
@@ -181,10 +172,9 @@ public partial class ScenePanel : UserControl
             // archive rolled back to a backup, another resource opened — so the stitching is re-run rather
             // than trusted, and the identities are carried across it.
             RefreshComponents();
-            // The Prefab tab describes the ARCHIVE, not the selection, so it has to follow what is staged —
-            // otherwise it only appears once something has been clicked, and a car that has just opened
+            // These two describe the ARCHIVE, not the selection, so they have to follow what is staged —
+            // otherwise they only appear once something has been clicked, and a car that has just opened
             // shows nothing at all.
-            _selection.RefreshPrefab();
             _selection.RefreshTuning();
             _selection.RefreshEffects();
         });
@@ -214,8 +204,20 @@ public partial class ScenePanel : UserControl
         ApplyTreeMode();
     }
 
-    /// <inheritdoc cref="ScenePropertyTabs.ShowPrefab"/>
-    public void ShowPrefab() => Tabs.ShowPrefab();
+    /// <summary>
+    /// Puts the hierarchy on the COMPONENT tree — what a modder means by "show me how this archive is put
+    /// together", and what the content browser's PREFAB tile now opens onto.
+    ///
+    /// <para>
+    /// There is no tab to bring up any more: the assembly is the tree, and its rows are the components the
+    /// prefab's lists were scattered across. An archive that carries no car is left on its frames, because
+    /// switching a district to a component tree it has none of would be worse than doing nothing.
+    /// </para>
+    /// </summary>
+    public void ShowAssembly()
+    {
+        if (_components.HasCar) _components.IsRaw = false;
+    }
 
     /// <inheritdoc cref="ScenePropertyTabs.ShowTuning"/>
     public void ShowTuning() => Tabs.ShowTuning();
@@ -633,11 +635,17 @@ public partial class ScenePanel : UserControl
     /// axle.</summary>
     private void EditDataRow(ComponentDataRowViewModel row)
     {
+        // A row that belongs to the CAR says so itself — the chassis and the steering-wheel grip sit on the
+        // body because the body is the car and not a panel of it, so the sentence about "a row beside the
+        // component" would be about the wrong thing.
         var dialog = new CarFieldsWindow(
             $"{row.Label} on {row.Component.Name}",
-            $"What this car's {row.Row.Kind} list says about \"{row.Component.Name}\". It is a row of its "
-            + "own beside the component, and nothing in the format keeps the two in step — which is why it "
-            + "is shown here.",
+            row.Row.Hint.Length > 0
+                ? row.Row.Hint + " It belongs to the car itself, and sits here because the body is the car "
+                    + "rather than a panel of it."
+                : $"What this car's {row.Row.Kind} list says about \"{row.Component.Name}\". It is a row of "
+                    + "its own beside the component, and nothing in the format keeps the two in step — which "
+                    + "is why it is shown here.",
             row.Row.Fields)
         {
             Owner = Window.GetWindow(this),

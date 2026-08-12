@@ -769,8 +769,8 @@ internal static class CollisionRoleProbes
             new Vector3(0.2f, 0.2f, 0.2f), Vector3.Zero, out string? refusal);
         if (edit == null) { check("a collision can be added", false, refusal ?? ""); return; }
 
-        // Somebody else — the Prefab tab, the collision overlay — writes the file between the read and the
-        // save. Their bytes are what has to survive.
+        // Somebody else — a scene save, a bridge push, a second window — writes the file between the read
+        // and the save. Their bytes are what has to survive.
         Car? other = Car.ReadFrom(mirror);
         CarComponent? otherBody = Pick(other, "body");
         if (other == null || otherBody == null) { check("the car reads twice", false, ""); return; }

@@ -6,6 +6,13 @@
        and Domain; Rendering and the UI consume Domain types exclusively. -->
 
   <ItemGroup>
+    <!-- The app sees the internals for one reason: the write-exclusivity probe has to be able to ask the Car
+         aggregate how many files it has put bytes into. "The file changed and the aggregate did not write it"
+         is the regression that seam decays into, and it cannot be measured from the outside. -->
+    <InternalsVisibleTo Include="Illusion" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
     <ProjectReference Include="..\Illusion.Formats\Illusion.Formats.csproj" />
     <ProjectReference Include="..\Illusion.Bridge\Illusion.Bridge.csproj" />

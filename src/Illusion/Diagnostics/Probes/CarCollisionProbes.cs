@@ -2,6 +2,7 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using Illusion.Assets;
+using Illusion.Assets.Cars;
 using Illusion.Assets.Collisions;
 using Illusion.Assets.Sds;
 using Illusion.Formats.Archive;
@@ -259,9 +260,17 @@ internal static class CarCollisionProbes
     }
 
     /// <summary>
-    /// Gives a bone a box to be shot at, on a COPY of the car, and checks the whole round trip: the shape file
-    /// exists and is announced, the stub names it, the stub hangs off the bone, and the FrameResource still
-    /// reads back after the writer has been over it. Then puts everything back.
+    /// Gives a component a box to be shot at, on a COPY of the car, and checks what the OVERLAY then has to
+    /// draw: every stub resolves to a shape, every shape draws as whole line segments, and the new box's
+    /// wireframe reaches exactly the half-size it was given. Then puts everything back.
+    ///
+    /// <para>
+    /// The authoring itself goes through the aggregate, because that is the only way a collision is written
+    /// now — a role, a shape and a full size, with the volume, the ItemDesc record, the manifest entry and the
+    /// mirror stub derived from them. What the record and the stub have to look like is
+    /// <c>--probe-collision-role</c>'s question, measured against the shipped corpus; this probe's own
+    /// question is the drawing, so that is what it checks beyond the minimum that the box arrived at all.
+    /// </para>
     /// <para>
     /// Works on a scratch copy of the extracted folder — the probe must never touch the player's own car.
     /// </para>
@@ -281,126 +290,117 @@ internal static class CarCollisionProbes
             foreach (string file in Directory.GetFiles(source))
                 File.Copy(file, Path.Combine(scratch, Path.GetFileName(file)));
 
-            FrameResource? fr = SdsMeshLoader.OpenScene(scratch).FrameResource;
+            Car? stitched = Car.ReadFrom(scratch);
+            FrameResource? fr = stitched?.Frames;
             FrameObjectModel? model = fr?.FrameObjects.Values.OfType<FrameObjectModel>().FirstOrDefault();
-            if (fr == null || model == null) { sb.AppendLine("\nno skinned model to attach to"); return; }
+            if (stitched == null || fr == null || model == null)
+            {
+                sb.AppendLine("\nno car with a skinned model to attach to");
+                return;
+            }
 
-            string[] bones = (model.GetSkeletonObject().BoneNames ?? []).Select(n => n.ToString() ?? "").ToArray();
-            int hood = Array.FindIndex(bones, n => string.Equals(n, "coverF", StringComparison.OrdinalIgnoreCase));
-            if (hood < 0) hood = Math.Min(1, bones.Length - 1);
+            // The bonnet where the car has one, the body otherwise — a part, because a collision hangs off a
+            // deform part and a bare bone has nothing to hang one on.
+            CarComponent? part = stitched.Components.FirstOrDefault(
+                    c => !c.IsBare && string.Equals(c.Name, "coverF", StringComparison.OrdinalIgnoreCase))
+                ?? stitched.Body;
+            if (part == null || part.IsBare) { sb.AppendLine("\nthis car has no deformable part"); return; }
 
             int stubsBefore = fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count();
             int shapesBefore = SdsManifest.Load(scratch).GetFiles("ItemDesc").Count;
+            int volumesBefore = part.Collisions.Count;
 
-            AddedCollisionBox? added = CarCollisionBuilder.AddShape(
-                model, hood, "illusion_probe_box_Collision", RigidBodyShape.Box,
-                new System.Numerics.Vector3(0.30f, 0.20f, 0.05f),
-                System.Numerics.Matrix4x4.CreateTranslation(0f, 0.10f, 0.02f), scratch, out string? refusal);
+            sb.AppendLine($"\n════ adding a box to \"{part.Name}\" ({part.Kind}) ════");
+            CarEdit? edit = stitched.AddCollision(
+                part, CarCollisionRole.Body, CarCollisionShape.Box,
+                new Vector3(0.60f, 0.40f, 0.10f), new Vector3(0f, 0.10f, 0.02f), out string? refusal);
+            check("a solid collision can be added to a component", edit != null, refusal ?? "");
+            if (edit == null) return;
 
-            sb.AppendLine($"\n════ adding a box to bone \"{(hood >= 0 && hood < bones.Length ? bones[hood] : "?")}\" ════");
-            check("a box collision can be added to a bone", added != null, refusal ?? "");
-            if (added == null) return;
+            CarSave saved = stitched.Save();
+            check("…and the save delivers it whole", saved.Ok, string.Join("; ", saved.Lost));
+            if (!saved.Ok) return;
 
             // The manifest is what packing reads — a shape written and not announced is silently dropped.
             SdsManifest after = SdsManifest.Load(scratch);
-            check("the shape file was written", File.Exists(added.ShapeFile),
-                Path.GetFileName(added.ShapeFile));
-            check("…and announced in the manifest, which is what packing reads",
-                after.GetFiles("ItemDesc").Count == shapesBefore + 1,
+            check("the shape record was written and announced in the manifest, which is what packing reads",
+                after.GetFiles("ItemDesc").Count == shapesBefore + 1
+                    && after.GetFiles("ItemDesc").All(File.Exists),
                 $"{shapesBefore} -> {after.GetFiles("ItemDesc").Count} shapes");
-
-            ItemDescFile back = ItemDescFile.Load(added.ShapeFile);
-            check("the shape reads back as the box that was asked for",
-                back.Hash == added.Frame.Hash
-                && back.Element is RigidBodyElement { Shape: RigidBodyShape.Box } box
-                && Math.Abs(box.BoxDimensions.X - 0.30f) < 1e-4f,
-                $"hash 0x{back.Hash:X16}, {(back.Element as RigidBodyElement)?.Shape.ToString() ?? "?"}");
-            check("the stub names it", added.Frame.Hash == back.Hash, "");
-            check("the stub hangs off the bone that was chosen",
-                added.Frame.AttachedTo == model && added.Frame.AttachedJoint == hood,
-                $"joint {added.Frame.AttachedJoint} of {bones.Length}");
-            check("the frame graph gained exactly one collision stub",
+            check("the frame graph gained exactly one mirror stub",
                 fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count() == stubsBefore + 1,
                 $"{stubsBefore} -> {fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count()}");
 
             // The writer is the real judge: a frame the resource cannot serialize takes the whole car with it.
             var reread = new FrameResource();
             using (var stream = new MemoryStream(fr.WriteToStream())) reread.ReadFromFile(stream);
-            FrameObjectCollision? survivor = reread.FrameObjects?.Values.OfType<FrameObjectCollision>()
-                .FirstOrDefault(c => c.Hash == added.Frame.Hash);
-            check("the new stub survives the writer and comes back on its bone",
-                survivor != null && survivor.AttachedTo != null && survivor.AttachedJoint == hood,
-                survivor == null ? "the stub is not in the file that came back"
-                    : $"joint {survivor.AttachedJoint}");
+            check("the new stub survives the writer and comes back on a bone",
+                reread.FrameObjects?.Values.OfType<FrameObjectCollision>().Count() == stubsBefore + 1
+                    && reread.FrameObjects.Values.OfType<FrameObjectCollision>()
+                        .All(c => c.AttachedTo != null),
+                $"{reread.FrameObjects?.Values.OfType<FrameObjectCollision>().Count() ?? -1} stubs came back");
 
-            // ── What the overlay draws, and editing a shape that already exists ──
+            // ── What the overlay draws ──
             Dictionary<ulong, ResolvedCollisionShape> resolvedAll = CarCollisionShapes.Load(
                 scratch, fr.FrameObjects.Values.OfType<FrameObjectCollision>());
             int stubs = fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count();
             check("every stub in the archive resolves to a shape the overlay can draw",
                 resolvedAll.Count == stubs, $"{resolvedAll.Count} of {stubs}");
 
-            // Every shape draws as SOMETHING, in line pairs. Not "24 vertices each" any more: a box is still
-            // twelve edges, but a capsule is now drawn as a capsule and a sphere as three circles, because a
-            // box around a capsule stands √2·r off the axis and reads as half again too big.
-            var lines = new List<System.Numerics.Vector3>();
+            // Every shape draws as SOMETHING, in line pairs. Not "24 vertices each": a box is still twelve
+            // edges, but a capsule is drawn as a capsule and a sphere as three circles, because a box around a
+            // capsule stands √2·r off the axis and reads as half again too big.
+            var lines = new List<Vector3>();
             int drawn = 0;
             foreach (ResolvedCollisionShape one in resolvedAll.Values)
             {
                 int before = lines.Count;
-                CarCollisionShapes.AppendWireframe(lines, one, System.Numerics.Matrix4x4.Identity);
+                CarCollisionShapes.AppendWireframe(lines, one, Matrix4x4.Identity);
                 if (lines.Count > before) drawn++;
             }
             check("every shape draws, as whole line segments",
                 drawn == resolvedAll.Count && lines.Count % 2 == 0,
                 $"{drawn} of {resolvedAll.Count} shapes, {lines.Count} vertices");
 
-            // The box the probe just added, drawn: its corners must sit at the half-size that was asked for.
-            var boxLines = new List<System.Numerics.Vector3>();
-            CarCollisionShapes.AppendWireframe(boxLines, resolvedAll[added.Frame.Hash],
-                System.Numerics.Matrix4x4.Identity);
+            // The box just added, drawn: its corners sit at HALF the full size that was asked for, which is
+            // the whole of what "size is always the whole thing" means once it reaches a shape record.
+            //
+            // Read off a FRESH stitch, not off the car that wrote it: a component's collision list is built
+            // when the car is stitched, so the one that made the edit still lists what it was read with.
+            CarCollision? minted = Car.ReadFrom(scratch)?.Components
+                .FirstOrDefault(c => string.Equals(c.Name, part.Name, StringComparison.Ordinal))
+                ?.Collisions.Skip(volumesBefore).FirstOrDefault();
+            ResolvedCollisionShape? mine = resolvedAll.Values.FirstOrDefault(
+                r => r.Shape.Element is RigidBodyElement { Shape: RigidBodyShape.Box } b
+                    && Math.Abs(b.BoxDimensions.X - 0.30f) < 1e-4f
+                    && Math.Abs(b.BoxDimensions.Y - 0.20f) < 1e-4f);
+            var boxLines = new List<Vector3>();
+            if (mine != null) CarCollisionShapes.AppendWireframe(boxLines, mine, Matrix4x4.Identity);
             float reach = boxLines.Count > 0 ? boxLines.Max(v => Math.Abs(v.X)) : 0f;
-            check("the wireframe reaches exactly the half-size the box was given",
+            check("the wireframe reaches half the full size the box was given",
                 Math.Abs(reach - 0.30f) < 1e-4f, $"{reach:F3} vs 0.300");
+            check("…and the aggregate reads that same box back as the FULL size that was typed",
+                minted != null && Math.Abs(minted.Size.X - 0.60f) < 1e-4f,
+                minted == null ? "the new collision is not on the component when the car is read again"
+                    : $"{minted.Size.X:F3} vs 0.600");
 
-            // Resizing an EXISTING shape, the way the property panel does it: change the numbers, write the
-            // file, and the change has to survive being read back — the panel edits the archive, not a copy.
-            if (resolvedAll[added.Frame.Hash].Shape.Element is RigidBodyElement live)
-            {
-                live.BoxDimensions = new System.Numerics.Vector3(0.75f, 0.20f, 0.05f);
-                File.WriteAllBytes(resolvedAll[added.Frame.Hash].File,
-                    resolvedAll[added.Frame.Hash].Shape.ToBytes());
-                ItemDescFile resized = ItemDescFile.Load(resolvedAll[added.Frame.Hash].File);
-                check("a resized shape survives being written and read back",
-                    resized.Element is RigidBodyElement r && Math.Abs(r.BoxDimensions.X - 0.75f) < 1e-4f,
-                    $"{(resized.Element as RigidBodyElement)?.BoxDimensions.X ?? -1f:F3} vs 0.750");
-            }
+            // …and taking it back puts the archive back the way it was — the record, the manifest line and
+            // the stub together, because half of them is an archive that cannot be packed.
+            stitched.Restore(edit.Before);
+            CarSave undone = stitched.Save();
+            check("undo delivers whole too", undone.Ok, string.Join("; ", undone.Lost));
 
-            // …and removing it puts the archive back the way it was.
-            CarCollisionBuilder.Remove(model, added);
-            check("removing it takes the stub and the shape away again",
-                !File.Exists(added.ShapeFile)
-                && fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count() == stubsBefore
-                && (model.AttachmentReferences ?? []).All(r => !ReferenceEquals(r.Attachment, added.Frame)), "");
-
+            SdsManifest afterUndo = SdsManifest.Load(scratch);
+            check("undo takes the stub and the shape away again",
+                fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count() == stubsBefore
+                    && afterUndo.GetFiles("ItemDesc").Count == shapesBefore,
+                $"{fr.FrameObjects.Values.OfType<FrameObjectCollision>().Count()} stubs, "
+                    + $"{afterUndo.GetFiles("ItemDesc").Count} shapes");
             // The failure this check exists for: the file went and the manifest kept naming it, so the next
             // Build died with "Could not find file …ItemDesc_0.ids" and the archive could not be packed at
             // all. Packing reads the manifest, so removing a file means unsaying it there too.
-            SdsManifest afterRemove = SdsManifest.Load(scratch);
-            check("…and the manifest stops naming it, or no Build can ever pack this archive again",
-                !afterRemove.HasFile(Path.GetFileName(added.ShapeFile))
-                && afterRemove.GetFiles("ItemDesc").Count == shapesBefore,
-                $"{afterRemove.GetFiles("ItemDesc").Count} shapes listed, was {shapesBefore}");
             check("every shape the manifest still names is really on disk",
-                afterRemove.GetFiles("ItemDesc").All(File.Exists), "");
-
-            // Redo puts the same shape back — file AND manifest line — rather than minting a second one.
-            CarCollisionBuilder.Restore(added, added.Shape.ToBytes());
-            SdsManifest afterRedo = SdsManifest.Load(scratch);
-            check("redo puts the same shape back, not a second one",
-                File.Exists(added.ShapeFile)
-                && afterRedo.GetFiles("ItemDesc").Count == shapesBefore + 1,
-                $"{afterRedo.GetFiles("ItemDesc").Count} shapes listed");
+                afterUndo.GetFiles("ItemDesc").All(File.Exists), "");
         }
         catch (Exception ex)
         {

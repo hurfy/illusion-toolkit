@@ -222,7 +222,10 @@ public sealed partial class Car
                         + "was left in place rather than leaving the archive unpackable");
                     continue;
                 }
-                try { if (File.Exists(target)) File.Delete(target); }
+                try
+                {
+                    if (File.Exists(target)) { File.Delete(target); Interlocked.Increment(ref _deletes); }
+                }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     // The manifest no longer names it, so the archive still packs; the file is orphaned, not
@@ -354,6 +357,29 @@ public sealed partial class Car
         string? folder = Path.GetDirectoryName(target);
         if (folder != null) Directory.CreateDirectory(folder);
         AtomicFile.WriteAllBytes(target, bytes);
+        Interlocked.Increment(ref _puts);
         written.Add(target);
     }
+
+    private static long _puts;
+
+    /// <summary>
+    /// How many files every save in this process has put bytes into — the WITNESS the write-exclusivity probe
+    /// watches.
+    ///
+    /// <para>
+    /// A car's prefab, its ItemDesc records and its frame resource have exactly one writer, and that is the
+    /// whole point of this seam. It also decays silently: a second path added anywhere writes bytes that look
+    /// the same and nothing fails. So the probe takes a byte census of those files, drives every surface that
+    /// can touch a car, and asks this counter who wrote — because "the file changed and the aggregate did not
+    /// write it" cannot be seen from the bytes alone.
+    /// </para>
+    /// </summary>
+    internal static long Puts => Interlocked.Read(ref _puts);
+
+    /// <summary>Also part of the witness: a shape record the save DELETED, which is a change to the archive
+    /// that leaves no bytes behind to count.</summary>
+    internal static long Deletes => Interlocked.Read(ref _deletes);
+
+    private static long _deletes;
 }

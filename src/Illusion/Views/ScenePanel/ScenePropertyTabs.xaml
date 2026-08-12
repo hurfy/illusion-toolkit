@@ -27,16 +27,10 @@
             <v:TuningTabView />
         </TabItem>
 
-        <!-- The browser's own Prefab icon and its own colour, not a Segoe glyph: the tile in the content
-             browser and this tab stand for the very same resource, and two pictures of one thing is what
-             makes a panel confusing. -->
-        <TabItem x:Name="PrefabTab" Header="Prefab" ToolTip="Prefab — how this archive is assembled"
-                 v:TabIcon.Icon="{x:Static v:PrefabTabIcon.Geometry}"
-                 Foreground="{x:Static v:PrefabTabIcon.Tint}"
-                 Style="{StaticResource VerticalTab}"
-                 Visibility="{Binding HasPrefab, Converter={StaticResource BoolToVis}}">
-            <v:PrefabTabView />
-        </TabItem>
+        <!-- There is no Prefab tab. What it showed — the raw assembly lists, Part 1 / Part 2 / Part 3 — is
+             the COMPONENT TREE now: a car's assembly is edited on the components it belongs to, in the
+             hierarchy above, and everything the tab listed has a row there. The tabs left on this rail
+             describe the car CLASS and the archive, which is a different thing from how it is put together. -->
 
         <TabItem x:Name="EffectsTab" Header="Effects" Tag="&#xE945;"
                  ToolTip="Effects — the effects this archive carries of its own"

@@ -3,7 +3,6 @@ using System.IO;
 using System.Text;
 using Illusion.Assets;
 using Illusion.Assets.Cars;
-using Illusion.Assets.Prefabs;
 using Illusion.Formats;
 using Illusion.Formats.Archive;
 using Illusion.Formats.Frames;
@@ -120,11 +119,11 @@ internal static class CarRoundTripProbes
             CarSave again = car.Save(redirect);
             if (again.Written.Count == 0 && again.Unchanged.Count == 1) secondSaveQuiet++;
 
-            // The path this ticket adds runs BESIDE the four that write today; it removes none. The cheapest
-            // way to see that is that the old reader and the new aggregate serialize the same file the same.
+            // The aggregate is now the only writer, but the plain READER is still there and independent of
+            // it, so it is still the cheapest second opinion: the two serialize the same file the same.
             try
             {
-                PrefabFile? old = PrefabEditing.OpenFirst(extracted);
+                PrefabFile? old = Assets.Collisions.CarPhysicsVolumes.OpenFirst(extracted);
                 if (old != null && old.ToBytes().AsSpan().SequenceEqual(original)) agreesWithOld++;
             }
             catch (Exception) { /* counted as disagreeing */ }
@@ -163,7 +162,7 @@ internal static class CarRoundTripProbes
         sb.AppendLine($"    refused (a field did not survive)  {savesRefused}");
         sb.AppendLine($"    the save wrote exactly one file    {wroteOnce}");
         sb.AppendLine($"    saving again wrote nothing         {secondSaveQuiet}");
-        sb.AppendLine($"    the old read path agrees on the bytes  {agreesWithOld}");
+        sb.AppendLine($"    the plain reader agrees on the bytes   {agreesWithOld}");
         sb.AppendLine($"    the frame graph re-serialized unedited is identical too  "
             + $"{rigsIdentical} of {rigs}");
         foreach (string line in damage.Take(20)) sb.AppendLine("      " + line);
@@ -177,7 +176,7 @@ internal static class CarRoundTripProbes
             savesRefused == 0, $"{savesRefused} cars refused their own save");
         check("a save with nothing to write leaves the file alone rather than rewriting it",
             cars > 0 && secondSaveQuiet == cars, $"{secondSaveQuiet} of {cars}");
-        check("the path this ticket adds writes what the path beside it writes",
+        check("the plain reader agrees with the aggregate on the bytes",
             cars > 0 && agreesWithOld == cars, $"{agreesWithOld} of {cars}");
         check("the other half of the car — its frame graph — comes back byte-identical as well",
             rigs > 0 && rigsIdentical == rigs, $"{rigsIdentical} of {rigs}");

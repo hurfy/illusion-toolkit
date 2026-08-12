@@ -318,8 +318,8 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
         }
         catch (Exception)
         {
-            // An archive whose car will not read is a panel that shows the frame tree, not a crash — the same
-            // answer the Prefab tab gives to the same file. Caught WIDE on purpose: the read runs inside the
+            // An archive whose car will not read is a panel that shows the frame tree, not a crash. Caught
+            // WIDE on purpose: the read runs inside the
             // scene-changed handler, the format layer throws several unrelated exception types out of the
             // native reader, and there is no dispatcher handler above this to survive one.
             //
@@ -1231,10 +1231,9 @@ public sealed class ComponentTreeViewModel : INotifyPropertyChanged
     ///
     /// <para>
     /// This is not belt and braces. The aggregate writes the WHOLE prefab from the copy it holds, and that
-    /// copy is only refreshed when the SCENE changes — while four other modules write the same file directly
-    /// and raise nothing: the Prefab tab repointing a seat, the collision overlay changing a volume's type,
-    /// a part being added. Editing on top of a stale read would put those changes back the way they were, and
-    /// the modder would be told the collision was added.
+    /// copy is only refreshed when the SCENE changes — while a scene save, a bridge push or a rollback moves
+    /// the file underneath it without saying so. Editing on top of a stale read would put those changes back
+    /// the way they were, and the modder would be told the collision was added.
     /// </para>
     /// </summary>
     private (Car Car, ComponentRowViewModel Row)? Reread(ComponentId id)
