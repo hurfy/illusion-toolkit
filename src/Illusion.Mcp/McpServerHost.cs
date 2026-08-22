@@ -247,7 +247,9 @@ public sealed class McpServerHost : IAsyncDisposable
             .WithTools<DecodeTools>()
             .WithTools<ResourceDecodeTools>()
             .WithTools<EffectsTools>()
-            .WithTools<MaterialTools>();
+            .WithTools<MaterialTools>()
+            .WithTools<TextureTools>()
+            .WithTools<FormatTools>();
 
         _options.ConfigureServices?.Invoke(builder.Services);
 

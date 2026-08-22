@@ -28,9 +28,13 @@ internal static class ToolResult
 
     private static readonly JsonSerializerOptions Options = new()
     {
-        // Null members are noise in a response the model has to read; leaving them out keeps the
-        // optional halves of the "filePath or base64Data" tools from padding every answer.
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // Nulls are WRITTEN, not dropped. Omitting them reads as tidier and costs a few tokens less,
+        // but it makes a response's shape depend on its content: "no format was identified" and "the
+        // format field does not exist in this kind of answer" become the same thing on the wire, and
+        // every consumer then has to probe for each key instead of reading it. An explicit null says
+        // "asked and unknown", which is what these tools actually mean. (Found the hard way — the
+        // probe crashed on a missing key that the code above had deliberately set to null.)
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
     /// <summary>Serializes a successful payload. Callers put <c>success = true</c> in it themselves,

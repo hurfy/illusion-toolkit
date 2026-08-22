@@ -45,6 +45,10 @@ internal static class McpProbes
         "parse_effects_file", "parse_effects_from_bytes",
         // MaterialTools
         "open_mtl_file", "list_mtl_files", "get_material_info", "search_materials",
+        // TextureTools
+        "inspect_dds_file", "inspect_dds_bytes", "inspect_sds_texture", "list_sds_textures",
+        // FormatTools
+        "detect_file_format", "detect_format_from_bytes",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional
@@ -362,6 +366,7 @@ internal static class McpProbes
 
         await ExerciseDecodersAsync(client, check, skip, sdsRoot).ConfigureAwait(false);
         await ExerciseMaterialsAsync(client, check, skip).ConfigureAwait(false);
+        await ExerciseFormatsAsync(client, check, skip, sdsRoot, tablesSds).ConfigureAwait(false);
 
         JsonElement closed = await CallAsync(client, "close_sds_file",
             new Dictionary<string, object?> { ["filePath"] = tablesSds }).ConfigureAwait(false);
@@ -498,6 +503,178 @@ internal static class McpProbes
             await CallAsync(client, "close_sds_file",
                 new Dictionary<string, object?> { ["filePath"] = archive }).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Texture inspection and format detection, against real game files. Both are header readers, so
+    /// what matters is that they agree with the files rather than with themselves — the DDS checks
+    /// therefore go through an archive's own Texture wrapper, and the detection checks against files
+    /// whose magic is known from the format documentation.
+    /// </summary>
+    private static async Task ExerciseFormatsAsync(
+        McpClient client, CheckFn check, NoteFn skip, string sdsRoot, string tablesSds)
+    {
+        // An SDS whose magic and version are known makes detect_file_format falsifiable: a reader
+        // that guessed from the extension would pass a weaker check and fail this one.
+        JsonElement archive = await CallAsync(client, "detect_file_format",
+            new Dictionary<string, object?> { ["filePath"] = tablesSds }).ConfigureAwait(false);
+        JsonElement archiveHit = archive.GetProperty("detection");
+        check("detect_file_format identifies an SDS and reads its version dword",
+            archiveHit.GetProperty("identified").GetBoolean()
+            && archiveHit.GetProperty("format").GetString() == "SDS"
+            && archiveHit.GetProperty("version").GetUInt32() == 19,
+            archiveHit.GetProperty("magic").GetString() ?? "");
+
+        string streamMap = MafiaEnvironment.StreamMapPath;
+        if (File.Exists(streamMap))
+        {
+            JsonElement map = await CallAsync(client, "detect_file_format",
+                new Dictionary<string, object?> { ["filePath"] = streamMap }).ConfigureAwait(false);
+            check("detect_file_format identifies a StreamMap by its StrM magic",
+                map.GetProperty("detection").GetProperty("format").GetString() == "StreamMap"
+                && map.GetProperty("detection").GetProperty("version").GetUInt32() == 6);
+        }
+
+        // Refusing to guess is a feature here, so it is asserted: a FrameResource opens with a count
+        // and there is genuinely nothing to recognize.
+        JsonElement unknown = await CallAsync(client, "detect_format_from_bytes",
+            new Dictionary<string, object?>
+            {
+                ["base64Data"] = Convert.ToBase64String([0x07, 0x00, 0x00, 0x00, 0x2A, 0x00, 0x00, 0x00]),
+                ["extensionHint"] = ".fr",
+            }).ConfigureAwait(false);
+        check("detect_format_from_bytes admits when the bytes prove nothing",
+            !unknown.GetProperty("detection").GetProperty("identified").GetBoolean()
+            && unknown.GetProperty("detection").GetProperty("extensionHint").GetString() == ".fr");
+
+        // Textures: find an archive that ships some. Not every archive does.
+        string? textured = null;
+        foreach (string candidate in Directory
+                     .EnumerateFiles(Path.Combine(sdsRoot, "city"), "*.sds")
+                     .OrderBy(p => p, StringComparer.Ordinal)
+                     .Take(6))
+        {
+            JsonElement listed = await CallAsync(client, "list_sds_textures",
+                new Dictionary<string, object?>
+                {
+                    ["sdsPath"] = candidate,
+                    ["includeMetadata"] = false,
+                    ["limit"] = 1,
+                }).ConfigureAwait(false);
+            if (listed.GetProperty("success").GetBoolean() && listed.GetProperty("total").GetInt32() > 0)
+            {
+                textured = candidate;
+                break;
+            }
+        }
+
+        if (textured is null)
+        {
+            skip("no archive with Texture resources among the surveyed districts — texture tools not exercised");
+            return;
+        }
+
+        JsonElement textures = await CallAsync(client, "list_sds_textures",
+            new Dictionary<string, object?> { ["sdsPath"] = textured, ["limit"] = 5 }).ConfigureAwait(false);
+        JsonElement first = textures.GetProperty("textures")[0];
+        // Dimensions of zero would mean the wrapper was not unwrapped and the DDS header was read
+        // from the wrong offset — the exact bug this tool exists to avoid.
+        bool sane = first.GetProperty("dds").GetProperty("width").GetInt32() > 0
+            && first.GetProperty("dds").GetProperty("height").GetInt32() > 0;
+        check("list_sds_textures unwraps each Texture record and reads a real DDS header", sane,
+            first.GetProperty("dds").GetProperty("format").GetString() + " "
+            + first.GetProperty("dds").GetProperty("width").GetInt32().ToString(CultureInfo.InvariantCulture)
+            + "x" + first.GetProperty("dds").GetProperty("height").GetInt32().ToString(CultureInfo.InvariantCulture));
+
+        int index = first.GetProperty("index").GetInt32();
+        JsonElement single = await CallAsync(client, "inspect_sds_texture",
+            new Dictionary<string, object?> { ["sdsPath"] = textured, ["resourceIndex"] = index }).ConfigureAwait(false);
+        check("inspect_sds_texture agrees with the listing for the same resource",
+            single.GetProperty("success").GetBoolean()
+            && single.GetProperty("dds").GetProperty("width").GetInt32()
+                == first.GetProperty("dds").GetProperty("width").GetInt32()
+            && single.GetProperty("nameHash").GetUInt64() == first.GetProperty("nameHash").GetUInt64());
+
+        // Round trip: the surface bytes out of the archive, detected and inspected on their own,
+        // must describe the same texture the archive-side tool just described.
+        JsonElement extracted = await CallAsync(client, "extract_resource",
+            new Dictionary<string, object?>
+            {
+                ["filePath"] = textured,
+                ["resourceIndex"] = index,
+                ["maxBytes"] = 256,
+            }).ConfigureAwait(false);
+        string payload = extracted.GetProperty("base64Data").GetString()!;
+        JsonElement wrapped = await CallAsync(client, "detect_format_from_bytes",
+            new Dictionary<string, object?> { ["base64Data"] = payload }).ConfigureAwait(false);
+        // The archive payload is the WRAPPER, not a bare .dds — so detection must NOT call it a DDS.
+        // That is the whole reason inspect_sds_texture exists as a separate tool.
+        check("a raw Texture payload is not mistaken for a bare .dds",
+            wrapped.GetProperty("detection").GetProperty("format").GetString() != "DDS");
+
+        JsonElement rejected = await CallAsync(client, "inspect_dds_bytes",
+            new Dictionary<string, object?> { ["base64Data"] = Convert.ToBase64String([1, 2, 3, 4]) }).ConfigureAwait(false);
+        check("inspect_dds_bytes refuses something that is not a DDS",
+            !rejected.GetProperty("success").GetBoolean(),
+            rejected.GetProperty("error").GetString() ?? "");
+
+        // The file path route, against a header whose every field is known because the probe wrote
+        // it. Real game textures prove the reader agrees with the game; this proves it agrees with
+        // the DDS specification, which is what catches an off-by-one in the offset table.
+        string synthetic = Path.Combine(Path.GetTempPath(), "illusion_probe_synthetic.dds");
+        try
+        {
+            File.WriteAllBytes(synthetic, SyntheticDds(width: 640, height: 480, mips: 4));
+            JsonElement inspected = await CallAsync(client, "inspect_dds_file",
+                new Dictionary<string, object?> { ["filePath"] = synthetic }).ConfigureAwait(false);
+            JsonElement header = inspected.GetProperty("dds");
+            check("inspect_dds_file reads back exactly the header it was given",
+                inspected.GetProperty("success").GetBoolean()
+                && header.GetProperty("width").GetInt32() == 640
+                && header.GetProperty("height").GetInt32() == 480
+                && header.GetProperty("mipCount").GetInt32() == 4
+                && header.GetProperty("fourCC").GetString() == "DXT5"
+                && header.GetProperty("compressed").GetBoolean(),
+                header.GetProperty("format").GetString() ?? "");
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(synthetic);
+            }
+            catch (IOException)
+            {
+                // A leftover temp file is not worth failing a diagnostic over.
+            }
+        }
+
+        await CallAsync(client, "close_sds_file",
+            new Dictionary<string, object?> { ["filePath"] = textured }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A minimal but valid DDS: the 'DDS ' magic, a 124-byte header carrying the given dimensions
+    /// and mip count, a DXT5 pixel format, and one block of surface data. Written field by field at
+    /// the specification's offsets rather than through the reader's own constants — a probe that
+    /// borrowed the reader's offsets would agree with it even when both were wrong.
+    /// </summary>
+    private static byte[] SyntheticDds(int width, int height, int mips)
+    {
+        byte[] dds = new byte[128 + 16];
+        void U32(int offset, uint value) => BitConverter.TryWriteBytes(dds.AsSpan(offset), value);
+
+        U32(0, 0x20534444);                                  // 'DDS '
+        U32(4, 124);                                         // dwSize
+        U32(8, 0x1 | 0x2 | 0x4 | 0x1000 | 0x20000);          // caps|height|width|pixelformat|mipmapcount
+        U32(12, (uint)height);
+        U32(16, (uint)width);
+        U32(28, (uint)mips);                                 // dwMipMapCount
+        U32(76, 32);                                         // ddspf.dwSize
+        U32(80, 0x4);                                        // ddspf.dwFlags = DDPF_FOURCC
+        U32(84, 0x35545844);                                 // ddspf.dwFourCC = 'DXT5'
+        U32(108, 0x1000 | 0x400000 | 0x8);                   // dwCaps = texture|mipmap|complex
+        return dds;
     }
 
     /// <summary>Material libraries, against the install's own edit/materials folder.</summary>
