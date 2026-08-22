@@ -233,10 +233,17 @@ public sealed class McpServerHost : IAsyncDisposable
         // may flip in a future release. Note this says nothing about the cache above — statelessness
         // is a property of the transport, while the cache is keyed by file path and shared by all
         // callers, so it survives across requests exactly as intended.
+        // Registered class by class rather than with WithToolsFromAssembly, so that what this server
+        // serves is a list somebody wrote down: a tool type added to the project is not silently
+        // published to every client until it is named here.
         builder.Services
             .AddMcpServer()
             .WithHttpTransport(o => o.Stateless = true)
-            .WithTools<PingTool>();
+            .WithTools<PingTool>()
+            .WithTools<SdsTools>()
+            .WithTools<UtilityTools>()
+            .WithTools<TableTools>()
+            .WithTools<StreamMapTools>();
 
         _options.ConfigureServices?.Invoke(builder.Services);
 
