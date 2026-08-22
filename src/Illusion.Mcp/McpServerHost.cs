@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using Illusion.Mcp.Services;
 using Illusion.Mcp.Tools;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HostFiltering;
@@ -222,9 +223,16 @@ public sealed class McpServerHost : IAsyncDisposable
         builder.Services.Configure<HostFilteringOptions>(o =>
             o.AllowedHosts = ["127.0.0.1", "localhost"]);
 
+        // The archive cache the browsing tools share. A singleton in the server's own container
+        // rather than something the application registers: it holds no application state, only
+        // decompressed file bytes, and its lifetime is the server's.
+        builder.Services.AddSingleton<ArchiveService>();
+
         // Stateless: no session affinity, every request stands alone. That suits a local tool
         // server, and it is set explicitly because the SDK's own samples warn that the default
-        // may flip in a future release.
+        // may flip in a future release. Note this says nothing about the cache above — statelessness
+        // is a property of the transport, while the cache is keyed by file path and shared by all
+        // callers, so it survives across requests exactly as intended.
         builder.Services
             .AddMcpServer()
             .WithHttpTransport(o => o.Stateless = true)

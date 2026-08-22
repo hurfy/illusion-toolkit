@@ -2,9 +2,9 @@
 
   <!-- The embedded MCP server: a loopback-only HTTP endpoint that exposes the toolkit to MCP
        clients (Claude Code and friends). Kept in its own project so that ASP.NET Core / Kestrel
-       stays out of the WPF exe and the rest of the solution. Depends on Domain only — tools will
-       reach live application state through DI seams (see McpHostOptions), never by referencing
-       the UI. -->
+       stays out of the WPF exe and the rest of the solution. Depends on Domain and Formats — the
+       two layers that hold no UI. Tools reach live application state through DI seams (see
+       McpHostOptions), never by referencing the executable. -->
 
   <ItemGroup>
     <!-- Kestrel is not published as standalone NuGet packages: a non-Web SDK project gets the
@@ -17,6 +17,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Illusion.Domain\Illusion.Domain.csproj" />
+    <!-- Every browsing tool reads a game file through this layer. Formats is a pure library (no
+         WPF, no rendering), so the "no UI from the server" rule above still holds. -->
+    <ProjectReference Include="..\Illusion.Formats\Illusion.Formats.csproj" />
   </ItemGroup>
 
 </Project>

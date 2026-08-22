@@ -16,6 +16,15 @@ namespace Illusion.Diagnostics.Probes;
 /// </summary>
 internal static class McpProbes
 {
+    /// <summary>
+    /// The tool surface this build promises, listed out so the probe fails on a tool that silently
+    /// stopped being registered. Kept in the order the tool classes declare them.
+    /// </summary>
+    private static readonly string[] ExpectedTools =
+    {
+        "ping",
+    };
+
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional
     /// <paramref name="detail"/> survives being passed between the probe's steps.</summary>
     private delegate void CheckFn(string name, bool ok, string detail = "");
@@ -108,8 +117,31 @@ internal static class McpProbes
         McpClientTool? ping = tools.FirstOrDefault(t => t.Name == "ping");
         check("client discovers the ping tool", ping is not null,
             string.Join(", ", tools.Select(t => t.Name)));
-        check("the tool carries a description for the model to read",
-            !string.IsNullOrWhiteSpace(ping?.Description));
+
+        // Every tool, not just ping. A description is what the model reads to decide whether to call
+        // the thing at all, so one missing is a tool the model will never reach for — and the SDK is
+        // perfectly happy to serve it, which is why this is asserted rather than assumed.
+        string[] undescribed = tools
+            .Where(t => string.IsNullOrWhiteSpace(t.Description))
+            .Select(t => t.Name)
+            .ToArray();
+        check("every tool carries a description for the model to read",
+            undescribed.Length == 0, string.Join(", ", undescribed));
+
+        // Names are the tools' public contract: a client's saved prompts and a user's muscle memory
+        // both address them by name, so a rename is a breaking change that should show up here.
+        // Duplicates are the other failure this catches — two [McpServerTool] methods claiming one
+        // name resolve silently to whichever the SDK enumerated last.
+        string[] duplicates = tools
+            .GroupBy(t => t.Name, StringComparer.Ordinal)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToArray();
+        check("no two tools claim the same name", duplicates.Length == 0, string.Join(", ", duplicates));
+
+        string[] missing = ExpectedTools.Where(name => tools.All(t => t.Name != name)).ToArray();
+        check($"all {ExpectedTools.Length} expected tools are served", missing.Length == 0,
+            missing.Length == 0 ? $"{tools.Count} served" : "missing: " + string.Join(", ", missing));
 
         CallToolResult result = await client.CallToolAsync("ping").ConfigureAwait(false);
         string text = string.Join(" ", result.Content.OfType<TextContentBlock>().Select(c => c.Text));

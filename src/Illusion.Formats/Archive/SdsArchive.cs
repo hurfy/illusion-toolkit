@@ -119,9 +119,18 @@ public sealed class SdsArchive
         manifest.Flush();
     }
 
-    // Stub names ({TypeName}_{i}{ext}) overridden by the ResourceInfo XML's SourceDataDescription
-    // values (skipping "not available"); archives without the XML may carry a CrySDS lock instead.
-    private List<string> ResolveEntryNames()
+    /// <summary>
+    /// The per-entry names extraction would write, one per <see cref="Entries"/> slot: stub names
+    /// ({TypeName}_{i}{ext}) overridden by the ResourceInfo XML's SourceDataDescription values
+    /// (skipping "not available"); archives without the XML may carry a CrySDS lock instead.
+    /// <para>
+    /// Public because browsing an archive without unpacking it — what the MCP tools do — needs the
+    /// same names the extractor would produce. Not a pure read: an archive locked with CrySDS has
+    /// that lock entry removed here, exactly as <see cref="Extract"/> does. Idempotent, so calling
+    /// this before extracting changes nothing about the result.
+    /// </para>
+    /// </summary>
+    public List<string> ResolveEntryNames()
     {
         XPathDocument? doc = null;
         if (!string.IsNullOrEmpty(ResourceInfoXml))
