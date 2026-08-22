@@ -196,18 +196,42 @@ independently, so one failure (the game holding a file open, say) does not block
 
 An MCP endpoint runs for the lifetime of the application at `http://127.0.0.1:2010/mcp` - loopback
 only, no authorization - with its live status in the launcher's status bar. Point a client at it
-with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`. It currently serves a
-single `ping` tool as the foundation for real ones; change the port with `McpPort` in settings.
+with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
+`McpPort` in settings.
+
+It serves 38 tools, all of them reading through the same format layer the editor uses, so what a
+model is told about a file is what the toolkit itself sees.
+
+| Group | Tools |
+|-------|-------|
+| **Archives** | `list_sds_files`, `open_sds_file`, `get_sds_header`, `list_resources`, `get_resource_info`, `search_resources`, `extract_resource`, `get_sds_stats`, `close_sds_file` |
+| **Decoding** | `decode_resource` (extract + decode in one call), `decode_actors`, `decode_frame_resource`, `decode_itemdesc`, `decode_collisions` |
+| **Scripts** | `decompile_script_resource`, `decompile_lua` - the game's compiled Lua back to source |
+| **Materials** | `open_mtl_file`, `list_mtl_files`, `get_material_info`, `search_materials` |
+| **Textures** | `list_sds_textures`, `inspect_sds_texture`, `inspect_dds_file`, `inspect_dds_bytes` |
+| **Tables** | `list_tables`, `dump_rows`, `lookup_by_row` |
+| **Stream map** | `parse_stream_map`, `edit_stream_map` |
+| **Effects** | `parse_effects_file`, `parse_effects_from_bytes` |
+| **Utility** | `hash_fnv32`, `hash_fnv64`, `hash_batch`, `convert_number`, `detect_file_format`, `detect_format_from_bytes`, `list_game_files`, `get_configured_games` |
+
+Two of these are worth knowing about before you rely on them. `edit_stream_map` is the only tool
+that writes: it previews by default (`dryRun` is true unless you say otherwise), keeps a
+`<name>_old.bin` backup, and patches strings in place - so a replacement can never be longer than
+what it replaces. And `parse_effects_*` report the `.eff` container header only; the property tree
+inside is not decoded, and the responses say so rather than looking complete.
+
+`--probe-mcp` exercises the whole surface against a real install.
 
 ## Known limits
 
 - The Resource Editor tile is a stub.
 - Duplicating frame objects covers static single-mesh objects only.
 - A topology rebuild does not regenerate lower LODs or collision for that object.
-- `.sds.patch`, `.tra`, `cityareas.bin` and `StreamMap*.bin` are read-only.
+- `.sds.patch`, `.tra` and `cityareas.bin` are read-only. `StreamMap*.bin` is read-only in the
+  editor; the MCP `edit_stream_map` tool can rewrite its strings in place (see below).
 - Console (big-endian) archives are refused.
 - Material-library edits are outside the backup/restore flow.
-- The MCP server exposes only `ping` so far.
+- The MCP server does not decode the `.eff` effects property tree - only the container header.
 - Navigation overlays (`.nav`, `.nov`) are view-only.
 
 ## Contributing

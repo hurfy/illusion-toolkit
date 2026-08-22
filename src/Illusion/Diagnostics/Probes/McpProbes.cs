@@ -37,7 +37,7 @@ internal static class McpProbes
         // TableTools
         "list_tables", "dump_rows", "lookup_by_row",
         // StreamMapTools
-        "parse_stream_map",
+        "parse_stream_map", "edit_stream_map",
         // DecodeTools + ResourceDecodeTools
         "decode_actors", "decode_frame_resource", "decode_itemdesc", "decode_collisions",
         "decode_resource",
@@ -49,6 +49,8 @@ internal static class McpProbes
         "inspect_dds_file", "inspect_dds_bytes", "inspect_sds_texture", "list_sds_textures",
         // FormatTools
         "detect_file_format", "detect_format_from_bytes",
+        // LuaTools
+        "decompile_lua", "decompile_script_resource",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional
@@ -362,11 +364,14 @@ internal static class McpProbes
                 loaders.GetProperty("returned").GetInt32() == 4
                 && loaders.GetProperty("loaders")[0].GetProperty("path").GetString()!.Length > 0,
                 loaders.GetProperty("loaders")[0].GetProperty("path").GetString() ?? "");
+
+            await ExerciseStreamMapEditAsync(client, check, streamMap).ConfigureAwait(false);
         }
 
         await ExerciseDecodersAsync(client, check, skip, sdsRoot).ConfigureAwait(false);
         await ExerciseMaterialsAsync(client, check, skip).ConfigureAwait(false);
         await ExerciseFormatsAsync(client, check, skip, sdsRoot, tablesSds).ConfigureAwait(false);
+        await ExerciseLuaAsync(client, check, skip, sdsRoot).ConfigureAwait(false);
 
         JsonElement closed = await CallAsync(client, "close_sds_file",
             new Dictionary<string, object?> { ["filePath"] = tablesSds }).ConfigureAwait(false);
@@ -502,6 +507,209 @@ internal static class McpProbes
         {
             await CallAsync(client, "close_sds_file",
                 new Dictionary<string, object?> { ["filePath"] = archive }).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The script tools, against a real mission archive.
+    /// <para>
+    /// Worth asserting on the CONTENT and not merely on "it returned something": Mafia II builds Lua
+    /// 5.1 with a 4-byte float lua_Number instead of the usual double, and a decompiler that assumed
+    /// the standard widths would still produce plausible-looking output — with every numeric
+    /// constant wrong. So the check looks for real recovered structure and for the game's own global
+    /// function names, which a misparse would not produce.
+    /// </para>
+    /// </summary>
+    private static async Task ExerciseLuaAsync(McpClient client, CheckFn check, NoteFn skip, string sdsRoot)
+    {
+        string missions = Path.Combine(sdsRoot, "missionscript");
+        string? archive = Directory.Exists(missions)
+            ? Directory.EnumerateFiles(missions, "*.sds").OrderBy(p => p, StringComparer.Ordinal).FirstOrDefault()
+            : null;
+
+        if (archive is null)
+        {
+            skip("no sds/missionscript archives in this install — the Lua tools were not exercised");
+            return;
+        }
+
+        // Listing is the default and must not decompile anything.
+        JsonElement listed = await CallAsync(client, "decompile_script_resource",
+            new Dictionary<string, object?> { ["sdsPath"] = archive }).ConfigureAwait(false);
+        if (!listed.GetProperty("success").GetBoolean() || listed.GetProperty("count").GetInt32() == 0)
+        {
+            skip($"{Path.GetFileName(archive)} holds no scripts — the Lua tools were not exercised");
+            return;
+        }
+
+        bool allIdentified = listed.GetProperty("scripts").EnumerateArray()
+            .All(s => s.GetProperty("isBytecode").GetBoolean()
+                && s.GetProperty("luaVersion").GetString() == "5.1");
+        check("decompile_script_resource lists the scripts and identifies their Lua version",
+            allIdentified,
+            listed.GetProperty("count").GetInt32().ToString(CultureInfo.InvariantCulture) + " scripts, Lua 5.1");
+
+        // Pick the largest script: a trivial one can decompile by accident, a 30 KB mission script
+        // exercises real control flow.
+        JsonElement biggest = listed.GetProperty("scripts").EnumerateArray()
+            .OrderByDescending(s => s.GetProperty("bytes").GetInt32())
+            .First();
+        int scriptIndex = biggest.GetProperty("index").GetInt32();
+
+        JsonElement source = await CallAsync(client, "decompile_script_resource",
+            new Dictionary<string, object?>
+            {
+                ["sdsPath"] = archive,
+                ["scriptIndex"] = scriptIndex,
+                ["limit"] = 200,
+            }).ConfigureAwait(false);
+
+        string text = source.GetProperty("script").GetProperty("text").GetString() ?? "";
+        int totalLines = source.GetProperty("script").GetProperty("totalLines").GetInt32();
+        // Recovered control flow and calls, not just a blob of assignments.
+        bool looksLikeLua = text.Contains("function", StringComparison.Ordinal)
+            && (text.Contains("end", StringComparison.Ordinal) || text.Contains("local", StringComparison.Ordinal));
+        check("decompile_script_resource returns real Lua source for a mission script",
+            source.GetProperty("success").GetBoolean() && looksLikeLua && totalLines > 50,
+            biggest.GetProperty("name").GetString() + " -> "
+            + totalLines.ToString(CultureInfo.InvariantCulture) + " lines");
+
+        check("decompiled source is paged rather than returned whole",
+            source.GetProperty("script").GetProperty("returned").GetInt32() <= 200
+            && source.GetProperty("script").GetProperty("truncated").GetBoolean() == totalLines > 200);
+
+        // Plain-text Lua must be refused outright: fed source, the parser would read the first
+        // characters as a header and fail deep, blaming the file rather than the caller.
+        JsonElement notBytecode = await CallAsync(client, "decompile_lua",
+            new Dictionary<string, object?>
+            {
+                ["base64Data"] = Convert.ToBase64String(Encoding.UTF8.GetBytes("print('hello')\n")),
+            }).ConfigureAwait(false);
+        check("decompile_lua refuses plain-text Lua instead of misreading it",
+            !notBytecode.GetProperty("success").GetBoolean()
+            && (notBytecode.GetProperty("error").GetString() ?? "").Contains("plain-text", StringComparison.Ordinal),
+            notBytecode.GetProperty("error").GetString() ?? "");
+
+        await CallAsync(client, "close_sds_file",
+            new Dictionary<string, object?> { ["filePath"] = archive }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The one tool in this server that WRITES. It therefore runs against a copy in TEMP and never
+    /// the install's own StreamMap, and the assertions are about the safety property the editor
+    /// claims rather than only about the result: an in-place pool edit must leave the file the same
+    /// length and must not touch a single byte before the string pool. That is what makes it safe to
+    /// patch a file whose header describes two arrays this toolkit does not model.
+    /// </summary>
+    private static async Task ExerciseStreamMapEditAsync(McpClient client, CheckFn check, string streamMap)
+    {
+        string copy = Path.Combine(Path.GetTempPath(), "illusion_probe_streammap.bin");
+        string backup = Path.Combine(Path.GetTempPath(), "illusion_probe_streammap_old.bin");
+        try
+        {
+            File.Copy(streamMap, copy, overwrite: true);
+            byte[] original = File.ReadAllBytes(copy);
+
+            // A dry run is the default, and it must be inert. If this ever writes, the default value
+            // of a destructive flag has silently inverted.
+            JsonElement preview = await CallAsync(client, "edit_stream_map",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = copy,
+                    ["find"] = "fmv",
+                    ["replace"] = "FMV",
+                    ["fields"] = "path",
+                }).ConfigureAwait(false);
+            int matched = preview.GetProperty("matched").GetInt32();
+            check("edit_stream_map previews by default and writes nothing",
+                preview.GetProperty("success").GetBoolean()
+                && matched > 0
+                && !preview.GetProperty("written").GetBoolean()
+                && File.ReadAllBytes(copy).AsSpan().SequenceEqual(original),
+                matched.ToString(CultureInfo.InvariantCulture) + " matches previewed");
+
+            // Too long to fit is refused per string, with the reason attached — not skipped quietly.
+            JsonElement tooLong = await CallAsync(client, "edit_stream_map",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = copy,
+                    ["find"] = "fmv",
+                    ["replace"] = "movies",
+                    ["fields"] = "path",
+                    ["dryRun"] = false,
+                }).ConfigureAwait(false);
+            check("edit_stream_map refuses a replacement that cannot fit, and says why",
+                tooLong.GetProperty("refusedCount").GetInt32() > 0
+                && !tooLong.GetProperty("written").GetBoolean()
+                && File.ReadAllBytes(copy).AsSpan().SequenceEqual(original),
+                tooLong.GetProperty("edits")[0].GetProperty("refused").GetString() ?? "");
+
+            JsonElement applied = await CallAsync(client, "edit_stream_map",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = copy,
+                    ["find"] = "fmv",
+                    ["replace"] = "FMV",
+                    ["fields"] = "path",
+                    ["dryRun"] = false,
+                }).ConfigureAwait(false);
+            byte[] patched = File.ReadAllBytes(copy);
+
+            check("edit_stream_map writes and leaves a backup of what was there before",
+                applied.GetProperty("written").GetBoolean()
+                && applied.GetProperty("backupPath").GetString() is { } path
+                && File.Exists(path)
+                && File.ReadAllBytes(path).AsSpan().SequenceEqual(original),
+                applied.GetProperty("applicable").GetInt32().ToString(CultureInfo.InvariantCulture) + " applied");
+
+            // The safety property, checked directly against the bytes. The pool start is read from
+            // the header here rather than taken from the editor, so the editor cannot define away
+            // the thing it is being held to.
+            int poolStart = BitConverter.ToInt32(original, 68);
+            int changed = 0;
+            int earliest = int.MaxValue;
+            for (int i = 0; i < original.Length; i++)
+            {
+                if (original[i] != patched[i])
+                {
+                    changed++;
+                    earliest = Math.Min(earliest, i);
+                }
+            }
+            check("the edit stays inside the string pool and does not move the file",
+                patched.Length == original.Length && changed > 0 && earliest >= poolStart,
+                changed.ToString(CultureInfo.InvariantCulture) + " bytes changed, first at "
+                + earliest.ToString(CultureInfo.InvariantCulture)
+                + ", pool starts at " + poolStart.ToString(CultureInfo.InvariantCulture));
+
+            // And the file still parses, with the new value where the old one was.
+            JsonElement reread = await CallAsync(client, "parse_stream_map",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = copy,
+                    ["section"] = "loaders",
+                    ["limit"] = 5000,
+                }).ConfigureAwait(false);
+            bool renamed = reread.GetProperty("loaders").EnumerateArray()
+                .Any(l => (l.GetProperty("path").GetString() ?? "").Contains("FMV", StringComparison.Ordinal));
+            bool noneLeft = !reread.GetProperty("loaders").EnumerateArray()
+                .Any(l => (l.GetProperty("path").GetString() ?? "").Contains("fmv", StringComparison.Ordinal));
+            check("the patched StreamMap still parses and carries the new paths",
+                reread.GetProperty("success").GetBoolean() && renamed && noneLeft);
+        }
+        finally
+        {
+            foreach (string temp in new[] { copy, backup })
+            {
+                try
+                {
+                    File.Delete(temp);
+                }
+                catch (IOException)
+                {
+                    // A leftover temp file is not worth failing a diagnostic over.
+                }
+            }
         }
     }
 

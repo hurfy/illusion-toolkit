@@ -119,6 +119,116 @@ public sealed class StreamMapTools
         }
     }
 
+    [McpServerTool(Name = "edit_stream_map")]
+    [Description("Find and replace across a StreamMapa.bin's string fields — the way a mod re-points the game at its own archives. dryRun defaults to TRUE and only previews; pass dryRun=false to write, which keeps a '<name>_old.bin' backup first. A replacement cannot be longer than the text it replaces (the edit is made in place); any that is gets refused by name rather than skipped silently.")]
+    public static string EditStreamMap(
+        [Description("Full path to the StreamMapa.bin to edit.")] string filePath,
+        [Description("Text to find, matched exactly and case-sensitively.")] string find,
+        [Description("Text to put in its place. Must encode to no more bytes than what it replaces.")] string replace,
+        [Description("Which fields to touch: any of 'path', 'entity', 'lineName', 'groupName', comma-separated. Default all.")] string? fields = null,
+        [Description("Preview without writing. Default TRUE — pass false to actually change the file.")] bool dryRun = true)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                return ToolResult.Invalid($"no such file: {filePath}");
+            }
+            if (string.IsNullOrEmpty(find))
+            {
+                return ToolResult.Invalid("find must not be empty");
+            }
+            if (!TryFields(fields, out StreamMapFields selected, out string complaint))
+            {
+                return ToolResult.Invalid(complaint);
+            }
+
+            byte[] original = File.ReadAllBytes(filePath);
+            StreamMapPatch patch = StreamMapEditor.Replace(original, find, replace, selected, dryRun);
+
+            int applied = patch.Edits.Count(e => e.Refused is null);
+            int refused = patch.Edits.Count - applied;
+
+            string? backup = null;
+            bool written = false;
+            if (!dryRun && patch.Patched is not null && applied > 0)
+            {
+                // The backup goes down before the file does, and only when there is something to
+                // write — a no-op edit should not churn a backup the user may still need.
+                backup = Path.Combine(
+                    Path.GetDirectoryName(filePath) ?? ".",
+                    Path.GetFileNameWithoutExtension(filePath) + "_old" + Path.GetExtension(filePath));
+                File.WriteAllBytes(backup, original);
+                File.WriteAllBytes(filePath, patch.Patched);
+                written = true;
+            }
+
+            return ToolResult.Json(new
+            {
+                success = true,
+                path = filePath,
+                find,
+                replace,
+                fields = selected.ToString(),
+                dryRun,
+                matched = patch.Edits.Count,
+                applicable = applied,
+                refusedCount = refused,
+                written,
+                backupPath = backup,
+                edits = patch.Edits.Select(e => new
+                {
+                    field = e.Field.ToString(),
+                    poolOffset = e.PoolOffset,
+                    before = e.Before,
+                    after = e.After,
+                    applied = e.Applied,
+                    refused = e.Refused,
+                }),
+            });
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail(ex);
+        }
+    }
+
+    /// <summary>Parses the comma-separated field selector. An unknown name is refused rather than
+    /// ignored — a typo that silently widened the edit to every field would be the worst outcome
+    /// here, since this tool writes.</summary>
+    private static bool TryFields(string? fields, out StreamMapFields selected, out string complaint)
+    {
+        complaint = "";
+        if (string.IsNullOrWhiteSpace(fields))
+        {
+            selected = StreamMapFields.All;
+            return true;
+        }
+
+        selected = StreamMapFields.None;
+        foreach (string part in fields.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (part.Trim().ToLowerInvariant())
+            {
+                case "path": selected |= StreamMapFields.Path; break;
+                case "entity": selected |= StreamMapFields.Entity; break;
+                case "linename": selected |= StreamMapFields.LineName; break;
+                case "groupname": selected |= StreamMapFields.GroupName; break;
+                case "all": selected |= StreamMapFields.All; break;
+                default:
+                    complaint = $"unknown field '{part.Trim()}' — expected path, entity, lineName, groupName or all";
+                    return false;
+            }
+        }
+
+        if (selected == StreamMapFields.None)
+        {
+            complaint = "no fields selected";
+            return false;
+        }
+        return true;
+    }
+
     /// <summary>Resolves the file-or-bytes pair every tool here accepts.</summary>
     internal static bool TryRead(
         string? filePath,

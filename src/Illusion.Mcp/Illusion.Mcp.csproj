@@ -13,6 +13,9 @@
          .NET Desktop runtime (a self-contained publish carries it along instead). -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <!-- Backs the two script tools. Game logic ships as compiled Lua inside a Script resource, and
+         reading it is most of what understanding a mission involves. -->
+    <PackageReference Include="Arrowgene.Lua.Decompiler" />
   </ItemGroup>
 
   <ItemGroup>
