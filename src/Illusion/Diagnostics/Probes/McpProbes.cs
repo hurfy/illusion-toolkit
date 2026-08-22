@@ -743,6 +743,28 @@ internal static class McpProbes
                 && map.GetProperty("detection").GetProperty("version").GetUInt32() == 6);
         }
 
+        // The signatures that contain non-printable bytes, checked against bytes built here. These
+        // are written in the table as C# escapes, and an escape that got mangled into a literal
+        // control character (or the wrong one) still compiles and still looks right in an editor —
+        // it just silently stops matching. Only comparing against real magic bytes catches that.
+        (byte[] Magic, string Expected)[] binarySignatures =
+        {
+            ([0x4E, 0x58, 0x53, 0x01], "PhysXCooked"),   // NXS\x01
+            ([0x50, 0x4B, 0x03, 0x04], "Zip"),           // PK\x03\x04
+            ([0x53, 0x44, 0x53, 0x00], "SDS"),           // SDS\0
+            ([0x1B, 0x4C, 0x75, 0x61], "LuaBytecode"),   // ESC Lua
+        };
+        foreach ((byte[] magic, string expected) in binarySignatures)
+        {
+            byte[] sample = new byte[16];
+            magic.CopyTo(sample, 0);
+            JsonElement hit = await CallAsync(client, "detect_format_from_bytes",
+                new Dictionary<string, object?> { ["base64Data"] = Convert.ToBase64String(sample) }).ConfigureAwait(false);
+            check($"detect_format_from_bytes matches the {expected} signature byte for byte",
+                hit.GetProperty("detection").GetProperty("format").GetString() == expected,
+                hit.GetProperty("detection").GetProperty("format").GetString() ?? "<none>");
+        }
+
         // Refusing to guess is a feature here, so it is asserted: a FrameResource opens with a count
         // and there is genuinely nothing to recognize.
         JsonElement unknown = await CallAsync(client, "detect_format_from_bytes",
