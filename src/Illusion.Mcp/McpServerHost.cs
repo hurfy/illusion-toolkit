@@ -243,7 +243,11 @@ public sealed class McpServerHost : IAsyncDisposable
             .WithTools<SdsTools>()
             .WithTools<UtilityTools>()
             .WithTools<TableTools>()
-            .WithTools<StreamMapTools>();
+            .WithTools<StreamMapTools>()
+            .WithTools<DecodeTools>()
+            .WithTools<ResourceDecodeTools>()
+            .WithTools<EffectsTools>()
+            .WithTools<MaterialTools>();
 
         _options.ConfigureServices?.Invoke(builder.Services);
 

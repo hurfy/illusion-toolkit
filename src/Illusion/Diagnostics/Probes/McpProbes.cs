@@ -38,6 +38,13 @@ internal static class McpProbes
         "list_tables", "dump_rows", "lookup_by_row",
         // StreamMapTools
         "parse_stream_map",
+        // DecodeTools + ResourceDecodeTools
+        "decode_actors", "decode_frame_resource", "decode_itemdesc", "decode_collisions",
+        "decode_resource",
+        // EffectsTools
+        "parse_effects_file", "parse_effects_from_bytes",
+        // MaterialTools
+        "open_mtl_file", "list_mtl_files", "get_material_info", "search_materials",
     };
 
     /// <summary>Records one assertion. A delegate rather than an <c>Action</c> so the optional
@@ -353,10 +360,200 @@ internal static class McpProbes
                 loaders.GetProperty("loaders")[0].GetProperty("path").GetString() ?? "");
         }
 
+        await ExerciseDecodersAsync(client, check, skip, sdsRoot).ConfigureAwait(false);
+        await ExerciseMaterialsAsync(client, check, skip).ConfigureAwait(false);
+
         JsonElement closed = await CallAsync(client, "close_sds_file",
             new Dictionary<string, object?> { ["filePath"] = tablesSds }).ConfigureAwait(false);
         check("close_sds_file drops the archive the earlier tools cached",
             closed.GetProperty("success").GetBoolean() && closed.GetProperty("closed").GetBoolean());
+    }
+
+    /// <summary>
+    /// Decoding a real district archive. A city SDS is the one that carries all four decodable scene
+    /// resources at once, which is what makes it the right target: it exercises decode_resource's
+    /// routing and the FrameNameTable pairing against a file the game actually ships.
+    /// </summary>
+    private static async Task ExerciseDecodersAsync(McpClient client, CheckFn check, NoteFn skip, string sdsRoot)
+    {
+        string cityFolder = Path.Combine(sdsRoot, "city");
+        if (!Directory.Exists(cityFolder))
+        {
+            skip("no sds/city folder in this install — the decode tools were not exercised");
+            return;
+        }
+
+        // No single district archive is guaranteed to carry all four decodable types — the first one
+        // alphabetically ships no Collisions at all — so the archives are surveyed until each type
+        // has a home. Bounded, because every survey decompresses a real archive.
+        const int SurveyLimit = 8;
+        var owner = new Dictionary<string, string>(StringComparer.Ordinal);
+        string[] wanted = { "FrameResource", "Collisions", "ItemDesc", "Actors" };
+        var surveyed = new List<string>();
+
+        foreach (string archive in Directory.EnumerateFiles(cityFolder, "*.sds")
+                     .OrderBy(p => p, StringComparer.Ordinal)
+                     .Take(SurveyLimit))
+        {
+            surveyed.Add(archive);
+            JsonElement resources = await CallAsync(client, "list_resources",
+                new Dictionary<string, object?> { ["filePath"] = archive, ["limit"] = 500 }).ConfigureAwait(false);
+            HashSet<string> types = resources.GetProperty("resources").EnumerateArray()
+                .Select(r => r.GetProperty("typeName").GetString() ?? "")
+                .ToHashSet(StringComparer.Ordinal);
+
+            foreach (string type in wanted)
+            {
+                if (types.Contains(type))
+                {
+                    owner.TryAdd(type, archive);
+                }
+            }
+
+            if (wanted.All(owner.ContainsKey))
+            {
+                break;
+            }
+        }
+
+        if (!owner.TryGetValue("FrameResource", out string? district))
+        {
+            skip("no district archive with a FrameResource in the first "
+                + SurveyLimit.ToString(CultureInfo.InvariantCulture) + " under sds/city");
+            district = surveyed.FirstOrDefault();
+        }
+
+        foreach (string type in wanted)
+        {
+            if (!owner.TryGetValue(type, out string? source))
+            {
+                skip($"no {type} resource in the surveyed district archives — decode_resource not exercised for it");
+                continue;
+            }
+
+            JsonElement decoded = await CallAsync(client, "decode_resource",
+                new Dictionary<string, object?>
+                {
+                    ["sdsPath"] = source,
+                    ["typeName"] = type,
+                    ["limit"] = 5,
+                }).ConfigureAwait(false);
+
+            bool ok = decoded.GetProperty("success").GetBoolean()
+                && decoded.GetProperty("typeName").GetString() == type
+                && decoded.GetProperty("decoded").GetProperty("success").GetBoolean();
+            check($"decode_resource routes and decodes a {type} payload", ok,
+                decoded.GetProperty("name").GetString() ?? "");
+
+            if (ok && type == "FrameResource")
+            {
+                JsonElement inner = decoded.GetProperty("decoded");
+                // Vector members of System.Numerics are fields, and the serializer writes properties
+                // only — every transform in every decode response would silently be {} if these were
+                // not projected by hand. Assert one, and the whole family is covered.
+                bool transformsProjected = inner.GetProperty("objects").EnumerateArray()
+                    .All(o => !o.GetProperty("localTransform").TryGetProperty("decomposed", out JsonElement d)
+                        || !d.GetBoolean()
+                        || o.GetProperty("localTransform").GetProperty("position").TryGetProperty("x", out _));
+                check("a decoded frame's transform carries real numbers, not an empty object",
+                    transformsProjected && inner.GetProperty("total").GetInt32() > 0,
+                    inner.GetProperty("total").GetInt32().ToString(CultureInfo.InvariantCulture) + " objects");
+
+                // The archive ships exactly one FrameNameTable beside its FrameResource, so the
+                // pairing should have happened without the caller naming it.
+                bool paired = inner.TryGetProperty("nameTable", out JsonElement table)
+                    && table.ValueKind == JsonValueKind.Object
+                    && table.GetProperty("entries").GetInt32() > 0;
+                check("decode_resource pairs the archive's own FrameNameTable", paired,
+                    paired
+                        ? table.GetProperty("entries").GetInt32().ToString(CultureInfo.InvariantCulture) + " named frames"
+                        : "no table paired");
+            }
+
+            if (ok && type == "Collisions")
+            {
+                JsonElement inner = decoded.GetProperty("decoded");
+                check("decoded collision meshes report geometry read out of the cooked blob",
+                    inner.GetProperty("meshCount").GetInt32() > 0
+                    && inner.GetProperty("meshes").EnumerateArray()
+                        .Any(m => m.GetProperty("vertexCount").ValueKind == JsonValueKind.Number),
+                    inner.GetProperty("meshCount").GetInt32().ToString(CultureInfo.InvariantCulture) + " meshes");
+            }
+        }
+
+        // Routing has to refuse as clearly as it accepts: a type with no decoder must say so rather
+        // than return an empty success.
+        if (district is not null)
+        {
+            JsonElement undecodable = await CallAsync(client, "decode_resource",
+                new Dictionary<string, object?> { ["sdsPath"] = district, ["typeName"] = "Texture" }).ConfigureAwait(false);
+            check("decode_resource names the types it can decode when handed one it cannot",
+                !undecodable.GetProperty("decoded").GetProperty("success").GetBoolean(),
+                undecodable.GetProperty("decoded").GetProperty("error").GetString() ?? "");
+        }
+
+        // The survey opened several archives; none of them is wanted in the cache afterwards.
+        foreach (string archive in surveyed)
+        {
+            await CallAsync(client, "close_sds_file",
+                new Dictionary<string, object?> { ["filePath"] = archive }).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Material libraries, against the install's own edit/materials folder.</summary>
+    private static async Task ExerciseMaterialsAsync(McpClient client, CheckFn check, NoteFn skip)
+    {
+        string folder = Path.Combine(MafiaEnvironment.GameRoot, "edit", "materials");
+        string library = Path.Combine(folder, "default.mtl");
+        if (!File.Exists(library))
+        {
+            skip("no edit/materials/default.mtl in this install — the material tools were not exercised");
+            return;
+        }
+
+        JsonElement listed = await CallAsync(client, "list_mtl_files",
+            new Dictionary<string, object?> { ["directoryPath"] = folder }).ConfigureAwait(false);
+        check("list_mtl_files reports each library's version and material count",
+            listed.GetProperty("total").GetInt32() > 0
+            && listed.GetProperty("libraries").EnumerateArray()
+                .Any(l => l.TryGetProperty("materialCount", out JsonElement c) && c.GetInt32() > 0),
+            listed.GetProperty("total").GetInt32().ToString(CultureInfo.InvariantCulture) + " libraries");
+
+        JsonElement opened = await CallAsync(client, "open_mtl_file",
+            new Dictionary<string, object?> { ["filePath"] = library, ["limit"] = 5 }).ConfigureAwait(false);
+        bool ok = opened.GetProperty("success").GetBoolean() && opened.GetProperty("total").GetInt32() > 0;
+        check("open_mtl_file reads the library and its materials",
+            ok && opened.GetProperty("returned").GetInt32() <= 5,
+            opened.GetProperty("version").GetString() + ", "
+            + opened.GetProperty("total").GetInt32().ToString(CultureInfo.InvariantCulture) + " materials");
+
+        if (!ok)
+        {
+            return;
+        }
+
+        JsonElement first = opened.GetProperty("materials")[0];
+        ulong hash = first.GetProperty("hash").GetUInt64();
+        string name = first.GetProperty("name").GetString()!;
+
+        // The hash is the whole point of the lookup path: a mesh references its material by FNV64
+        // and never by name, so selecting by hash has to land on the same material as by name.
+        JsonElement byHash = await CallAsync(client, "get_material_info",
+            new Dictionary<string, object?> { ["filePath"] = library, ["hash"] = hash }).ConfigureAwait(false);
+        check("get_material_info finds a material by the hash a mesh references it with",
+            byHash.GetProperty("success").GetBoolean()
+            && byHash.GetProperty("material").GetProperty("name").GetString() == name,
+            name);
+
+        JsonElement found = await CallAsync(client, "search_materials",
+            new Dictionary<string, object?>
+            {
+                ["filePath"] = library,
+                ["pattern"] = name.Length > 3 ? name[..3] : name,
+            }).ConfigureAwait(false);
+        check("search_materials matches on a name substring",
+            found.GetProperty("success").GetBoolean() && found.GetProperty("total").GetInt32() > 0,
+            found.GetProperty("total").GetInt32().ToString(CultureInfo.InvariantCulture) + " matches");
     }
 
     /// <summary>Calls one tool and parses its JSON answer. The element is cloned so it outlives the
