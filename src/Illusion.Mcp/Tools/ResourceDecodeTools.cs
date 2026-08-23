@@ -17,6 +17,11 @@ namespace Illusion.Mcp.Tools;
 [McpServerToolType]
 public sealed class ResourceDecodeTools
 {
+    /// <summary>The resource types this tool can route, named once so the check and the message a
+    /// caller gets back cannot drift apart.</summary>
+    private static readonly string[] Decodable =
+        ["Actors", "FrameResource", "ItemDesc", "Collisions", "Effects"];
+
     [McpServerTool(Name = "decode_resource")]
     [Description("Extract a resource from an SDS and decode it in one step, choosing the decoder from its type (Actors, FrameResource, ItemDesc, Collisions, Effects). Select it by resourceIndex, or by typeName to take the first resource of that type. For a FrameResource the archive's own FrameNameTable is paired automatically. offset/limit page the decoded array where there is one.")]
     public static string DecodeResource(
@@ -55,6 +60,18 @@ public sealed class ResourceDecodeTools
             string type = SdsTools.TypeNameOf(cached, index);
             byte[] payload = cached.Archive.Entries[index].Data ?? [];
 
+            // An undecodable type is a failure of the whole call, not a failed field inside a
+            // successful one. Burying it in `decoded.success` while the envelope still said true
+            // meant a caller reading the top-level flag — the one every other tool here sets —
+            // would take it for a decode that worked and find an object with nothing in it.
+            if (!Decodable.Contains(type))
+            {
+                return ToolResult.Invalid(
+                    $"no decoder for resource type '{type}' — decodable types are "
+                    + string.Join(", ", Decodable)
+                    + "; use extract_resource to take this one as bytes");
+            }
+
             object decoded = type switch
             {
                 "Actors" => Decoders.Actors(payload, offset, limit),
@@ -62,13 +79,7 @@ public sealed class ResourceDecodeTools
                 "ItemDesc" => Decoders.ItemDesc(payload),
                 "Collisions" => Decoders.Collisions(payload, offset, limit),
                 "Effects" => Decoders.Effects(payload),
-                _ => new
-                {
-                    success = false,
-                    error = $"no decoder for resource type '{type}' — "
-                        + "decodable types are Actors, FrameResource, ItemDesc, Collisions and Effects; "
-                        + "use extract_resource to take this one as bytes",
-                },
+                _ => throw new InvalidOperationException($"unreachable: '{type}' passed the decodable check"),
             };
 
             return ToolResult.Json(new

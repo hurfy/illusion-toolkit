@@ -497,9 +497,13 @@ internal static class McpProbes
         {
             JsonElement undecodable = await CallAsync(client, "decode_resource",
                 new Dictionary<string, object?> { ["sdsPath"] = district, ["typeName"] = "Texture" }).ConfigureAwait(false);
-            check("decode_resource names the types it can decode when handed one it cannot",
-                !undecodable.GetProperty("decoded").GetProperty("success").GetBoolean(),
-                undecodable.GetProperty("decoded").GetProperty("error").GetString() ?? "");
+            // The failure has to reach the TOP-level success flag. Reporting it only inside the
+            // decoded object, while the envelope still said true, made a failed decode read as a
+            // successful one to any caller checking the field every other tool here sets.
+            check("decode_resource fails the whole call when it has no decoder for the type",
+                !undecodable.GetProperty("success").GetBoolean()
+                && (undecodable.GetProperty("error").GetString() ?? "").Contains("no decoder", StringComparison.Ordinal),
+                undecodable.GetProperty("error").GetString() ?? "");
         }
 
         // The survey opened several archives; none of them is wanted in the cache afterwards.
@@ -666,21 +670,67 @@ internal static class McpProbes
             // the header here rather than taken from the editor, so the editor cannot define away
             // the thing it is being held to.
             int poolStart = BitConverter.ToInt32(original, 68);
-            int changed = 0;
-            int earliest = int.MaxValue;
-            for (int i = 0; i < original.Length; i++)
+
+            // Length first, and on its own. The byte walk below indexes both buffers by the same
+            // index, so a regression that wrote a SHORTER file would throw IndexOutOfRange here —
+            // and the assertion that exists to catch a resized file would be the one crashing on it,
+            // taking the rest of the probe with it.
+            if (patched.Length != original.Length)
             {
-                if (original[i] != patched[i])
-                {
-                    changed++;
-                    earliest = Math.Min(earliest, i);
-                }
+                check("the edit does not move the file", false,
+                    "patched is " + patched.Length.ToString(CultureInfo.InvariantCulture)
+                    + " bytes, original was " + original.Length.ToString(CultureInfo.InvariantCulture));
             }
-            check("the edit stays inside the string pool and does not move the file",
-                patched.Length == original.Length && changed > 0 && earliest >= poolStart,
-                changed.ToString(CultureInfo.InvariantCulture) + " bytes changed, first at "
-                + earliest.ToString(CultureInfo.InvariantCulture)
-                + ", pool starts at " + poolStart.ToString(CultureInfo.InvariantCulture));
+            else
+            {
+                int changed = 0;
+                int earliest = int.MaxValue;
+                for (int i = 0; i < original.Length; i++)
+                {
+                    if (original[i] != patched[i])
+                    {
+                        changed++;
+                        earliest = Math.Min(earliest, i);
+                    }
+                }
+                check("the edit stays inside the string pool and does not move the file",
+                    changed > 0 && earliest >= poolStart,
+                    changed.ToString(CultureInfo.InvariantCulture) + " bytes changed, first at "
+                    + earliest.ToString(CultureInfo.InvariantCulture)
+                    + ", pool starts at " + poolStart.ToString(CultureInfo.InvariantCulture));
+            }
+
+            // A SECOND write must not eat the first backup. The name is derived from the target, so
+            // it is the same every time — writing over it would replace the pristine original with
+            // the already-patched file, leaving the user two copies of modified data and no way
+            // back. This is the assertion that pins that down.
+            string firstBackup = applied.GetProperty("backupPath").GetString()!;
+            JsonElement second = await CallAsync(client, "edit_stream_map",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = copy,
+                    ["find"] = "FMV",
+                    ["replace"] = "fmV",
+                    ["fields"] = "path",
+                    ["dryRun"] = false,
+                }).ConfigureAwait(false);
+            string secondBackup = second.GetProperty("backupPath").GetString() ?? "";
+            check("a second write keeps the first backup instead of overwriting it",
+                second.GetProperty("written").GetBoolean()
+                && !string.Equals(secondBackup, firstBackup, StringComparison.OrdinalIgnoreCase)
+                && File.ReadAllBytes(firstBackup).AsSpan().SequenceEqual(original),
+                Path.GetFileName(firstBackup) + " kept, second went to " + Path.GetFileName(secondBackup));
+
+            // Put the FMV spelling back so the checks below read the file the first edit produced.
+            await CallAsync(client, "edit_stream_map",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = copy,
+                    ["find"] = "fmV",
+                    ["replace"] = "FMV",
+                    ["fields"] = "path",
+                    ["dryRun"] = false,
+                }).ConfigureAwait(false);
 
             // And the file still parses, with the new value where the old one was.
             JsonElement reread = await CallAsync(client, "parse_stream_map",
@@ -699,7 +749,20 @@ internal static class McpProbes
         }
         finally
         {
-            foreach (string temp in new[] { copy, backup })
+            // Every backup the run produced, numbered siblings included — the second write now
+            // creates one rather than clobbering the first.
+            IEnumerable<string> leftovers = new[] { copy, backup };
+            try
+            {
+                leftovers = leftovers.Concat(
+                    Directory.EnumerateFiles(Path.GetTempPath(), "illusion_probe_streammap_old*.bin"));
+            }
+            catch (IOException)
+            {
+                // Enumeration failed; the two known names below are still worth removing.
+            }
+
+            foreach (string temp in leftovers.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 try
                 {
@@ -778,9 +841,20 @@ internal static class McpProbes
             && unknown.GetProperty("detection").GetProperty("extensionHint").GetString() == ".fr");
 
         // Textures: find an archive that ships some. Not every archive does.
+        //
+        // Guarded like ExerciseDecodersAsync does. Enumerating a missing folder throws, and an
+        // exception here aborts the whole probe run — so an install without sds/city would lose the
+        // Lua checks and the final cleanup rather than recording one honest SKIP.
+        string cityFolder = Path.Combine(sdsRoot, "city");
+        if (!Directory.Exists(cityFolder))
+        {
+            skip("no sds/city folder in this install — the texture tools were not exercised");
+            return;
+        }
+
         string? textured = null;
         foreach (string candidate in Directory
-                     .EnumerateFiles(Path.Combine(sdsRoot, "city"), "*.sds")
+                     .EnumerateFiles(cityFolder, "*.sds")
                      .OrderBy(p => p, StringComparer.Ordinal)
                      .Take(6))
         {
@@ -951,6 +1025,35 @@ internal static class McpProbes
             byHash.GetProperty("success").GetBoolean()
             && byHash.GetProperty("material").GetProperty("name").GetString() == name,
             name);
+
+        // Samplers must come from the material's own list, not from probing a guessed key range.
+        // The retail library uses fourteen distinct sampler ids running up to S072, so a fixed
+        // S000..S007 loop silently dropped most of them — while the tool promised every sampler.
+        // Every bound texture comes from a sampler, so a material reporting fewer samplers than
+        // textures is that bug, whatever the id numbering happens to be.
+        JsonElement richest = opened.GetProperty("materials").EnumerateArray()
+            .OrderByDescending(m => m.GetProperty("textures").GetArrayLength())
+            .First();
+        int textureCount = richest.GetProperty("textures").GetArrayLength();
+        if (textureCount == 0)
+        {
+            skip("no textured material on the first page — the sampler enumeration was not exercised");
+        }
+        else
+        {
+            JsonElement full = await CallAsync(client, "get_material_info",
+                new Dictionary<string, object?>
+                {
+                    ["filePath"] = library,
+                    ["hash"] = richest.GetProperty("hash").GetUInt64(),
+                }).ConfigureAwait(false);
+            int samplerCount = full.GetProperty("material").GetProperty("samplers").GetArrayLength();
+            check("get_material_info reports every sampler the material stores",
+                samplerCount >= textureCount,
+                samplerCount.ToString(CultureInfo.InvariantCulture) + " samplers for "
+                + textureCount.ToString(CultureInfo.InvariantCulture) + " textures on "
+                + richest.GetProperty("name").GetString());
+        }
 
         JsonElement found = await CallAsync(client, "search_materials",
             new Dictionary<string, object?>

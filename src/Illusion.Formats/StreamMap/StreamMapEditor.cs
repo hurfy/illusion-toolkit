@@ -23,8 +23,12 @@ public enum StreamMapFields
 /// <param name="PoolOffset">Where the string starts, relative to the string pool.</param>
 /// <param name="Before">The value as found.</param>
 /// <param name="After">The value the replacement would produce.</param>
-/// <param name="Applied">False when the change was refused — see <paramref name="Refused"/>.</param>
-/// <param name="Refused">Why the change could not be made, or null when it could.</param>
+/// <param name="Applied">True only when the bytes were actually written to the patched buffer.
+/// False both for a refused change and for every change in a dry run, so it cannot be read on its
+/// own as "this was rejected" — <paramref name="Refused"/> is what distinguishes the two.</param>
+/// <param name="Refused">Why the change could not be made, or null when it could. Null with
+/// <paramref name="Applied"/> false means the edit is fine and simply was not written, because the
+/// pass was a dry run.</param>
 public sealed record StreamMapEdit(
     StreamMapFields Field,
     int PoolOffset,
@@ -210,7 +214,7 @@ public static class StreamMapEditor
         int groupArray = ReadI32(file, OffsetGroupArray);
         for (int i = 0; i < groupCount; i++)
         {
-            int at = groupArray + (i * GroupRecordSize);
+            int at = RecordAt(file, groupArray, i, GroupRecordSize, "group header");
             RequireRange(file, at, sizeof(long), "group header");
             // Stored as eight bytes, used as a signed 32-bit pool offset — the reader narrows it the
             // same way, so this reproduces which string the game actually resolves.
@@ -221,7 +225,7 @@ public static class StreamMapEditor
         int lineArray = ReadI32(file, OffsetLineArray);
         for (int i = 0; i < lineCount; i++)
         {
-            int at = lineArray + (i * LineRecordSize);
+            int at = RecordAt(file, lineArray, i, LineRecordSize, "line");
             RequireRange(file, at, LineRecordSize, "line");
             references.Add((ReadI32(file, at + LineNameField), StreamMapFields.LineName));
         }
@@ -230,7 +234,7 @@ public static class StreamMapEditor
         int loaderArray = ReadI32(file, OffsetLoaderArray);
         for (int i = 0; i < loaderCount; i++)
         {
-            int at = loaderArray + (i * LoaderRecordSize);
+            int at = RecordAt(file, loaderArray, i, LoaderRecordSize, "loader");
             RequireRange(file, at, LoaderRecordSize, "loader");
             references.Add((ReadI32(file, at + LoaderPathField), StreamMapFields.Path));
             references.Add((ReadI32(file, at + LoaderEntityField), StreamMapFields.Entity));
@@ -273,9 +277,32 @@ public static class StreamMapEditor
         return BitConverter.ToInt32(file, offset);
     }
 
+    /// <summary>
+    /// Offset of record <paramref name="index"/>, computed in 64-bit arithmetic. The record COUNT is
+    /// also a header field, so <c>index * size</c> can overflow on its own before the bounds check
+    /// below ever sees the result.
+    /// </summary>
+    private static int RecordAt(byte[] file, int arrayStart, int index, int size, string what)
+    {
+        long at = (long)arrayStart + ((long)index * size);
+        if (arrayStart < 0 || at < 0 || at + size > file.Length)
+        {
+            throw new FileFormatException(
+                $"StreamMap {what} {index} lies outside the {file.Length}-byte file");
+        }
+        return (int)at;
+    }
+
+    /// <summary>
+    /// Bounds check in 64-bit arithmetic. Every offset here is a header field read straight out of
+    /// the file, so a corrupt or hostile one can be close to <see cref="int.MaxValue"/> — and in
+    /// 32-bit arithmetic <c>offset + length</c> then overflows to a negative number, sails through
+    /// the comparison, and lets BitConverter throw ArgumentOutOfRangeException instead of the
+    /// FileFormatException this class documents.
+    /// </summary>
     private static void RequireRange(byte[] file, int offset, int length, string what)
     {
-        if (offset < 0 || length < 0 || offset + length > file.Length)
+        if (offset < 0 || length < 0 || (long)offset + length > file.Length)
         {
             throw new FileFormatException(
                 $"StreamMap {what} at {offset} runs past the end of the {file.Length}-byte file");

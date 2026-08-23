@@ -14,9 +14,9 @@ namespace Illusion.Mcp.Tools;
 /// material use?" are the two questions these tools answer, and the hash is reported beside every
 /// material for exactly that reason.
 /// </para>
-/// Mafia II ships v57 libraries and the Definitive Edition v58. The two differ in their sampler
-/// records, so samplers are reported through the version-agnostic accessors rather than one
-/// version's shape.
+/// Mafia II ships v57 libraries and the Definitive Edition v58. The two hold their samplers in
+/// differently typed lists with no shared accessor, so <see cref="Samplers"/> matches the concrete
+/// material type and enumerates what it actually stores.
 /// </summary>
 [McpServerToolType]
 public sealed class MaterialTools
@@ -198,6 +198,7 @@ public sealed class MaterialTools
     public static string SearchMaterials(
         [Description("Full path to the .mtl file.")] string filePath,
         [Description("Substring to look for in the material name.")] string pattern,
+        [Description("Index of the first match to return. Default 0.")] int offset = 0,
         [Description("How many matches to return. Default 100.")] int limit = 0)
     {
         try
@@ -214,8 +215,8 @@ public sealed class MaterialTools
                 .Where(m => m.GetMaterialName().Contains(pattern, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            (_, int count) = Page.Clamp(0, limit);
-            List<IMaterial> window = Page.Slice(matches, 0, count);
+            (int start, int count) = Page.Clamp(offset, limit);
+            List<IMaterial> window = Page.Slice(matches, start, count);
 
             return ToolResult.Json(new
             {
@@ -223,6 +224,8 @@ public sealed class MaterialTools
                 path = filePath,
                 pattern,
                 total = matches.Count,
+                offset = start,
+                limit = count,
                 returned = window.Count,
                 materials = window.Select(Summarize),
             });
@@ -269,31 +272,33 @@ public sealed class MaterialTools
     };
 
     /// <summary>
-    /// The material's texture samplers. v57 and v58 keep them in differently shaped lists, so they
-    /// are read through the base-class accessors: <c>CollectTextures</c> names the bound textures
-    /// and <c>GetSamplerByKey</c> resolves each slot. That way a library of either version reports
-    /// the same shape and neither one has to be special-cased here.
+    /// The material's texture samplers — all of them, read out of the list the material actually
+    /// holds.
+    /// <para>
+    /// This used to probe <c>GetSamplerByKey</c> for S000 through S007, on the assumption that
+    /// sampler ids are a small dense range. They are not: the retail <c>default.mtl</c> uses
+    /// fourteen distinct ids running up to S072, so that loop returned four of them and dropped
+    /// 3,678 bindings without a word — while the tool's own description promised every sampler.
+    /// </para>
+    /// v57 and v58 keep their samplers in differently typed lists with no common accessor, so the
+    /// concrete type is matched here. An unrecognized material contributes nothing rather than
+    /// silently reporting an empty sampler set as fact.
     /// </summary>
     private static IEnumerable<object> Samplers(IMaterial material)
     {
-        var samplers = new List<object>();
-        for (int slot = 0; slot < 8; slot++)
+        IEnumerable<IMaterialSampler> stored = material switch
         {
-            string key = "S" + slot.ToString("D3", System.Globalization.CultureInfo.InvariantCulture);
-            IMaterialSampler? sampler = material.GetSamplerByKey(key);
-            if (sampler is null)
-            {
-                continue;
-            }
+            Material_v57 v57 => v57.Samplers,
+            Material_v58 v58 => v58.Samplers,
+            _ => [],
+        };
 
-            samplers.Add(new
-            {
-                id = sampler.ID,
-                textureName = sampler.GetFileName(),
-                textureHash = sampler.GetFileHash(),
-                samplerStates = sampler.SamplerStates,
-            });
-        }
-        return samplers;
+        return stored.Select(sampler => new
+        {
+            id = sampler.ID,
+            textureName = sampler.GetFileName(),
+            textureHash = sampler.GetFileHash(),
+            samplerStates = sampler.SamplerStates,
+        }).ToList();
     }
 }

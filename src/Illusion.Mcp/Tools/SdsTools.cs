@@ -225,6 +225,7 @@ public sealed class SdsTools
         [Description("Full path to the .sds file.")] string filePath,
         [Description("Substring to look for in the resource name.")] string pattern,
         [Description("Resource type name to keep, case-insensitive. Omit for all types.")] string? typeFilter = null,
+        [Description("Index of the first match to return. Default 0.")] int offset = 0,
         [Description("How many matches to return. Default 100.")] int limit = 0)
     {
         try
@@ -235,8 +236,8 @@ public sealed class SdsTools
                 && (typeFilter is null
                     || TypeNameOf(cached, i).Equals(typeFilter, StringComparison.OrdinalIgnoreCase)));
 
-            (_, int count) = Page.Clamp(0, limit);
-            List<int> window = Page.Slice(matches, 0, count);
+            (int start, int count) = Page.Clamp(offset, limit);
+            List<int> window = Page.Slice(matches, start, count);
 
             return ToolResult.Json(new
             {
@@ -245,6 +246,8 @@ public sealed class SdsTools
                 pattern,
                 typeFilter,
                 total = matches.Count,
+                offset = start,
+                limit = count,
                 returned = window.Count,
                 resources = window.Select(i => Describe(cached, i)),
             });

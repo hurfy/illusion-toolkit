@@ -199,7 +199,7 @@ only, no authorization - with its live status in the launcher's status bar. Poin
 with `claude mcp add --transport http illusion http://127.0.0.1:2010/mcp`; change the port with
 `McpPort` in settings.
 
-It serves 38 tools, all of them reading through the same format layer the editor uses, so what a
+It serves 39 tools, all of them reading through the same format layer the editor uses, so what a
 model is told about a file is what the toolkit itself sees.
 
 | Group | Tools |
@@ -228,7 +228,7 @@ inside is not decoded, and the responses say so rather than looking complete.
 - Duplicating frame objects covers static single-mesh objects only.
 - A topology rebuild does not regenerate lower LODs or collision for that object.
 - `.sds.patch`, `.tra` and `cityareas.bin` are read-only. `StreamMap*.bin` is read-only in the
-  editor; the MCP `edit_stream_map` tool can rewrite its strings in place (see below).
+  editor; the MCP `edit_stream_map` tool can rewrite its strings in place (see above).
 - Console (big-endian) archives are refused.
 - Material-library edits are outside the backup/restore flow.
 - The MCP server does not decode the `.eff` effects property tree - only the container header.

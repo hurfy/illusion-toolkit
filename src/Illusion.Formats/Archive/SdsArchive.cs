@@ -206,8 +206,15 @@ public sealed class SdsArchive
             stream.ReadBytes(authorLength);
             int fileSize = stream.ReadValueS32();
             stream.ReadValueS32(); // password
-            using var reader = new StringReader(Encoding.UTF8.GetString(stream.ReadBytes(fileSize)));
+            string recovered = Encoding.UTF8.GetString(stream.ReadBytes(fileSize));
+            using var reader = new StringReader(recovered);
             var doc = new XPathDocument(reader);
+
+            // Keep what was recovered. This method consumes the lock entry, so a second resolution
+            // would find neither the XML nor the lock and quietly fall back to stub names — which is
+            // exactly what happens now that ResolveEntryNames is public and called once at load and
+            // again by Extract on the same instance.
+            ResourceInfoXml = recovered;
 
             Entries.RemoveAt(i);
             ResourceTypes.RemoveAt(lockTypeId);

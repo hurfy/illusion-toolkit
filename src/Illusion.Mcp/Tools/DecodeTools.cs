@@ -63,7 +63,7 @@ public sealed class DecodeTools
     }
 
     [McpServerTool(Name = "decode_collisions")]
-    [Description("Decode a Collisions ('.col') resource: the placed instances (transform plus the mesh hash each uses) and the collision meshes themselves, with vertex and triangle counts read out of the PhysX-cooked blob. Instances are paginated.")]
+    [Description("Decode a Collisions ('.col') resource: the placed instances (transform plus the mesh hash each uses) and the collision meshes themselves, with vertex and triangle counts read out of the PhysX-cooked blob. offset/limit page the instances and the meshes together - totals for both are reported.")]
     public static string DecodeCollisions(
         [Description("Path to a .col file. Omit if using base64Data.")] string? filePath = null,
         [Description("Base64 of a Collisions payload. Omit if using filePath.")] string? base64Data = null,

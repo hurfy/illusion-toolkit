@@ -250,16 +250,24 @@ internal static class Decoders
         (int start, int count) = Page.Clamp(offset, limit);
         List<CollisionInstance> window = Page.Slice(file.Instances, start, count);
 
+        // The window pages BOTH arrays, and that is about cost as much as about size. Every mesh
+        // reported has its PhysX blob decoded to count vertices and triangles, so projecting the
+        // whole mesh list meant a caller asking for one instance of a district .col still paid the
+        // full decode for every mesh in it and got the entire array back. Paging them together
+        // bounds that to `limit` meshes; the totals below say what was left behind.
+        List<CollisionMesh> meshWindow = Page.Slice(file.Meshes, start, count);
+
         return new
         {
             success = true,
             version = file.Version,
             platform = file.Platform,
-            meshCount = file.Meshes.Count,
             total = file.Instances.Count,
+            meshCount = file.Meshes.Count,
             offset = start,
             limit = count,
             returned = window.Count,
+            meshesReturned = meshWindow.Count,
             // Placements first: a caller asking "what collides here" wants the instances, and the
             // meshes they point at are shared between many of them.
             instances = window.Select(i => new
@@ -269,7 +277,7 @@ internal static class Decoders
                 rotationEuler = Xyz(i.Rotation),
                 group = i.Group,
             }),
-            meshes = file.Meshes.Select(Mesh),
+            meshes = meshWindow.Select(Mesh),
         };
     }
 
