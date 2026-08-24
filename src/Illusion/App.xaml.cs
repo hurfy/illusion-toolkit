@@ -85,10 +85,13 @@ public partial class App : Application
             // worth showing the user — come up on the default port, which the launcher displays.
             Port = settings.McpPort is > 0 and <= 65535 ? settings.McpPort : McpHostOptions.DefaultPort,
 
-            // Where tools get their hands on the application. Only the UI marshal for now; the state
-            // future tools need (the open document, the selection) is registered alongside it.
-            ConfigureServices = services =>
-                services.AddSingleton<IUiThreadMarshal>(new WpfUiThreadMarshal(Dispatcher)),
+            // Where tools get their hands on the application: the UI marshal for anything that will
+            // touch the scene or the viewport, and the game environment the file-browsing tools
+            // report paths from. The rest of the state future tools need (the open document, the
+            // selection) is registered alongside them.
+            ConfigureServices = services => services
+                .AddSingleton<IUiThreadMarshal>(new WpfUiThreadMarshal(Dispatcher))
+                .AddSingleton<IGameEnvironment, AppGameEnvironment>(),
         });
 
         _ = McpServer.StartAsync();

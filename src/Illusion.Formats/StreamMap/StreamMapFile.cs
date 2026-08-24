@@ -14,14 +14,21 @@ public sealed class StreamMapFile
     public StreamMapLine[] Lines { get; private set; } = Array.Empty<StreamMapLine>();
     public StreamMapLoader[] Loaders { get; private set; } = Array.Empty<StreamMapLoader>();
 
-    public static StreamMapFile Load(string path)
+    public static StreamMapFile Load(string path) => Read(File.ReadAllBytes(path));
+
+    /// <summary>
+    /// Parses a StreamMap already in memory — the same bytes <see cref="Load"/> would read off disk.
+    /// Exists for callers holding the file as a payload rather than a path (the MCP tools decode one
+    /// straight out of base64).
+    /// </summary>
+    public static StreamMapFile Read(ReadOnlySpan<byte> bytes)
     {
         var file = new StreamMapFile();
-        file.Parse(File.ReadAllBytes(path));
+        file.Parse(bytes);
         return file;
     }
 
-    private void Parse(byte[] b)
+    private void Parse(ReadOnlySpan<byte> b)
     {
         (GroupHeaders, Lines, Loaders) = Native.Misc.NativeMiscFiles.ReadStreamMap(b);
     }
