@@ -119,9 +119,18 @@ public sealed class SdsArchive
         manifest.Flush();
     }
 
-    // Stub names ({TypeName}_{i}{ext}) overridden by the ResourceInfo XML's SourceDataDescription
-    // values (skipping "not available"); archives without the XML may carry a CrySDS lock instead.
-    private List<string> ResolveEntryNames()
+    /// <summary>
+    /// The per-entry names extraction would write, one per <see cref="Entries"/> slot: stub names
+    /// ({TypeName}_{i}{ext}) overridden by the ResourceInfo XML's SourceDataDescription values
+    /// (skipping "not available"); archives without the XML may carry a CrySDS lock instead.
+    /// <para>
+    /// Public because browsing an archive without unpacking it — what the MCP tools do — needs the
+    /// same names the extractor would produce. Not a pure read: an archive locked with CrySDS has
+    /// that lock entry removed here, exactly as <see cref="Extract"/> does. Idempotent, so calling
+    /// this before extracting changes nothing about the result.
+    /// </para>
+    /// </summary>
+    public List<string> ResolveEntryNames()
     {
         XPathDocument? doc = null;
         if (!string.IsNullOrEmpty(ResourceInfoXml))
@@ -197,8 +206,15 @@ public sealed class SdsArchive
             stream.ReadBytes(authorLength);
             int fileSize = stream.ReadValueS32();
             stream.ReadValueS32(); // password
-            using var reader = new StringReader(Encoding.UTF8.GetString(stream.ReadBytes(fileSize)));
+            string recovered = Encoding.UTF8.GetString(stream.ReadBytes(fileSize));
+            using var reader = new StringReader(recovered);
             var doc = new XPathDocument(reader);
+
+            // Keep what was recovered. This method consumes the lock entry, so a second resolution
+            // would find neither the XML nor the lock and quietly fall back to stub names — which is
+            // exactly what happens now that ResolveEntryNames is public and called once at load and
+            // again by Extract on the same instance.
+            ResourceInfoXml = recovered;
 
             Entries.RemoveAt(i);
             ResourceTypes.RemoveAt(lockTypeId);

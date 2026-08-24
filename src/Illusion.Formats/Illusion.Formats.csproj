@@ -9,6 +9,9 @@
     <!-- Byte-level collision helpers (OpcodeModelOffset, ReadCounts) are internal on purpose but the
          diagnostic probes in the app assembly measure against them. -->
     <InternalsVisibleTo Include="Illusion" />
+    <!-- The MCP tools decode Table, Texture and Script payloads, whose resource-format classes are
+         internal to this assembly (they are file-layout detail, not a public model). -->
+    <InternalsVisibleTo Include="Illusion.Mcp" />
   </ItemGroup>
 
   <!-- ============================== Native core ==============================

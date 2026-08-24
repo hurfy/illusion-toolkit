@@ -15,6 +15,15 @@
     <PackageVersion Include="ModelContextProtocol" Version="1.4.1" />
   </ItemGroup>
 
+  <ItemGroup Label="Lua decompiler (MCP script tools)">
+    <!-- A C# reimplementation of tehtmi's unluac, covering Lua 5.0-5.5. MIT, no dependencies of its
+         own, and it targets net10.0 directly. Mafia II compiled its scripts with a NON-STANDARD Lua
+         5.1 (lua_Number is a 4-byte float, not the usual double), so honouring the bytecode header's
+         declared sizes rather than assuming them is the requirement here - measured against the
+         retail corpus, this decompiles 2021 of 2021 scripts across all 1362 archives. -->
+    <PackageVersion Include="Arrowgene.Lua.Decompiler" Version="1.1.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Rendering (Silk.NET / D3D11)">
     <PackageVersion Include="Silk.NET.Core" Version="$(SilkVersion)" />
     <PackageVersion Include="Silk.NET.Maths" Version="$(SilkVersion)" />
